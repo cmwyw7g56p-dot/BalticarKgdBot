@@ -26,7 +26,11 @@ CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "@Balticar_kgd")
 DB_PATH = Path(os.getenv("DB_PATH", "data/balticar.sqlite3"))
 HOLD_MINUTES = int(os.getenv("PENDING_HOLD_MINUTES", "60"))
 TZ = ZoneInfo(os.getenv("TIMEZONE", "Europe/Kaliningrad"))
+PORT = int(os.getenv("PORT", "10000"))
 
+WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/telegram/webhook")
+
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 CARS = {
     "solaris21": {
         "name": "Hyundai Solaris 2021",
