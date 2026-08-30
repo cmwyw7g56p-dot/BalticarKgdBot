@@ -370,8 +370,6 @@ async def admin_calendar(callback: CallbackQuery):
         await callback.answer("Нет доступа.", show_alert=True)
         return
 
-    rows = []
-
     for cid, car in CARS.items():
         rows.append([
             InlineKeyboardButton(
@@ -380,20 +378,7 @@ async def admin_calendar(callback: CallbackQuery):
             )
         ])
 
-    rows.append([
-        InlineKeyboardButton(
-            text="◀️ Назад",
-            callback_data="admin:back"
-        )
-    ])
-
-    await callback.message.edit_text(
-        "📅 <b>Календарь занятости</b>\n\n"
-        "Выберите автомобиль:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
-    )
-
-    await callback.answer()
+    
 
     rows.append([
         InlineKeyboardButton(
@@ -944,14 +929,14 @@ async def main():
     dp.callback_query.register(admin_action, F.data.startswith("reject:"))
     dp.callback_query.register(admin_calendar, F.data == "admin:calendar")
     dp.callback_query.register(
-    admin_month,
-    F.data.startswith("adminmonth:")
-)
+        admin_month,
+        F.data.startswith("adminmonth:")
+    )
 
-dp.callback_query.register(
-    admin_day,
-    F.data.startswith("adminday:")
-)
+    dp.callback_query.register(
+        admin_day,
+        F.data.startswith("adminday:")
+    )
     dp.callback_query.register(lambda c: c.answer(), F.data == "noop")
 
     dp.message.register(name_handler, Booking.name)
