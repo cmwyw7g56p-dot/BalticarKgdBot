@@ -614,6 +614,7 @@ async def main():
     dp.message.register(start_handler, Command("start"))
     dp.message.register(id_handler, Command("id"))
     dp.message.register(publish, Command("publish"))
+    dp.message.register(admin_panel, Command("admin"))
     dp.callback_query.register(catalog, F.data == "catalog")
     dp.callback_query.register(car_selected, F.data.startswith("car:"))
     dp.callback_query.register(pick_dates, F.data.startswith("pick:"))
