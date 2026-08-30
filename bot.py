@@ -655,6 +655,7 @@ async def main():
     dp.callback_query.register(terms, F.data == "terms")
     dp.callback_query.register(admin_action, F.data.startswith("confirm:"))
     dp.callback_query.register(admin_action, F.data.startswith("reject:"))
+    dp.callback_query.register(admin_calendar, F.data == "admin:calendar")
     dp.callback_query.register(lambda c: c.answer(), F.data == "noop")
 
     dp.message.register(name_handler, Booking.name)
