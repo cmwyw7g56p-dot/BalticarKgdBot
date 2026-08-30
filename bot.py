@@ -365,7 +365,7 @@ async def admin_panel(message: Message):
         "Выберите раздел:",
         reply_markup=admin_panel_keyboard()
     )
-    async def admin_calendar(callback: CallbackQuery):
+async def admin_calendar(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("Нет доступа.", show_alert=True)
         return
@@ -406,6 +406,30 @@ async def admin_panel(message: Message):
         "📅 <b>Календарь занятости</b>\n\n"
         "Выберите автомобиль:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
+    )
+
+    await callback.answer()
+async def admin_car_calendar(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+
+    cid = callback.data.split(":", 1)[1]
+
+    today = datetime.now(TZ).date()
+
+    await callback.message.edit_text(
+        f"📅 <b>Календарь занятости</b>\n\n"
+        f"🚗 <b>{CARS[cid]['name']}</b>\n\n"
+        "🟢 свободно\n"
+        "🟡 ожидает подтверждения\n"
+        "🔴 подтверждено\n"
+        "⚪ прошедшая дата",
+        reply_markup=admin_busy_calendar_keyboard(
+            cid,
+            today.year,
+            today.month
+        )
     )
 
     await callback.answer()
@@ -660,6 +684,10 @@ async def main():
     dp.message.register(publish, Command("publish"))
     dp.message.register(admin_panel, Command("admin"))
     dp.callback_query.register(catalog, F.data == "catalog")
+    dp.callback_query.register(
+    admin_car_calendar,
+    F.data.startswith("admincar:")
+)
     dp.callback_query.register(car_selected, F.data.startswith("car:"))
     dp.callback_query.register(pick_dates, F.data.startswith("pick:"))
     dp.callback_query.register(month, F.data.startswith("month:"))
