@@ -141,68 +141,184 @@ def main_keyboard():
 
 def calendar_keyboard(car_id, year, month):
     first = date(year, month, 1)
-    next_month = date(year + (month == 12), 1 if month == 12 else month + 1, 1)
-    days = (next_month - first).days
-    prev_month = first - timedelta(days=1)
-    prev_first = date(prev_month.year, prev_month.month, 1)
 
-    buttons = []
-    for label, wd in [("Пн",0),("Вт",1),("Ср",2),("Чт",3),("Пт",4),("Сб",5),("Вс",6)]:
-        buttons.append(InlineKeyboardButton(text=label, callback_data="noop"))
-    rows = [buttons]
+    if month == 12:
+        next_first = date(year + 1, 1, 1)
+    else:
+        next_first = date(year, month + 1, 1)
 
-    week = []
-    for _ in range(first.weekday()):
-        week.append(InlineKeyboardButton(text=" ", callback_data="noop"))
+    prev_first = first - timedelta(days=1)
+    prev_first = date(prev_first.year, prev_first.month, 1)
+
+    days = (next_first - first).days
     today = datetime.now(TZ).date()
+
+    months = [
+        "Январь", "Февраль", "Март", "Апрель",
+        "Май", "Июнь", "Июль", "Август",
+        "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"
+    ]
+
+    rows = []
+
+    # Заголовок дней недели
+    rows.append([
+        InlineKeyboardButton(text=x, callback_data="noop")
+        for x in ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+    ])
+
+    week = [
+        InlineKeyboardButton(text=" ", callback_data="noop")
+        for _ in range(first.weekday())
+    ]
+
     for d in range(1, days + 1):
         cur = date(year, month, d)
-        disabled = cur < today or not available(car_id, cur, cur + timedelta(days=1))
-        week.append(InlineKeyboardButton(
-            text=("·" if disabled else str(d)),
-            callback_data=("noop" if disabled else f"day:{car_id}:{cur.isoformat()}")
-        ))
+
+        if cur < today:
+            text = "⚪"
+            callback = "noop"
+
+        elif not available(
+            car_id,
+            cur,
+            cur + timedelta(days=1)
+        ):
+            text = f"🔴{d}"
+            callback = "noop"
+
+        else:
+            text = f"🟢{d}"
+            callback = f"day:{car_id}:{cur.isoformat()}"
+
+        week.append(
+            InlineKeyboardButton(
+                text=text,
+                callback_data=callback
+            )
+        )
+
         if len(week) == 7:
-            rows.append(week); week = []
+            rows.append(week)
+            week = []
+
     if week:
         while len(week) < 7:
-            week.append(InlineKeyboardButton(text=" ", callback_data="noop"))
+            week.append(
+                InlineKeyboardButton(
+                    text=" ",
+                    callback_data="noop"
+                )
+            )
         rows.append(week)
 
     rows.append([
-        InlineKeyboardButton(text="‹", callback_data=f"month:{car_id}:{prev_first.isoformat()}"),
-        InlineKeyboardButton(text=f"{first.strftime('%m.%Y')}", callback_data="noop"),
-        InlineKeyboardButton(text="›", callback_data=f"month:{car_id}:{next_month.isoformat()}"),
+        InlineKeyboardButton(
+            text="‹",
+            callback_data=f"month:{car_id}:{prev_first.isoformat()}"
+        ),
+        InlineKeyboardButton(
+            text=f"{months[month - 1]} {year}",
+            callback_data="noop"
+        ),
+        InlineKeyboardButton(
+            text="›",
+            callback_data=f"month:{car_id}:{next_first.isoformat()}"
+        ),
     ])
+
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def end_calendar_keyboard(car_id, start_d, year, month):
     first = date(year, month, 1)
-    next_month = date(year + (month == 12), 1 if month == 12 else month + 1, 1)
-    days = (next_month - first).days
-    prev_month = first - timedelta(days=1)
-    prev_first = date(prev_month.year, prev_month.month, 1)
 
-    rows = [[InlineKeyboardButton(text=x, callback_data="noop") for x in ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]]]
-    week = [InlineKeyboardButton(text=" ", callback_data="noop") for _ in range(first.weekday())]
+    if month == 12:
+        next_first = date(year + 1, 1, 1)
+    else:
+        next_first = date(year, month + 1, 1)
+
+    prev_day = first - timedelta(days=1)
+    prev_first = date(prev_day.year, prev_day.month, 1)
+
+    days = (next_first - first).days
+
+    months = [
+        "Январь", "Февраль", "Март", "Апрель",
+        "Май", "Июнь", "Июль", "Август",
+        "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"
+    ]
+
+    rows = [[
+        InlineKeyboardButton(text=x, callback_data="noop")
+        for x in ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+    ]]
+
+    week = [
+        InlineKeyboardButton(text=" ", callback_data="noop")
+        for _ in range(first.weekday())
+    ]
+
     for d in range(1, days + 1):
         cur = date(year, month, d)
-        disabled = cur <= start_d or not available(car_id, start_d, cur)
-        week.append(InlineKeyboardButton(
-            text=("·" if disabled else str(d)),
-            callback_data=("noop" if disabled else f"end:{car_id}:{cur.isoformat()}")
-        ))
+
+        # До даты получения вернуть автомобиль нельзя
+        if cur <= start_d:
+            text = "⚪"
+            callback = "noop"
+
+        # Проверяем весь интервал от получения до возврата
+        elif not available(car_id, start_d, cur):
+            text = f"🔴{d}"
+            callback = "noop"
+
+        else:
+            text = f"🟢{d}"
+            callback = f"end:{car_id}:{cur.isoformat()}"
+
+        week.append(
+            InlineKeyboardButton(
+                text=text,
+                callback_data=callback
+            )
+        )
+
         if len(week) == 7:
-            rows.append(week); week=[]
+            rows.append(week)
+            week = []
+
     if week:
         while len(week) < 7:
-            week.append(InlineKeyboardButton(text=" ", callback_data="noop"))
+            week.append(
+                InlineKeyboardButton(
+                    text=" ",
+                    callback_data="noop"
+                )
+            )
         rows.append(week)
+
     rows.append([
-        InlineKeyboardButton(text="‹", callback_data=f"endmonth:{car_id}:{start_d.isoformat()}:{prev_first.isoformat()}"),
-        InlineKeyboardButton(text=f"{first.strftime('%m.%Y')}", callback_data="noop"),
-        InlineKeyboardButton(text="›", callback_data=f"endmonth:{car_id}:{start_d.isoformat()}:{next_month.isoformat()}"),
+        InlineKeyboardButton(
+            text="‹",
+            callback_data=(
+                f"endmonth:{car_id}:"
+                f"{start_d.isoformat()}:"
+                f"{prev_first.isoformat()}"
+            )
+        ),
+        InlineKeyboardButton(
+            text=f"{months[month - 1]} {year}",
+            callback_data="noop"
+        ),
+        InlineKeyboardButton(
+            text="›",
+            callback_data=(
+                f"endmonth:{car_id}:"
+                f"{start_d.isoformat()}:"
+                f"{next_first.isoformat()}"
+            )
+        ),
     ])
+
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def admin_buttons(bid):
@@ -254,7 +370,9 @@ async def pick_dates(callback: CallbackQuery):
     cid = callback.data.split(":")[1]
     today = datetime.now(TZ).date()
     await callback.message.answer(
-        f"📅 <b>{CARS[cid]['name']}</b>\nВыберите дату получения:",
+        f"📅 <b>{CARS[cid]['name']}</b>\n\n"
+"🟢 свободно   🔴 занято   ⚪ недоступно\n\n"
+"Выберите дату получения:",
         reply_markup=calendar_keyboard(cid, today.year, today.month)
     )
     await callback.answer()
