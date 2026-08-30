@@ -365,6 +365,35 @@ async def admin_panel(message: Message):
         "Выберите раздел:",
         reply_markup=admin_panel_keyboard()
     )
+async def admin_calendar(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+
+    rows = []
+
+    for cid, car in CARS.items():
+        rows.append([
+            InlineKeyboardButton(
+                text=f"🚗 {car['name']}",
+                callback_data=f"admincar:{cid}"
+            )
+        ])
+
+    rows.append([
+        InlineKeyboardButton(
+            text="◀️ Назад",
+            callback_data="admin:back"
+        )
+    ])
+
+    await callback.message.edit_text(
+        "📅 <b>Календарь занятости</b>\n\n"
+        "Выберите автомобиль:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
+    )
+
+    await callback.answer()
 def car_text(cid):
     c = CARS[cid]
     return (
