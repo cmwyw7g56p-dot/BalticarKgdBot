@@ -370,6 +370,8 @@ async def admin_calendar(callback: CallbackQuery):
         await callback.answer("Нет доступа.", show_alert=True)
         return
 
+    rows = []
+
     for cid, car in CARS.items():
         rows.append([
             InlineKeyboardButton(
@@ -377,8 +379,6 @@ async def admin_calendar(callback: CallbackQuery):
                 callback_data=f"admincar:{cid}"
             )
         ])
-
-    
 
     rows.append([
         InlineKeyboardButton(
