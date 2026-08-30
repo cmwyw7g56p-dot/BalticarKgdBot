@@ -326,7 +326,45 @@ def admin_buttons(bid):
         InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"confirm:{bid}"),
         InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{bid}"),
     ]])
+def admin_panel_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="🔔 Новые заявки",
+                callback_data="admin:new"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="📅 Календарь занятости",
+                callback_data="admin:calendar"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="📋 Все бронирования",
+                callback_data="admin:bookings"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="🚗 Автомобили",
+                callback_data="admin:cars"
+            )
+        ],
+    ])
 
+
+async def admin_panel(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+
+    await message.answer(
+        "👨‍💼 <b>Админ-панель Balticar</b>\n\n"
+        "Выберите раздел:",
+        reply_markup=admin_panel_keyboard()
+    )
 def car_text(cid):
     c = CARS[cid]
     return (
