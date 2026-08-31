@@ -30,20 +30,25 @@ from aiogram.types import (
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0") or 0)
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+
+ADMIN_ID = int(
+    os.getenv("ADMIN_ID", "0") or 0
+)
 
 CHANNEL_USERNAME = os.getenv(
     "CHANNEL_USERNAME",
     "@Balticar_kgd"
 )
 
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    ""
+).strip()
 
 if not DATABASE_URL:
     raise RuntimeError(
-        "DATABASE_URL не задан в Environment Variables Render. "
-        "Добавь строку подключения Neon."
+        "DATABASE_URL не задан в Environment Variables Render."
     )
 
 HOLD_MINUTES = int(
@@ -75,7 +80,8 @@ WEBHOOK_PATH = os.getenv(
 WEBHOOK_SECRET = os.getenv(
     "WEBHOOK_SECRET",
     ""
-)
+).strip()
+
 
 # ============================================================
 # ВРЕМЯ АРЕНДЫ
@@ -95,14 +101,24 @@ PICKUP_END_HOUR = int(
     )
 )
 
-# Минимальный промежуток между возвратом одной аренды
-# и выдачей следующей машины.
+# Технический промежуток между арендами.
+#
+# Например:
+#
+# возврат:       06.09 17:00
+# BUFFER_HOURS:  2
+# следующая:     не раньше 06.09 19:00
+#
+# Если поставить 0:
+# следующая аренда может начинаться сразу после возврата.
+
 BUFFER_HOURS = int(
     os.getenv(
         "BUFFER_HOURS",
         "2"
     )
 )
+
 
 # ============================================================
 # АВТОМОБИЛИ
@@ -203,15 +219,15 @@ def init_db():
     """
     Создание таблицы и миграция старой структуры.
 
-    Старые брони:
+    Старые записи:
         start_date / end_date
 
-    Новые брони:
+    Новые записи:
         start_at / end_at
 
-    Старые записи получают:
-        начало 10:00
-        окончание 17:00
+    Для старых записей:
+        получение 10:00
+        возврат 17:00
     """
 
     con = db()
@@ -239,8 +255,6 @@ def init_db():
                 """
             )
 
-            # Добавляем новые поля, если их ещё нет.
-
             cur.execute(
                 """
                 ALTER TABLE bookings
@@ -255,33 +269,31 @@ def init_db():
                 """
             )
 
-            # Миграция старых записей.
-            #
-            # Если start_at/end_at отсутствуют,
-            # берём старые даты и ставим 10:00 / 17:00.
-
             cur.execute(
                 """
                 UPDATE bookings
                 SET
                     start_at =
-                        (start_date::timestamp
-                         + TIME '10:00')
-                         AT TIME ZONE 'Europe/Kaliningrad',
+                        (
+                            start_date::timestamp
+                            + TIME '10:00'
+                        ) AT TIME ZONE 'Europe/Kaliningrad',
+
                     end_at =
-                        (end_date::timestamp
-                         + TIME '17:00')
-                         AT TIME ZONE 'Europe/Kaliningrad'
+                        (
+                            end_date::timestamp
+                            + TIME '17:00'
+                        ) AT TIME ZONE 'Europe/Kaliningrad'
+
                 WHERE start_at IS NULL
                    OR end_at IS NULL
                 """
             )
 
-            # Индекс для быстрых проверок пересечения.
-
             cur.execute(
                 """
-                CREATE INDEX IF NOT EXISTS idx_bookings_car_datetime
+                CREATE INDEX IF NOT EXISTS
+                idx_bookings_car_datetime
                 ON bookings (
                     car_id,
                     start_at,
@@ -291,13 +303,10 @@ def init_db():
                 """
             )
 
-            # Старый индекс оставляем.
-            # Он не мешает и может использоваться
-            # некоторыми запросами.
-
             cur.execute(
                 """
-                CREATE INDEX IF NOT EXISTS idx_bookings_car_dates
+                CREATE INDEX IF NOT EXISTS
+                idx_bookings_car_dates
                 ON bookings (
                     car_id,
                     start_date,
@@ -315,13 +324,15 @@ def init_db():
 
 def cleanup_pending():
     """
-    Освобождает истёкшие pending-заявки.
+    Переводит истёкшие pending-заявки в expired.
     """
 
     con = db()
 
     try:
+
         with con.cursor() as cur:
+
             cur.execute(
                 """
                 UPDATE bookings
@@ -335,6 +346,7 @@ def cleanup_pending():
         con.commit()
 
     finally:
+
         con.close()
 
 
@@ -353,22 +365,31 @@ def local_dt(
     )
 
 
+def ensure_tz(dt):
+    if dt is None:
+        return None
+
+    if dt.tzinfo is None:
+        return dt.replace(
+            tzinfo=TZ
+        )
+
+    return dt.astimezone(TZ)
+
+
 def format_dt(dt):
     if dt is None:
         return "—"
 
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=TZ)
+    dt = ensure_tz(dt)
 
-    return dt.astimezone(TZ).strftime(
+    return dt.strftime(
         "%d.%m.%Y %H:%M"
     )
 
 
 def format_date_time(dt):
-    return dt.astimezone(TZ).strftime(
-        "%d.%m.%Y %H:%M"
-    )
+    return format_dt(dt)
 
 
 def rental_hours(
@@ -385,9 +406,10 @@ def rental_days(
     end_at
 ):
     """
-    Считаем оплачиваемые сутки вверх.
+    Оплачиваемые сутки считаются вверх.
 
     02.09 10:00 → 06.09 10:00 = 4 суток
+
     02.09 10:00 → 06.09 17:00 = 5 суток
     """
 
@@ -407,7 +429,7 @@ def rental_days(
 
 
 # ============================================================
-# BOOKING OVERLAP
+# OVERLAP
 # ============================================================
 
 def booking_overlaps(
@@ -417,21 +439,24 @@ def booking_overlaps(
     exclude_booking_id=None
 ):
     """
-    Проверяет реальное пересечение времени.
+    Проверяет пересечение интервала.
 
-    С учётом буфера между арендами.
+    Учитывается BUFFER_HOURS.
 
-    Например:
+    ВАЖНО:
 
-        возврат 06.09 17:00
-        BUFFER_HOURS=2
+    start_at < other_end
+    И
+    end_at > other_start
 
-    следующая выдача возможна с:
-
-        06.09 19:00
+    Это позволяет делать последовательные аренды
+    без ошибочной блокировки всего дня.
     """
 
     cleanup_pending()
+
+    start_at = ensure_tz(start_at)
+    end_at = ensure_tz(end_at)
 
     buffer_delta = timedelta(
         hours=BUFFER_HOURS
@@ -450,7 +475,11 @@ def booking_overlaps(
     try:
 
         query = """
-            SELECT id, status, start_at, end_at
+            SELECT
+                id,
+                status,
+                start_at,
+                end_at
             FROM bookings
             WHERE car_id=%s
               AND status IN ('pending', 'confirmed')
@@ -475,6 +504,7 @@ def booking_overlaps(
             )
 
         query += """
+            ORDER BY start_at
             LIMIT 1
         """
 
@@ -501,18 +531,19 @@ def available(
     if end_at <= start_at:
         return False
 
-    row = booking_overlaps(
-        car_id,
-        start_at,
-        end_at,
-        exclude_booking_id
+    return (
+        booking_overlaps(
+            car_id,
+            start_at,
+            end_at,
+            exclude_booking_id
+        )
+        is None
     )
-
-    return row is None
 
 
 # ============================================================
-# ЗАГРУЗКА ЗАНЯТОСТИ МЕСЯЦА
+# БЫСТРАЯ ЗАГРУЗКА ЗАНЯТОСТИ МЕСЯЦА
 # ============================================================
 
 def get_month_bookings(
@@ -521,9 +552,9 @@ def get_month_bookings(
     month
 ):
     """
-    Один запрос к Neon вместо запроса на каждый день.
+    Один запрос к Neon.
 
-    Это сильно ускоряет календарь.
+    НИКАКИХ запросов по каждому дню.
     """
 
     first = date(
@@ -533,12 +564,15 @@ def get_month_bookings(
     )
 
     if month == 12:
+
         next_first = date(
             year + 1,
             1,
             1
         )
+
     else:
+
         next_first = date(
             year,
             month + 1,
@@ -589,23 +623,24 @@ def get_month_bookings(
         con.close()
 
 
+# ============================================================
+# DAY STATUS
+# ============================================================
+
 def day_status(
     current,
     bookings,
     today
 ):
     """
-    Определяет статус дня.
+    Статус дня используется ТОЛЬКО для визуального
+    календаря.
 
-    confirmed -> красный
-    pending   -> жёлтый
-    free      -> зелёный
+    Важно:
+    наличие брони в этот день НЕ означает,
+    что весь день заблокирован.
 
-    Если в течение дня есть хотя бы свободный
-    промежуток, день не помечаем полностью красным.
-
-    Для точного времени пользователь всё равно
-    выбирает часы следующим шагом.
+    Точное время проверяется следующим шагом.
     """
 
     if current < today:
@@ -616,8 +651,9 @@ def day_status(
         time(0, 0)
     )
 
-    day_end = day_start + timedelta(
-        days=1
+    day_end = (
+        day_start
+        + timedelta(days=1)
     )
 
     confirmed = False
@@ -625,18 +661,13 @@ def day_status(
 
     for row in bookings:
 
-        start_at = row["start_at"]
-        end_at = row["end_at"]
+        start_at = ensure_tz(
+            row["start_at"]
+        )
 
-        if start_at.tzinfo is None:
-            start_at = start_at.replace(
-                tzinfo=TZ
-            )
-
-        if end_at.tzinfo is None:
-            end_at = end_at.replace(
-                tzinfo=TZ
-            )
+        end_at = ensure_tz(
+            row["end_at"]
+        )
 
         if (
             start_at < day_end
@@ -659,7 +690,7 @@ def day_status(
 
 
 # ============================================================
-# HELPERS
+# RATES
 # ============================================================
 
 def rate_for_days(
@@ -696,6 +727,10 @@ def status_label(status):
         status
     )
 
+
+# ============================================================
+# MAIN KEYBOARDS
+# ============================================================
 
 def main_keyboard():
 
@@ -805,8 +840,15 @@ def time_keyboard(
 ):
     """
     mode:
+
         pickup
         return
+
+    Время показывается с PICKUP_START_HOUR
+    до PICKUP_END_HOUR.
+
+    Проверка реальной занятости выполняется
+    при нажатии на конкретное время.
     """
 
     rows = []
@@ -841,71 +883,68 @@ def time_keyboard(
             )
         )
 
-    for i in range(
-        0,
-        len(times),
-        3
-    ):
+    current_row = []
 
-        row = []
+    for t in times:
 
-        for t in times[i:i + 3]:
+        if mode == "pickup":
 
-            t_text = t.strftime(
-                "%H:%M"
+            dt = local_dt(
+                selected_date,
+                t
             )
 
-            if mode == "pickup":
+            now = datetime.now(TZ)
 
-                dt = local_dt(
-                    selected_date,
-                    t
-                )
+            if dt <= now:
+                continue
 
-                # Нельзя выбрать прошедшее время сегодня.
-
-                now = datetime.now(TZ)
-
-                if dt <= now:
-
-                    continue
-
-                callback = (
-                    f"picktime:"
-                    f"{car_id}:"
-                    f"{selected_date.isoformat()}:"
-                    f"{t_text}"
-                )
-
-            else:
-
-                if start_at is None:
-                    continue
-
-                end_at = local_dt(
-                    selected_date,
-                    t
-                )
-
-                if end_at <= start_at:
-                    continue
-
-                callback = (
-                    f"endtime:"
-                    f"{car_id}:"
-                    f"{selected_date.isoformat()}:"
-                    f"{t_text}"
-                )
-
-            row.append(
-                InlineKeyboardButton(
-                    text=t_text,
-                    callback_data=callback
-                )
+            callback = (
+                f"picktime:"
+                f"{car_id}:"
+                f"{selected_date.isoformat()}:"
+                f"{t.strftime('%H:%M')}"
             )
 
-        if row:
-            rows.append(row)
+        else:
+
+            if start_at is None:
+                continue
+
+            end_at = local_dt(
+                selected_date,
+                t
+            )
+
+            if end_at <= start_at:
+                continue
+
+            callback = (
+                f"endtime:"
+                f"{car_id}:"
+                f"{selected_date.isoformat()}:"
+                f"{t.strftime('%H:%M')}"
+            )
+
+        current_row.append(
+            InlineKeyboardButton(
+                text=t.strftime("%H:%M"),
+                callback_data=callback
+            )
+        )
+
+        if len(current_row) == 3:
+
+            rows.append(
+                current_row
+            )
+
+            current_row = []
+
+    if current_row:
+        rows.append(
+            current_row
+        )
 
     if mode == "pickup":
 
@@ -1107,7 +1146,10 @@ def calendar_keyboard(
 
         if len(week) == 7:
 
-            rows.append(week)
+            rows.append(
+                week
+            )
+
             week = []
 
     if week:
@@ -1121,7 +1163,9 @@ def calendar_keyboard(
                 )
             )
 
-        rows.append(week)
+        rows.append(
+            week
+        )
 
     rows.append(
         [
@@ -1172,6 +1216,32 @@ def end_calendar_keyboard(
     year,
     month
 ):
+    """
+    БЫСТРЫЙ календарь возврата.
+
+    Здесь больше НЕТ:
+
+        available()
+        booking_overlaps()
+
+    для каждого часа каждого дня.
+
+    Поэтому календарь больше не создаёт десятки
+    соединений с Neon.
+
+    День подсвечивается:
+
+        🟢 — дата потенциально доступна
+        🔴 — нет подходящего времени
+        ⚪ — раньше/равна получению
+
+    Точная проверка выполняется при выборе
+    конкретного времени возврата.
+    """
+
+    start_at = ensure_tz(
+        start_at
+    )
 
     first = date(
         year,
@@ -1230,6 +1300,14 @@ def end_calendar_keyboard(
         "Декабрь",
     ]
 
+    # Загружаем брони месяца ОДНИМ запросом.
+
+    bookings = get_month_bookings(
+        car_id,
+        year,
+        month
+    )
+
     rows = [
         [
             InlineKeyboardButton(
@@ -1267,6 +1345,8 @@ def end_calendar_keyboard(
             n
         )
 
+        # Дата возврата должна быть ПОСЛЕ даты получения.
+
         if current <= start_at.date():
 
             text = "⚪"
@@ -1274,48 +1354,69 @@ def end_calendar_keyboard(
 
         else:
 
-            # Для отображения дня проверяем,
-            # существует ли хотя бы одно время возврата,
-            # которое не пересекается с существующей бронью.
+            # Проверяем только данные уже загруженного
+            # месяца, без запросов к БД.
 
-            possible = False
+            day_start = local_dt(
+                current,
+                time(0, 0)
+            )
 
-            for hour in range(
-                PICKUP_START_HOUR,
-                PICKUP_END_HOUR + 1
-            ):
+            day_end = (
+                day_start
+                + timedelta(days=1)
+            )
 
-                candidate_end = local_dt(
-                    current,
-                    time(hour, 0)
+            has_booking = False
+
+            for row in bookings:
+
+                row_start = ensure_tz(
+                    row["start_at"]
                 )
 
-                if candidate_end <= start_at:
-                    continue
+                row_end = ensure_tz(
+                    row["end_at"]
+                )
 
-                if available(
-                    car_id,
-                    start_at,
-                    candidate_end
+                if (
+                    row_start < day_end
+                    and row_end > day_start
                 ):
-                    possible = True
+
+                    has_booking = True
                     break
 
-            if possible:
+            # Даже если в день есть бронь,
+            # день оставляем кликабельным.
+            #
+            # Почему?
+            #
+            # Например:
+            #
+            # старая бронь:
+            # 05.09 10:00 → 06.09 17:00
+            #
+            # новая аренда:
+            # 06.09 19:00 → ...
+            #
+            # 06.09 нельзя помечать полностью занятым.
+            #
+            # Точное время проверяется дальше.
 
-                text = f"🟢{n}"
+            if has_booking:
 
-                callback_data = (
-                    f"end:"
-                    f"{car_id}:"
-                    f"{current.isoformat()}"
-                )
+                text = f"🟡{n}"
 
             else:
 
-                text = f"🔴{n}"
+                text = f"🟢{n}"
 
-                callback_data = "noop"
+            callback_data = (
+                f"end:"
+                f"{car_id}:"
+                f"{current.isoformat()}"
+            )
 
         week.append(
             InlineKeyboardButton(
@@ -1326,7 +1427,10 @@ def end_calendar_keyboard(
 
         if len(week) == 7:
 
-            rows.append(week)
+            rows.append(
+                week
+            )
+
             week = []
 
     if week:
@@ -1340,7 +1444,9 @@ def end_calendar_keyboard(
                 )
             )
 
-        rows.append(week)
+        rows.append(
+            week
+        )
 
     rows.append(
         [
@@ -1606,7 +1712,10 @@ def admin_busy_calendar_keyboard(
 
         if len(week) == 7:
 
-            rows.append(week)
+            rows.append(
+                week
+            )
+
             week = []
 
     if week:
@@ -1620,7 +1729,9 @@ def admin_busy_calendar_keyboard(
                 )
             )
 
-        rows.append(week)
+        rows.append(
+            week
+        )
 
     rows.append(
         [
@@ -1683,7 +1794,9 @@ def car_text(cid):
         f"<b>{money(car['rates'][2])}/сутки</b>\n\n"
         f"🕐 Выдача/возврат: "
         f"<b>{PICKUP_START_HOUR:02d}:00–"
-        f"{PICKUP_END_HOUR:02d}:00</b>"
+        f"{PICKUP_END_HOUR:02d}:00</b>\n"
+        f"🔧 Технический интервал между арендами: "
+        f"<b>{BUFFER_HOURS} ч.</b>"
     )
 
 
@@ -1841,7 +1954,9 @@ async def month(
 
     _, cid, iso = callback.data.split(":")
 
-    d = date.fromisoformat(iso)
+    d = date.fromisoformat(
+        iso
+    )
 
     await callback.message.edit_reply_markup(
         reply_markup=calendar_keyboard(
@@ -1865,7 +1980,18 @@ async def start_day(
 
     _, cid, iso = callback.data.split(":")
 
-    start_d = date.fromisoformat(iso)
+    if cid not in CARS:
+
+        await callback.answer(
+            "Автомобиль не найден.",
+            show_alert=True
+        )
+
+        return
+
+    start_d = date.fromisoformat(
+        iso
+    )
 
     today = datetime.now(TZ).date()
 
@@ -1911,7 +2037,9 @@ async def backstart(
 
     _, cid, iso = callback.data.split(":")
 
-    d = date.fromisoformat(iso)
+    d = date.fromisoformat(
+        iso
+    )
 
     await callback.message.edit_reply_markup(
         reply_markup=calendar_keyboard(
@@ -1936,6 +2064,15 @@ async def pick_time(
     _, cid, date_iso, time_text = (
         callback.data.split(":")
     )
+
+    if cid not in CARS:
+
+        await callback.answer(
+            "Автомобиль не найден.",
+            show_alert=True
+        )
+
+        return
 
     start_d = date.fromisoformat(
         date_iso
@@ -1962,12 +2099,23 @@ async def pick_time(
 
         return
 
-    # Проверяем хотя бы минимальный интервал
-    # в 1 час.
+    # ========================================================
+    # ВАЖНО
+    #
+    # Не создаём фиктивную бронь на 1 час.
+    #
+    # Проверяем только, что выбранный момент
+    # не находится внутри уже существующей аренды
+    # с учётом BUFFER_HOURS.
+    #
+    # Для этого используем небольшой тестовый интервал.
+    # ========================================================
 
     test_end = (
         start_at
-        + timedelta(hours=1)
+        + timedelta(
+            minutes=1
+        )
     )
 
     if not available(
@@ -1977,7 +2125,8 @@ async def pick_time(
     ):
 
         await callback.answer(
-            "❌ В это время автомобиль уже занят.",
+            "❌ В это время автомобиль уже занят "
+            "или ещё действует технический интервал.",
             show_alert=True
         )
 
@@ -2020,14 +2169,22 @@ async def endmonth(
         callback.data.split(":")
     )
 
+    if cid not in CARS:
+
+        await callback.answer(
+            "Автомобиль не найден.",
+            show_alert=True
+        )
+
+        return
+
     start_at = datetime.fromisoformat(
         start_iso
     )
 
-    if start_at.tzinfo is None:
-        start_at = start_at.replace(
-            tzinfo=TZ
-        )
+    start_at = ensure_tz(
+        start_at
+    )
 
     d = date.fromisoformat(
         iso
@@ -2056,6 +2213,15 @@ async def end_day(
 
     _, cid, end_iso = callback.data.split(":")
 
+    if cid not in CARS:
+
+        await callback.answer(
+            "Автомобиль не найден.",
+            show_alert=True
+        )
+
+        return
+
     data = await state.get_data()
 
     if not data.get("start_at"):
@@ -2074,14 +2240,22 @@ async def end_day(
         data["start_at"]
     )
 
-    if start_at.tzinfo is None:
-        start_at = start_at.replace(
-            tzinfo=TZ
-        )
+    start_at = ensure_tz(
+        start_at
+    )
 
     end_d = date.fromisoformat(
         end_iso
     )
+
+    if end_d <= start_at.date():
+
+        await callback.answer(
+            "Дата возврата должна быть позже даты получения.",
+            show_alert=True
+        )
+
+        return
 
     title, keyboard = time_keyboard(
         cid,
@@ -2119,9 +2293,6 @@ async def backend(
     start_d = date.fromisoformat(
         start_iso
     )
-
-    # В этом callback достаточно показать
-    # календарь текущего месяца начала.
 
     start_at = local_dt(
         start_d,
@@ -2176,6 +2347,15 @@ async def end_time_handler(
         callback.data.split(":")
     )
 
+    if cid not in CARS:
+
+        await callback.answer(
+            "Автомобиль не найден.",
+            show_alert=True
+        )
+
+        return
+
     data = await state.get_data()
 
     if not data.get("start_at"):
@@ -2193,10 +2373,9 @@ async def end_time_handler(
         data["start_at"]
     )
 
-    if start_at.tzinfo is None:
-        start_at = start_at.replace(
-            tzinfo=TZ
-        )
+    start_at = ensure_tz(
+        start_at
+    )
 
     end_d = date.fromisoformat(
         end_date_iso
@@ -2221,7 +2400,14 @@ async def end_time_handler(
 
         return
 
-    # Проверка реального интервала.
+    # ========================================================
+    # ФИНАЛЬНАЯ ПРОВЕРКА
+    #
+    # Только здесь выполняется обращение к БД.
+    #
+    # Именно этот запрос определяет,
+    # действительно ли выбранный интервал свободен.
+    # ========================================================
 
     if not available(
         cid,
@@ -2395,15 +2581,13 @@ async def comment_handler(
         data["end_at"]
     )
 
-    if start_at.tzinfo is None:
-        start_at = start_at.replace(
-            tzinfo=TZ
-        )
+    start_at = ensure_tz(
+        start_at
+    )
 
-    if end_at.tzinfo is None:
-        end_at = end_at.replace(
-            tzinfo=TZ
-        )
+    end_at = ensure_tz(
+        end_at
+    )
 
     days = rental_days(
         start_at,
@@ -2428,7 +2612,7 @@ async def comment_handler(
     created_at = datetime.now(TZ)
 
     # ========================================================
-    # АТОМАРНАЯ БРОНЬ
+    # АТОМАРНОЕ СОЗДАНИЕ БРОНИ
     # ========================================================
 
     con = db()
@@ -2436,9 +2620,6 @@ async def comment_handler(
     try:
 
         with con.cursor() as cur:
-
-            # Общая блокировка для всех операций
-            # бронирования.
 
             cur.execute(
                 """
@@ -2448,7 +2629,7 @@ async def comment_handler(
                 """
             )
 
-            # Истёкшие заявки.
+            # Истёкшие pending.
 
             cur.execute(
                 """
@@ -2459,8 +2640,6 @@ async def comment_handler(
                   AND expires_at < NOW()
                 """
             )
-
-            # Повторная проверка перед INSERT.
 
             buffer_delta = timedelta(
                 hours=BUFFER_HOURS
@@ -2508,9 +2687,6 @@ async def comment_handler(
                 )
 
                 return
-
-            # Даты сохраняем также для совместимости
-            # со старой структурой.
 
             start_date = start_at.date()
             end_date = end_at.date()
@@ -2693,6 +2869,14 @@ async def mybookings(
                     row["end_date"],
                     time(17, 0)
                 )
+
+            start_at = ensure_tz(
+                start_at
+            )
+
+            end_at = ensure_tz(
+                end_at
+            )
 
             out.append(
                 f"\n<b>№{row['id']} — "
@@ -2947,7 +3131,9 @@ async def admin_month(
 
     _, cid, iso = callback.data.split(":")
 
-    d = date.fromisoformat(iso)
+    d = date.fromisoformat(
+        iso
+    )
 
     await callback.message.edit_reply_markup(
         reply_markup=admin_busy_calendar_keyboard(
@@ -2979,7 +3165,9 @@ async def admin_day(
 
     _, car_id, iso = callback.data.split(":")
 
-    selected = date.fromisoformat(iso)
+    selected = date.fromisoformat(
+        iso
+    )
 
     day_start = local_dt(
         selected,
@@ -3035,11 +3223,19 @@ async def admin_day(
 
     for row in rows:
 
+        start_at = ensure_tz(
+            row["start_at"]
+        )
+
+        end_at = ensure_tz(
+            row["end_at"]
+        )
+
         out.append(
             f"📋 <b>Заявка №{row['id']}</b>\n"
             f"{status_label(row['status'])}\n"
-            f"🕐 {format_date_time(row['start_at'])}\n"
-            f"↩️ {format_date_time(row['end_at'])}\n"
+            f"🕐 {format_date_time(start_at)}\n"
+            f"↩️ {format_date_time(end_at)}\n"
             f"👤 {row['name']}\n"
             f"📞 {row['phone']}\n"
             f"💰 {money(row['total'])}\n"
@@ -3207,6 +3403,14 @@ async def admin_booking(
             row["end_date"],
             time(17, 0)
         )
+
+    start_at = ensure_tz(
+        start_at
+    )
+
+    end_at = ensure_tz(
+        end_at
+    )
 
     username = (
         f"@{row['username']}"
@@ -3443,7 +3647,9 @@ async def admin_action(
 
         return
 
-    action, bid_s = callback.data.split(":")
+    action, bid_s = callback.data.split(
+        ":"
+    )
 
     bid = int(bid_s)
 
@@ -3453,8 +3659,6 @@ async def admin_action(
 
         with con.cursor() as cur:
 
-            # Та же блокировка, что и при создании заявки.
-
             cur.execute(
                 """
                 SELECT pg_advisory_xact_lock(
@@ -3463,7 +3667,9 @@ async def admin_action(
                 """
             )
 
-            # Истёкшие заявки.
+            # ==================================================
+            # Истёкшие заявки
+            # ==================================================
 
             cur.execute(
                 """
@@ -3474,6 +3680,10 @@ async def admin_action(
                   AND expires_at < NOW()
                 """
             )
+
+            # ==================================================
+            # Получаем заявку под блокировкой
+            # ==================================================
 
             row = cur.execute(
                 """
@@ -3524,6 +3734,18 @@ async def admin_action(
                     row["end_date"],
                     time(17, 0)
                 )
+
+            start_at = ensure_tz(
+                start_at
+            )
+
+            end_at = ensure_tz(
+                end_at
+            )
+
+            # ==================================================
+            # CONFIRM
+            # ==================================================
 
             if action == "confirm":
 
@@ -3617,6 +3839,10 @@ async def admin_action(
                 await callback.answer(
                     "Заявка подтверждена."
                 )
+
+            # ==================================================
+            # REJECT
+            # ==================================================
 
             else:
 
@@ -3946,9 +4172,15 @@ async def main():
             "starting polling mode."
         )
 
-        await dp.start_polling(
-            bot
-        )
+        try:
+
+            await dp.start_polling(
+                bot
+            )
+
+        finally:
+
+            await bot.session.close()
 
         return
 
@@ -4071,4 +4303,6 @@ async def main():
 
 if __name__ == "__main__":
 
-    asyncio.run(main())
+    asyncio.run(
+        main()
+    )
