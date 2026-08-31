@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from aiohttp import web
+
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -37,6 +38,10 @@ PORT = int(os.getenv("PORT", "10000"))
 WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/telegram/webhook")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 
+
+# ============================================================
+# АВТОМОБИЛИ
+# ============================================================
 
 CARS = {
     "solaris21": {
@@ -76,6 +81,10 @@ CARS = {
 }
 
 
+# ============================================================
+# СОСТОЯНИЯ БРОНИРОВАНИЯ
+# ============================================================
+
 class Booking(StatesGroup):
     start = State()
     end = State()
@@ -84,9 +93,9 @@ class Booking(StatesGroup):
     comment = State()
 
 
-# =========================================================
-# DATABASE
-# =========================================================
+# ============================================================
+# БАЗА ДАННЫХ
+# ============================================================
 
 def db():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -118,6 +127,22 @@ def init_db():
         )
     """)
 
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS cars (
+            car_id TEXT PRIMARY KEY,
+            enabled INTEGER NOT NULL DEFAULT 1
+        )
+    """)
+
+    for cid in CARS:
+        con.execute(
+            """
+            INSERT OR IGNORE INTO cars (car_id, enabled)
+            VALUES (?, 1)
+            """,
+            (cid,),
+        )
+
     con.commit()
     con.close()
 
@@ -142,36 +167,100 @@ def cleanup_pending():
     con.close()
 
 
-def available(car_id, start_d, end_d):
-    cleanup_pending()
-
+def is_car_enabled(car_id):
     con = db()
 
     row = con.execute(
         """
+        SELECT enabled
+        FROM cars
+        WHERE car_id = ?
+        """,
+        (car_id,),
+    ).fetchone()
+
+    con.close()
+
+    if row is None:
+        return True
+
+    return bool(row["enabled"])
+
+
+def set_car_enabled(car_id, enabled):
+    con = db()
+
+    con.execute(
+        """
+        INSERT INTO cars (car_id, enabled)
+        VALUES (?, ?)
+        ON CONFLICT(car_id)
+        DO UPDATE SET enabled = excluded.enabled
+        """,
+        (car_id, 1 if enabled else 0),
+    )
+
+    con.commit()
+    con.close()
+
+
+# ============================================================
+# ПРОВЕРКА ДОСТУПНОСТИ
+# ============================================================
+
+def available(car_id, start_d, end_d, exclude_booking_id=None):
+    cleanup_pending()
+
+    if not is_car_enabled(car_id):
+        return False
+
+    con = db()
+
+    query = """
         SELECT id
         FROM bookings
         WHERE car_id = ?
           AND status IN ('pending', 'confirmed')
           AND date(start_date) < date(?)
           AND date(end_date) > date(?)
-        LIMIT 1
-        """,
-        (
-            car_id,
-            end_d.isoformat(),
-            start_d.isoformat(),
-        ),
-    ).fetchone()
+    """
+
+    params = [
+        car_id,
+        end_d.isoformat(),
+        start_d.isoformat(),
+    ]
+
+    if exclude_booking_id is not None:
+        query += " AND id <> ?"
+        params.append(exclude_booking_id)
+
+    query += " LIMIT 1"
+
+    row = con.execute(query, params).fetchone()
 
     con.close()
 
     return row is None
 
 
-# =========================================================
-# HELPERS
-# =========================================================
+def booking_overlaps_existing(
+    car_id,
+    start_d,
+    end_d,
+    exclude_booking_id=None,
+):
+    return not available(
+        car_id,
+        start_d,
+        end_d,
+        exclude_booking_id=exclude_booking_id,
+    )
+
+
+# ============================================================
+# ЦЕНЫ
+# ============================================================
 
 def rate_for_days(car_id, days):
     rates = CARS[car_id]["rates"]
@@ -189,27 +278,29 @@ def money(n):
     return f"{n:,}".replace(",", " ") + " ₽"
 
 
-def status_text(status):
-    return {
-        "pending": "🟡 Ожидает подтверждения",
-        "confirmed": "🔴 Подтверждено",
-        "rejected": "❌ Отклонено",
-        "expired": "⌛ Истекло",
-    }.get(status, status)
-
-
-# =========================================================
-# USER KEYBOARDS
-# =========================================================
+# ============================================================
+# КЛАВИАТУРЫ
+# ============================================================
 
 def car_keyboard():
     rows = []
 
     for cid, car in CARS.items():
+        if not is_car_enabled(cid):
+            continue
+
         rows.append([
             InlineKeyboardButton(
                 text=f"🚗 {car['name']}",
                 callback_data=f"car:{cid}",
+            )
+        ])
+
+    if not rows:
+        rows.append([
+            InlineKeyboardButton(
+                text="😔 Автомобилей пока нет",
+                callback_data="noop",
             )
         ])
 
@@ -241,9 +332,76 @@ def main_keyboard():
     )
 
 
-# =========================================================
-# USER CALENDAR
-# =========================================================
+def admin_panel_keyboard():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔔 Новые заявки",
+                    callback_data="admin:new",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📅 Календарь занятости",
+                    callback_data="admin:calendar",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📋 Все бронирования",
+                    callback_data="admin:bookings",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🚗 Автомобили",
+                    callback_data="admin:cars",
+                )
+            ],
+        ]
+    )
+
+
+def admin_back_keyboard():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="◀️ В админ-панель",
+                    callback_data="admin:back",
+                )
+            ]
+        ]
+    )
+
+
+def admin_booking_buttons(bid):
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Подтвердить",
+                    callback_data=f"confirm:{bid}",
+                ),
+                InlineKeyboardButton(
+                    text="❌ Отклонить",
+                    callback_data=f"reject:{bid}",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📄 Договор",
+                    callback_data=f"contract:{bid}",
+                )
+            ],
+        ]
+    )
+
+
+# ============================================================
+# КАЛЕНДАРЬ КЛИЕНТА
+# ============================================================
 
 def calendar_keyboard(car_id, year, month):
     first = date(year, month, 1)
@@ -253,10 +411,11 @@ def calendar_keyboard(car_id, year, month):
     else:
         next_first = date(year, month + 1, 1)
 
-    prev_first = first - timedelta(days=1)
-    prev_first = date(
-        prev_first.year,
-        prev_first.month,
+    previous_day = first - timedelta(days=1)
+
+    previous_first = date(
+        previous_day.year,
+        previous_day.month,
         1,
     )
 
@@ -305,23 +464,27 @@ def calendar_keyboard(car_id, year, month):
     ]
 
     for d in range(1, days + 1):
-        cur = date(year, month, d)
+        current = date(year, month, d)
 
-        if cur < today:
+        if current < today:
+            text = "⚪"
+            callback = "noop"
+
+        elif not is_car_enabled(car_id):
             text = "⚪"
             callback = "noop"
 
         elif not available(
             car_id,
-            cur,
-            cur + timedelta(days=1),
+            current,
+            current + timedelta(days=1),
         ):
             text = f"🔴{d}"
             callback = "noop"
 
         else:
             text = f"🟢{d}"
-            callback = f"day:{car_id}:{cur.isoformat()}"
+            callback = f"day:{car_id}:{current.isoformat()}"
 
         week.append(
             InlineKeyboardButton(
@@ -349,7 +512,8 @@ def calendar_keyboard(car_id, year, month):
         InlineKeyboardButton(
             text="‹",
             callback_data=(
-                f"month:{car_id}:{prev_first.isoformat()}"
+                f"month:{car_id}:"
+                f"{previous_first.isoformat()}"
             ),
         ),
         InlineKeyboardButton(
@@ -359,15 +523,25 @@ def calendar_keyboard(car_id, year, month):
         InlineKeyboardButton(
             text="›",
             callback_data=(
-                f"month:{car_id}:{next_first.isoformat()}"
+                f"month:{car_id}:"
+                f"{next_first.isoformat()}"
             ),
         ),
     ])
 
-    return InlineKeyboardMarkup(
-        inline_keyboard=rows
-    )
+    rows.append([
+        InlineKeyboardButton(
+            text="◀️ К автомобилям",
+            callback_data="catalog",
+        )
+    ])
 
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ============================================================
+# КАЛЕНДАРЬ ДАТЫ ВОЗВРАТА
+# ============================================================
 
 def end_calendar_keyboard(car_id, start_d, year, month):
     first = date(year, month, 1)
@@ -377,11 +551,11 @@ def end_calendar_keyboard(car_id, start_d, year, month):
     else:
         next_first = date(year, month + 1, 1)
 
-    prev_day = first - timedelta(days=1)
+    previous_day = first - timedelta(days=1)
 
-    prev_first = date(
-        prev_day.year,
-        prev_day.month,
+    previous_first = date(
+        previous_day.year,
+        previous_day.month,
         1,
     )
 
@@ -427,19 +601,23 @@ def end_calendar_keyboard(car_id, start_d, year, month):
     ]
 
     for d in range(1, days + 1):
-        cur = date(year, month, d)
+        current = date(year, month, d)
 
-        if cur <= start_d:
+        if current <= start_d:
             text = "⚪"
             callback = "noop"
 
-        elif not available(car_id, start_d, cur):
+        elif not available(
+            car_id,
+            start_d,
+            current,
+        ):
             text = f"🔴{d}"
             callback = "noop"
 
         else:
             text = f"🟢{d}"
-            callback = f"end:{car_id}:{cur.isoformat()}"
+            callback = f"end:{car_id}:{current.isoformat()}"
 
         week.append(
             InlineKeyboardButton(
@@ -469,7 +647,7 @@ def end_calendar_keyboard(car_id, start_d, year, month):
             callback_data=(
                 f"endmonth:{car_id}:"
                 f"{start_d.isoformat()}:"
-                f"{prev_first.isoformat()}"
+                f"{previous_first.isoformat()}"
             ),
         ),
         InlineKeyboardButton(
@@ -486,442 +664,19 @@ def end_calendar_keyboard(car_id, start_d, year, month):
         ),
     ])
 
-    return InlineKeyboardMarkup(
-        inline_keyboard=rows
-    )
-
-
-# =========================================================
-# ADMIN KEYBOARDS
-# =========================================================
-
-def admin_buttons(bid):
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="✅ Подтвердить",
-                    callback_data=f"confirm:{bid}",
-                ),
-                InlineKeyboardButton(
-                    text="❌ Отклонить",
-                    callback_data=f"reject:{bid}",
-                ),
-            ]
-        ]
-    )
-
-
-def admin_panel_keyboard():
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="🔔 Новые заявки",
-                    callback_data="admin:new",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="📅 Календарь занятости",
-                    callback_data="admin:calendar",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="📋 Все бронирования",
-                    callback_data="admin:bookings",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🚗 Автомобили",
-                    callback_data="admin:cars",
-                )
-            ],
-        ]
-    )
-
-
-def admin_back_keyboard():
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="◀️ Назад",
-                    callback_data="admin:back",
-                )
-            ]
-        ]
-    )
-
-
-# =========================================================
-# ADMIN PANEL
-# =========================================================
-
-async def admin_panel(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("⛔ Нет доступа.")
-        return
-
-    await message.answer(
-        "👨‍💼 <b>Админ-панель Balticar</b>\n\n"
-        "Выберите раздел:",
-        reply_markup=admin_panel_keyboard(),
-    )
-
-
-async def admin_back(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer(
-            "Нет доступа.",
-            show_alert=True,
-        )
-        return
-
-    await callback.message.edit_text(
-        "👨‍💼 <b>Админ-панель Balticar</b>\n\n"
-        "Выберите раздел:",
-        reply_markup=admin_panel_keyboard(),
-    )
-
-    await callback.answer()
-
-
-# =========================================================
-# ADMIN — NEW BOOKINGS
-# =========================================================
-
-async def admin_new_bookings(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer(
-            "Нет доступа.",
-            show_alert=True,
-        )
-        return
-
-    cleanup_pending()
-
-    con = db()
-
-    rows = con.execute(
-        """
-        SELECT *
-        FROM bookings
-        WHERE status = 'pending'
-        ORDER BY id DESC
-        """
-    ).fetchall()
-
-    con.close()
-
-    if not rows:
-        await callback.message.edit_text(
-            "🔔 <b>Новые заявки</b>\n\n"
-            "Новых заявок нет.",
-            reply_markup=admin_back_keyboard(),
-        )
-
-        await callback.answer()
-        return
-
-    text_parts = [
-        "🔔 <b>Новые заявки</b>",
-        "",
-    ]
-
-    for row in rows:
-        start_d = date.fromisoformat(row["start_date"])
-        end_d = date.fromisoformat(row["end_date"])
-
-        username = (
-            f"@{row['username']}"
-            if row["username"]
-            else "без username"
-        )
-
-        text_parts.append(
-            f"📩 <b>Заявка №{row['id']}</b>\n"
-            f"🚗 {CARS[row['car_id']]['name']}\n"
-            f"📅 {start_d.strftime('%d.%m.%Y')} — "
-            f"{end_d.strftime('%d.%m.%Y')}\n"
-            f"⏱ {(end_d - start_d).days} суток\n"
-            f"💰 <b>{money(row['total'])}</b>\n"
-            f"👤 {row['name']}\n"
-            f"📞 {row['phone']}\n"
-            f"Telegram: {username}\n"
-            f"📝 {row['comment'] or '—'}"
-        )
-
-        if row["expires_at"]:
-            expires = datetime.fromisoformat(
-                row["expires_at"]
-            ).astimezone(TZ)
-
-            text_parts.append(
-                f"⏳ Удержание до "
-                f"{expires.strftime('%d.%m.%Y %H:%M')}"
-            )
-
-        text_parts.append("")
-
-    await callback.message.edit_text(
-        "\n".join(text_parts),
-        reply_markup=admin_back_keyboard(),
-    )
-
-    # Отдельные сообщения с кнопками действий.
-    for row in rows:
-        start_d = date.fromisoformat(row["start_date"])
-        end_d = date.fromisoformat(row["end_date"])
-
-        await callback.message.answer(
-            f"📩 <b>Заявка №{row['id']}</b>\n\n"
-            f"🚗 {CARS[row['car_id']]['name']}\n"
-            f"📅 {start_d.strftime('%d.%m.%Y')} — "
-            f"{end_d.strftime('%d.%m.%Y')}\n"
-            f"⏱ {(end_d - start_d).days} суток\n"
-            f"💰 <b>{money(row['total'])}</b>\n"
-            f"👤 {row['name']}\n"
-            f"📞 {row['phone']}\n"
-            f"📝 {row['comment'] or '—'}",
-            reply_markup=admin_buttons(row["id"]),
-        )
-
-    await callback.answer()
-
-
-# =========================================================
-# ADMIN — ALL BOOKINGS
-# =========================================================
-
-async def admin_all_bookings(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer(
-            "Нет доступа.",
-            show_alert=True,
-        )
-        return
-
-    cleanup_pending()
-
-    con = db()
-
-    rows = con.execute(
-        """
-        SELECT *
-        FROM bookings
-        ORDER BY id DESC
-        LIMIT 50
-        """
-    ).fetchall()
-
-    con.close()
-
-    if not rows:
-        await callback.message.edit_text(
-            "📋 <b>Все бронирования</b>\n\n"
-            "Бронирований пока нет.",
-            reply_markup=admin_back_keyboard(),
-        )
-
-        await callback.answer()
-        return
-
-    text_parts = [
-        "📋 <b>Все бронирования</b>",
-        "",
-    ]
-
-    for row in rows:
-        start_d = date.fromisoformat(row["start_date"])
-        end_d = date.fromisoformat(row["end_date"])
-
-        text_parts.append(
-            f"<b>№{row['id']}</b> — "
-            f"{status_text(row['status'])}\n"
-            f"🚗 {CARS[row['car_id']]['name']}\n"
-            f"📅 {start_d.strftime('%d.%m.%Y')} — "
-            f"{end_d.strftime('%d.%m.%Y')}\n"
-            f"👤 {row['name']}\n"
-            f"📞 {row['phone']}\n"
-            f"💰 {money(row['total'])}\n"
-        )
-
-    await callback.message.edit_text(
-        "\n".join(text_parts),
-        reply_markup=admin_back_keyboard(),
-    )
-
-    await callback.answer()
-
-
-# =========================================================
-# ADMIN — CARS
-# =========================================================
-
-async def admin_cars(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer(
-            "Нет доступа.",
-            show_alert=True,
-        )
-        return
-
-    rows = []
-
-    for cid, car in CARS.items():
-        rows.append([
-            InlineKeyboardButton(
-                text=f"🚗 {car['name']}",
-                callback_data=f"admincardetail:{cid}",
-            )
-        ])
-
     rows.append([
         InlineKeyboardButton(
-            text="◀️ Назад",
-            callback_data="admin:back",
+            text="◀️ К автомобилям",
+            callback_data="catalog",
         )
     ])
 
-    await callback.message.edit_text(
-        "🚗 <b>Автомобили</b>\n\n"
-        "Выберите автомобиль:",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=rows
-        ),
-    )
-
-    await callback.answer()
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def admin_car_detail(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer(
-            "Нет доступа.",
-            show_alert=True,
-        )
-        return
-
-    cid = callback.data.split(":", 1)[1]
-
-    if cid not in CARS:
-        await callback.answer(
-            "Автомобиль не найден.",
-            show_alert=True,
-        )
-        return
-
-    car = CARS[cid]
-
-    await callback.message.edit_text(
-        f"🚗 <b>{car['name']}</b>\n\n"
-        f"⚙️ Коробка: <b>{car['gear']}</b>\n\n"
-        f"💰 1–3 суток: "
-        f"<b>{money(car['rates'][0])}/сутки</b>\n"
-        f"💰 4–6 суток: "
-        f"<b>{money(car['rates'][1])}/сутки</b>\n"
-        f"💰 7+ суток: "
-        f"<b>{money(car['rates'][2])}/сутки</b>\n\n"
-        f"📷 Фотографий: {len(car['photos'])}",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="◀️ К автомобилям",
-                        callback_data="admin:cars",
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text="📅 Календарь",
-                        callback_data=f"admincar:{cid}",
-                    )
-                ],
-            ]
-        ),
-    )
-
-    await callback.answer()
-
-
-# =========================================================
-# ADMIN — OCCUPANCY CALENDAR
-# =========================================================
-
-async def admin_calendar(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer(
-            "Нет доступа.",
-            show_alert=True,
-        )
-        return
-
-    rows = []
-
-    for cid, car in CARS.items():
-        rows.append([
-            InlineKeyboardButton(
-                text=f"🚗 {car['name']}",
-                callback_data=f"admincar:{cid}",
-            )
-        ])
-
-    rows.append([
-        InlineKeyboardButton(
-            text="◀️ Назад",
-            callback_data="admin:back",
-        )
-    ])
-
-    await callback.message.edit_text(
-        "📅 <b>Календарь занятости</b>\n\n"
-        "Выберите автомобиль:",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=rows
-        ),
-    )
-
-    await callback.answer()
-
-
-async def admin_car_calendar(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer(
-            "Нет доступа.",
-            show_alert=True,
-        )
-        return
-
-    cid = callback.data.split(":", 1)[1]
-
-    if cid not in CARS:
-        await callback.answer(
-            "Автомобиль не найден.",
-            show_alert=True,
-        )
-        return
-
-    today = datetime.now(TZ).date()
-
-    await callback.message.edit_text(
-        f"📅 <b>Календарь занятости</b>\n\n"
-        f"🚗 <b>{CARS[cid]['name']}</b>\n\n"
-        "🟢 свободно\n"
-        "🟡 ожидает подтверждения\n"
-        "🔴 подтверждено\n"
-        "⚪ прошедшая дата",
-        reply_markup=admin_busy_calendar_keyboard(
-            cid,
-            today.year,
-            today.month,
-        ),
-    )
-
-    await callback.answer()
-
+# ============================================================
+# АДМИНСКИЙ КАЛЕНДАРЬ
+# ============================================================
 
 def admin_busy_calendar_keyboard(car_id, year, month):
     first = date(year, month, 1)
@@ -984,11 +739,7 @@ def admin_busy_calendar_keyboard(car_id, year, month):
     ]
 
     for day_number in range(1, days + 1):
-        current = date(
-            year,
-            month,
-            day_number,
-        )
+        current = date(year, month, day_number)
 
         status = "free"
 
@@ -1044,28 +795,21 @@ def admin_busy_calendar_keyboard(car_id, year, month):
 
         if status == "confirmed":
             text = f"🔴{day_number}"
-            callback_data = (
-                f"adminday:{car_id}:"
-                f"{current.isoformat()}"
-            )
 
         elif status == "pending":
             text = f"🟡{day_number}"
-            callback_data = (
-                f"adminday:{car_id}:"
-                f"{current.isoformat()}"
-            )
 
         elif status == "past":
             text = "⚪"
-            callback_data = "noop"
 
         else:
             text = f"🟢{day_number}"
-            callback_data = (
-                f"adminday:{car_id}:"
-                f"{current.isoformat()}"
-            )
+
+        callback_data = (
+            "noop"
+            if status == "past"
+            else f"adminday:{car_id}:{current.isoformat()}"
+        )
 
         week.append(
             InlineKeyboardButton(
@@ -1117,120 +861,26 @@ def admin_busy_calendar_keyboard(car_id, year, month):
         )
     ])
 
-    return InlineKeyboardMarkup(
-        inline_keyboard=rows
-    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def admin_month(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer(
-            "Нет доступа.",
-            show_alert=True,
-        )
-        return
-
-    _, car_id, iso = callback.data.split(":")
-
-    d = date.fromisoformat(iso)
-
-    await callback.message.edit_reply_markup(
-        reply_markup=admin_busy_calendar_keyboard(
-            car_id,
-            d.year,
-            d.month,
-        )
-    )
-
-    await callback.answer()
-
-
-async def admin_day(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer(
-            "Нет доступа.",
-            show_alert=True,
-        )
-        return
-
-    _, car_id, iso = callback.data.split(":")
-
-    selected = date.fromisoformat(iso)
-
-    cleanup_pending()
-
-    con = db()
-
-    row = con.execute(
-        """
-        SELECT *
-        FROM bookings
-        WHERE car_id = ?
-          AND status IN ('pending', 'confirmed')
-          AND date(start_date) <= date(?)
-          AND date(end_date) > date(?)
-        ORDER BY
-            CASE status
-                WHEN 'confirmed' THEN 1
-                WHEN 'pending' THEN 2
-                ELSE 3
-            END
-        LIMIT 1
-        """,
-        (
-            car_id,
-            selected.isoformat(),
-            selected.isoformat(),
-        ),
-    ).fetchone()
-
-    con.close()
-
-    if not row:
-        await callback.answer(
-            "В этот день бронирований нет.",
-            show_alert=True,
-        )
-        return
-
-    status = (
-        "🔴 Подтверждено"
-        if row["status"] == "confirmed"
-        else "🟡 Ожидает подтверждения"
-    )
-
-    await callback.message.answer(
-        f"📋 <b>Бронирование №{row['id']}</b>\n\n"
-        f"🚗 {CARS[car_id]['name']}\n"
-        f"{status}\n"
-        f"📅 "
-        f"{date.fromisoformat(row['start_date']).strftime('%d.%m.%Y')}"
-        f" — "
-        f"{date.fromisoformat(row['end_date']).strftime('%d.%m.%Y')}\n"
-        f"👤 {row['name']}\n"
-        f"📞 {row['phone']}\n"
-        f"💰 {money(row['total'])}\n"
-        f"📝 {row['comment'] or '—'}",
-        reply_markup=(
-            admin_buttons(row["id"])
-            if row["status"] == "pending"
-            else None
-        ),
-    )
-
-    await callback.answer()
-
-
-# =========================================================
-# CAR INFO
-# =========================================================
+# ============================================================
+# ТЕКСТ АВТОМОБИЛЯ
+# ============================================================
 
 def car_text(cid):
     car = CARS[cid]
 
+    enabled_text = (
+        "🟢 Доступен для бронирования"
+        if is_car_enabled(cid)
+        else "🔴 Временно недоступен"
+    )
+
     return (
         f"<b>{car['name']}</b>\n"
-        f"⚙️ {car['gear']}\n\n"
+        f"⚙️ {car['gear']}\n"
+        f"{enabled_text}\n\n"
         f"💰 1–3 суток: "
         f"<b>{money(car['rates'][0])}/сутки</b>\n"
         f"💰 4–6 суток: "
@@ -1249,6 +899,23 @@ async def send_car(bot, chat_id, cid):
                 chat_id,
                 FSInputFile(photo),
             )
+
+    if not is_car_enabled(cid):
+        await bot.send_message(
+            chat_id,
+            car_text(cid),
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="◀️ К автомобилям",
+                            callback_data="catalog",
+                        )
+                    ]
+                ]
+            ),
+        )
+        return
 
     await bot.send_message(
         chat_id,
@@ -1272,16 +939,50 @@ async def send_car(bot, chat_id, cid):
     )
 
 
-# =========================================================
-# USER HANDLERS
-# =========================================================
+# ============================================================
+# АДМИН: ФОРМАТ ЗАЯВКИ
+# ============================================================
+
+def booking_status_text(status):
+    return {
+        "pending": "🟡 Ожидает подтверждения",
+        "confirmed": "✅ Подтверждена",
+        "rejected": "❌ Отклонена",
+        "expired": "⌛ Истекла",
+    }.get(status, status)
+
+
+def format_booking(row):
+    start_d = date.fromisoformat(row["start_date"])
+    end_d = date.fromisoformat(row["end_date"])
+
+    return (
+        f"📋 <b>Бронирование №{row['id']}</b>\n\n"
+        f"🚗 <b>{CARS[row['car_id']]['name']}</b>\n"
+        f"⚙️ {CARS[row['car_id']]['gear']}\n"
+        f"📅 {start_d.strftime('%d.%m.%Y')} — "
+        f"{end_d.strftime('%d.%m.%Y')}\n"
+        f"⏱ {(end_d - start_d).days} суток\n"
+        f"💰 <b>{money(row['total'])}</b>\n\n"
+        f"👤 <b>{row['name']}</b>\n"
+        f"📞 {row['phone']}\n"
+        f"Telegram: "
+        f"@{row['username'] if row['username'] else 'без username'}\n"
+        f"📝 {row['comment'] or '—'}\n\n"
+        f"{booking_status_text(row['status'])}"
+    )
+
+
+# ============================================================
+# START
+# ============================================================
 
 async def start_handler(message: Message, state: FSMContext):
     await state.clear()
 
     await message.answer(
         "🚗 <b>Balticar</b>\n\n"
-        "Аренда автомобилей в Калининграде.\n"
+        "Аренда автомобилей в Калининграде.\n\n"
         "Выберите действие:",
         reply_markup=main_keyboard(),
     )
@@ -1294,6 +995,10 @@ async def id_handler(message: Message):
     )
 
 
+# ============================================================
+# КАТАЛОГ
+# ============================================================
+
 async def catalog(callback: CallbackQuery):
     await callback.message.answer(
         "🚗 <b>Выберите автомобиль:</b>",
@@ -1304,7 +1009,14 @@ async def catalog(callback: CallbackQuery):
 
 
 async def car_selected(callback: CallbackQuery):
-    cid = callback.data.split(":")[1]
+    cid = callback.data.split(":", 1)[1]
+
+    if cid not in CARS:
+        await callback.answer(
+            "Автомобиль не найден.",
+            show_alert=True,
+        )
+        return
 
     await send_car(
         callback.bot,
@@ -1315,8 +1027,19 @@ async def car_selected(callback: CallbackQuery):
     await callback.answer()
 
 
+# ============================================================
+# ВЫБОР ДАТ
+# ============================================================
+
 async def pick_dates(callback: CallbackQuery):
-    cid = callback.data.split(":")[1]
+    cid = callback.data.split(":", 1)[1]
+
+    if not is_car_enabled(cid):
+        await callback.answer(
+            "Этот автомобиль временно недоступен.",
+            show_alert=True,
+        )
+        return
 
     today = datetime.now(TZ).date()
 
@@ -1358,6 +1081,24 @@ async def start_day(
 
     start_d = date.fromisoformat(iso)
 
+    if not is_car_enabled(cid):
+        await callback.answer(
+            "Автомобиль временно недоступен.",
+            show_alert=True,
+        )
+        return
+
+    if not available(
+        cid,
+        start_d,
+        start_d + timedelta(days=1),
+    ):
+        await callback.answer(
+            "Эта дата уже занята.",
+            show_alert=True,
+        )
+        return
+
     await state.update_data(
         car_id=cid,
         start_date=iso,
@@ -1367,7 +1108,7 @@ async def start_day(
 
     await callback.message.answer(
         f"📅 Получение: "
-        f"<b>{start_d.strftime('%d.%m.%Y')}</b>\n"
+        f"<b>{start_d.strftime('%d.%m.%Y')}</b>\n\n"
         "Теперь выберите дату возврата:",
         reply_markup=end_calendar_keyboard(
             cid,
@@ -1406,13 +1147,32 @@ async def end_day(
 
     data = await state.get_data()
 
+    if not data.get("start_date"):
+        await callback.answer(
+            "Сессия бронирования истекла.",
+            show_alert=True,
+        )
+        await state.clear()
+        return
+
     start_d = date.fromisoformat(
         data["start_date"]
     )
 
     end_d = date.fromisoformat(end_iso)
 
-    if not available(cid, start_d, end_d):
+    if end_d <= start_d:
+        await callback.answer(
+            "Дата возврата должна быть позже даты получения.",
+            show_alert=True,
+        )
+        return
+
+    if not available(
+        cid,
+        start_d,
+        end_d,
+    ):
         await callback.answer(
             "Эти даты уже заняты.",
             show_alert=True,
@@ -1422,8 +1182,8 @@ async def end_day(
     days = (end_d - start_d).days
 
     total = (
-        days
-        * rate_for_days(cid, days)
+        days *
+        rate_for_days(cid, days)
     )
 
     await state.update_data(
@@ -1440,25 +1200,29 @@ async def end_day(
         f"{end_d.strftime('%d.%m.%Y')}</b>\n"
         f"⏱ {days} суток\n"
         f"💰 <b>{money(total)}</b>\n\n"
-        "Введите ваше имя:"
+        "Введите ваше имя:",
     )
 
     await callback.answer()
 
 
+# ============================================================
+# ДАННЫЕ КЛИЕНТА
+# ============================================================
+
 async def name_handler(
     message: Message,
     state: FSMContext,
 ):
-    if len(message.text.strip()) < 2:
+    text = (message.text or "").strip()
+
+    if len(text) < 2:
         await message.answer(
             "Пожалуйста, введите имя."
         )
         return
 
-    await state.update_data(
-        name=message.text.strip()
-    )
+    await state.update_data(name=text)
 
     await state.set_state(Booking.phone)
 
@@ -1471,7 +1235,7 @@ async def phone_handler(
     message: Message,
     state: FSMContext,
 ):
-    phone = message.text.strip()
+    phone = (message.text or "").strip()
 
     if len(phone) < 7:
         await message.answer(
@@ -1480,9 +1244,7 @@ async def phone_handler(
         )
         return
 
-    await state.update_data(
-        phone=phone
-    )
+    await state.update_data(phone=phone)
 
     await state.set_state(Booking.comment)
 
@@ -1492,16 +1254,31 @@ async def phone_handler(
     )
 
 
+# ============================================================
+# СОЗДАНИЕ БРОНИРОВАНИЯ
+# ============================================================
+
 async def comment_handler(
     message: Message,
     state: FSMContext,
 ):
     data = await state.get_data()
 
+    if not data.get("car_id"):
+        await state.clear()
+
+        await message.answer(
+            "Сессия бронирования истекла. "
+            "Начните заново: /start"
+        )
+        return
+
+    comment_text = (message.text or "").strip()
+
     comment = (
         ""
-        if message.text.strip() == "-"
-        else message.text.strip()
+        if comment_text == "-"
+        else comment_text
     )
 
     cid = data["car_id"]
@@ -1514,7 +1291,20 @@ async def comment_handler(
         data["end_date"]
     )
 
-    if not available(cid, start_d, end_d):
+    if not is_car_enabled(cid):
+        await message.answer(
+            "К сожалению, этот автомобиль "
+            "стал недоступен. Начните заново: /start"
+        )
+
+        await state.clear()
+        return
+
+    if not available(
+        cid,
+        start_d,
+        end_d,
+    ):
         await message.answer(
             "К сожалению, автомобиль только что "
             "забронировали на эти даты.\n\n"
@@ -1522,7 +1312,6 @@ async def comment_handler(
         )
 
         await state.clear()
-
         return
 
     expires = (
@@ -1531,6 +1320,35 @@ async def comment_handler(
     )
 
     con = db()
+
+    # Повторная проверка непосредственно перед INSERT.
+    conflict = con.execute(
+        """
+        SELECT id
+        FROM bookings
+        WHERE car_id = ?
+          AND status IN ('pending', 'confirmed')
+          AND date(start_date) < date(?)
+          AND date(end_date) > date(?)
+        LIMIT 1
+        """,
+        (
+            cid,
+            end_d.isoformat(),
+            start_d.isoformat(),
+        ),
+    ).fetchone()
+
+    if conflict:
+        con.close()
+
+        await message.answer(
+            "❌ Эти даты уже заняты другим клиентом.\n\n"
+            "Начните заново: /start"
+        )
+
+        await state.clear()
+        return
 
     cur = con.execute(
         """
@@ -1549,10 +1367,7 @@ async def comment_handler(
             created_at,
             expires_at
         )
-        VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            'pending', ?, ?
-        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
         """,
         (
             message.from_user.id,
@@ -1583,10 +1398,11 @@ async def comment_handler(
         f"{end_d.strftime('%d.%m.%Y')}\n"
         f"⏱ {data['days']} суток\n"
         f"💰 <b>{money(data['total'])}</b>\n\n"
-        "Мы свяжемся с вами после "
-        "подтверждения заявки."
+        "Мы свяжемся с вами после подтверждения заявки.",
+        reply_markup=main_keyboard(),
     )
 
+    # Уведомление админу
     if ADMIN_ID:
         username = (
             f"@{message.from_user.username}"
@@ -1595,13 +1411,13 @@ async def comment_handler(
         )
 
         text = (
-            f"🔔 <b>Новая заявка №{bid}</b>\n\n"
-            f"🚗 {CARS[cid]['name']} "
-            f"({CARS[cid]['gear']})\n"
+            f"🔔 <b>НОВАЯ ЗАЯВКА №{bid}</b>\n\n"
+            f"🚗 <b>{CARS[cid]['name']}</b>\n"
+            f"⚙️ {CARS[cid]['gear']}\n"
             f"📅 {start_d.strftime('%d.%m.%Y')} — "
             f"{end_d.strftime('%d.%m.%Y')}\n"
             f"⏱ {data['days']} суток\n"
-            f"💰 <b>{money(data['total'])}</b>\n"
+            f"💰 <b>{money(data['total'])}</b>\n\n"
             f"👤 {data['name']}\n"
             f"📞 {data['phone']}\n"
             f"Telegram: {username}\n"
@@ -1613,9 +1429,13 @@ async def comment_handler(
         await message.bot.send_message(
             ADMIN_ID,
             text,
-            reply_markup=admin_buttons(bid),
+            reply_markup=admin_booking_buttons(bid),
         )
 
+
+# ============================================================
+# МОИ ЗАЯВКИ
+# ============================================================
 
 async def mybookings(callback: CallbackQuery):
     cleanup_pending()
@@ -1628,7 +1448,7 @@ async def mybookings(callback: CallbackQuery):
         FROM bookings
         WHERE user_id = ?
         ORDER BY id DESC
-        LIMIT 10
+        LIMIT 20
         """,
         (callback.from_user.id,),
     ).fetchall()
@@ -1637,36 +1457,108 @@ async def mybookings(callback: CallbackQuery):
 
     if not rows:
         await callback.message.answer(
-            "У вас пока нет заявок."
+            "📋 У вас пока нет заявок."
         )
 
-    else:
-        out = [
-            "📋 <b>Ваши заявки:</b>"
-        ]
+        await callback.answer()
+        return
 
-        for row in rows:
-            out.append(
-                f"\n№{row['id']} — "
-                f"{CARS[row['car_id']]['name']}\n"
-                f"📅 "
-                f"{date.fromisoformat(row['start_date']).strftime('%d.%m.%Y')}"
-                f" — "
-                f"{date.fromisoformat(row['end_date']).strftime('%d.%m.%Y')}\n"
-                f"💰 {money(row['total'])} — "
-                f"{status_text(row['status'])}"
+    buttons = []
+
+    for row in rows:
+        buttons.append([
+            InlineKeyboardButton(
+                text=(
+                    f"№{row['id']} — "
+                    f"{CARS[row['car_id']]['name']}"
+                ),
+                callback_data=f"mybooking:{row['id']}",
             )
+        ])
 
-        await callback.message.answer(
-            "\n".join(out)
+    buttons.append([
+        InlineKeyboardButton(
+            text="◀️ Назад",
+            callback_data="back:main",
         )
+    ])
+
+    await callback.message.answer(
+        "📋 <b>Ваши заявки</b>\n\n"
+        "Выберите заявку:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=buttons
+        ),
+    )
 
     await callback.answer()
 
 
+async def mybooking_detail(callback: CallbackQuery):
+    bid = int(callback.data.split(":", 1)[1])
+
+    cleanup_pending()
+
+    con = db()
+
+    row = con.execute(
+        """
+        SELECT *
+        FROM bookings
+        WHERE id = ?
+          AND user_id = ?
+        """,
+        (
+            bid,
+            callback.from_user.id,
+        ),
+    ).fetchone()
+
+    con.close()
+
+    if not row:
+        await callback.answer(
+            "Заявка не найдена.",
+            show_alert=True,
+        )
+        return
+
+    text = format_booking(row)
+
+    buttons = []
+
+    if row["status"] == "confirmed":
+        buttons.append([
+            InlineKeyboardButton(
+                text="📄 Получить договор",
+                callback_data=f"contract_user:{bid}",
+            )
+        ])
+
+    buttons.append([
+        InlineKeyboardButton(
+            text="◀️ Мои заявки",
+            callback_data="mybookings",
+        )
+    ])
+
+    await callback.message.answer(
+        text,
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=buttons
+        ),
+    )
+
+    await callback.answer()
+
+
+# ============================================================
+# УСЛОВИЯ
+# ============================================================
+
 async def terms(callback: CallbackQuery):
     await callback.message.answer(
-        "ℹ️ <b>Условия</b>\n\n"
+        "ℹ️ <b>Условия аренды</b>\n\n"
         "• Бронирование оформляется после "
         "подтверждения заявки.\n"
         "• Цена рассчитывается автоматически "
@@ -1680,9 +1572,653 @@ async def terms(callback: CallbackQuery):
     await callback.answer()
 
 
-# =========================================================
-# ADMIN — CONFIRM / REJECT
-# =========================================================
+# ============================================================
+# АДМИН-ПАНЕЛЬ
+# ============================================================
+
+async def admin_panel(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+
+    cleanup_pending()
+
+    await message.answer(
+        "👨‍💼 <b>Админ-панель Balticar</b>\n\n"
+        "Выберите раздел:",
+        reply_markup=admin_panel_keyboard(),
+    )
+
+
+async def admin_back(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer(
+            "Нет доступа.",
+            show_alert=True,
+        )
+        return
+
+    await callback.message.edit_text(
+        "👨‍💼 <b>Админ-панель Balticar</b>\n\n"
+        "Выберите раздел:",
+        reply_markup=admin_panel_keyboard(),
+    )
+
+    await callback.answer()
+
+
+# ============================================================
+# НОВЫЕ ЗАЯВКИ
+# ============================================================
+
+async def admin_new_bookings(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer(
+            "Нет доступа.",
+            show_alert=True,
+        )
+        return
+
+    cleanup_pending()
+
+    con = db()
+
+    rows = con.execute(
+        """
+        SELECT *
+        FROM bookings
+        WHERE status = 'pending'
+        ORDER BY id ASC
+        """
+    ).fetchall()
+
+    con.close()
+
+    if not rows:
+        await callback.message.edit_text(
+            "🔔 <b>Новые заявки</b>\n\n"
+            "Новых заявок нет.",
+            reply_markup=admin_back_keyboard(),
+        )
+
+        await callback.answer()
+        return
+
+    buttons = []
+
+    for row in rows:
+        buttons.append([
+            InlineKeyboardButton(
+                text=(
+                    f"🟡 №{row['id']} — "
+                    f"{CARS[row['car_id']]['name']}"
+                ),
+                callback_data=f"adminbooking:{row['id']}",
+            )
+        ])
+
+    buttons.append([
+        InlineKeyboardButton(
+            text="◀️ В админ-панель",
+            callback_data="admin:back",
+        )
+    ])
+
+    await callback.message.edit_text(
+        f"🔔 <b>Новые заявки</b>\n\n"
+        f"Ожидают подтверждения: <b>{len(rows)}</b>\n\n"
+        "Выберите заявку:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=buttons
+        ),
+    )
+
+    await callback.answer()
+
+
+async def admin_booking_detail(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer(
+            "Нет доступа.",
+            show_alert=True,
+        )
+        return
+
+    bid = int(callback.data.split(":", 1)[1])
+
+    cleanup_pending()
+
+    con = db()
+
+    row = con.execute(
+        """
+        SELECT *
+        FROM bookings
+        WHERE id = ?
+        """,
+        (bid,),
+    ).fetchone()
+
+    con.close()
+
+    if not row:
+        await callback.answer(
+            "Заявка не найдена.",
+            show_alert=True,
+        )
+        return
+
+    keyboard = []
+
+    if row["status"] == "pending":
+        keyboard.append([
+            InlineKeyboardButton(
+                text="✅ Подтвердить",
+                callback_data=f"confirm:{bid}",
+            ),
+            InlineKeyboardButton(
+                text="❌ Отклонить",
+                callback_data=f"reject:{bid}",
+            ),
+        ])
+
+    if row["status"] == "confirmed":
+        keyboard.append([
+            InlineKeyboardButton(
+                text="📄 Договор",
+                callback_data=f"contract:{bid}",
+            )
+        ])
+
+    keyboard.append([
+        InlineKeyboardButton(
+            text="◀️ К заявкам",
+            callback_data="admin:new",
+        )
+    ])
+
+    await callback.message.edit_text(
+        format_booking(row),
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=keyboard
+        ),
+    )
+
+    await callback.answer()
+
+
+# ============================================================
+# ВСЕ БРОНИРОВАНИЯ
+# ============================================================
+
+def admin_booking_filter_keyboard():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🟡 Ожидают",
+                    callback_data="adminfilter:pending",
+                ),
+                InlineKeyboardButton(
+                    text="✅ Подтверждены",
+                    callback_data="adminfilter:confirmed",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Отклонены",
+                    callback_data="adminfilter:rejected",
+                ),
+                InlineKeyboardButton(
+                    text="⌛ Истекли",
+                    callback_data="adminfilter:expired",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📋 Все",
+                    callback_data="adminfilter:all",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="◀️ В админ-панель",
+                    callback_data="admin:back",
+                )
+            ],
+        ]
+    )
+
+
+async def admin_bookings(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer(
+            "Нет доступа.",
+            show_alert=True,
+        )
+        return
+
+    await callback.message.edit_text(
+        "📋 <b>Все бронирования</b>\n\n"
+        "Выберите фильтр:",
+        reply_markup=admin_booking_filter_keyboard(),
+    )
+
+    await callback.answer()
+
+
+async def admin_filter(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer(
+            "Нет доступа.",
+            show_alert=True,
+        )
+        return
+
+    status = callback.data.split(":", 1)[1]
+
+    cleanup_pending()
+
+    con = db()
+
+    if status == "all":
+        rows = con.execute(
+            """
+            SELECT *
+            FROM bookings
+            ORDER BY id DESC
+            LIMIT 100
+            """
+        ).fetchall()
+
+        title = "📋 Все бронирования"
+
+    else:
+        rows = con.execute(
+            """
+            SELECT *
+            FROM bookings
+            WHERE status = ?
+            ORDER BY id DESC
+            LIMIT 100
+            """,
+            (status,),
+        ).fetchall()
+
+        title = (
+            f"{booking_status_text(status)}"
+        )
+
+    con.close()
+
+    if not rows:
+        await callback.message.edit_text(
+            f"<b>{title}</b>\n\n"
+            "Заявок нет.",
+            reply_markup=admin_booking_filter_keyboard(),
+        )
+
+        await callback.answer()
+        return
+
+    buttons = []
+
+    for row in rows:
+        start_d = date.fromisoformat(
+            row["start_date"]
+        )
+
+        status_icon = {
+            "pending": "🟡",
+            "confirmed": "✅",
+            "rejected": "❌",
+            "expired": "⌛",
+        }.get(row["status"], "📋")
+
+        buttons.append([
+            InlineKeyboardButton(
+                text=(
+                    f"{status_icon} №{row['id']} "
+                    f"{CARS[row['car_id']]['name']} "
+                    f"{start_d.strftime('%d.%m')}"
+                ),
+                callback_data=f"adminbooking:{row['id']}",
+            )
+        ])
+
+    buttons.append([
+        InlineKeyboardButton(
+            text="◀️ Фильтры",
+            callback_data="admin:bookings",
+        )
+    ])
+
+    await callback.message.edit_text(
+        f"<b>{title}</b>\n\n"
+        f"Количество: <b>{len(rows)}</b>",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=buttons
+        ),
+    )
+
+    await callback.answer()
+
+
+# ============================================================
+# АДМИН: АВТОМОБИЛИ
+# ============================================================
+
+def admin_cars_keyboard():
+    rows = []
+
+    for cid, car in CARS.items():
+        enabled = is_car_enabled(cid)
+
+        icon = "🟢" if enabled else "🔴"
+
+        rows.append([
+            InlineKeyboardButton(
+                text=f"{icon} {car['name']}",
+                callback_data=f"admincarinfo:{cid}",
+            )
+        ])
+
+    rows.append([
+        InlineKeyboardButton(
+            text="◀️ В админ-панель",
+            callback_data="admin:back",
+        )
+    ])
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=rows
+    )
+
+
+async def admin_cars(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer(
+            "Нет доступа.",
+            show_alert=True,
+        )
+        return
+
+    await callback.message.edit_text(
+        "🚗 <b>Автомобили</b>\n\n"
+        "🟢 автомобиль доступен клиентам\n"
+        "🔴 автомобиль временно отключён\n\n"
+        "Выберите автомобиль:",
+        reply_markup=admin_cars_keyboard(),
+    )
+
+    await callback.answer()
+
+
+async def admin_car_info(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer(
+            "Нет доступа.",
+            show_alert=True,
+        )
+        return
+
+    cid = callback.data.split(":", 1)[1]
+
+    if cid not in CARS:
+        await callback.answer(
+            "Автомобиль не найден.",
+            show_alert=True,
+        )
+        return
+
+    enabled = is_car_enabled(cid)
+
+    toggle_text = (
+        "🔴 Отключить автомобиль"
+        if enabled
+        else "🟢 Включить автомобиль"
+    )
+
+    await callback.message.edit_text(
+        f"🚗 <b>{CARS[cid]['name']}</b>\n\n"
+        f"⚙️ {CARS[cid]['gear']}\n\n"
+        f"💰 1–3 суток: "
+        f"{money(CARS[cid]['rates'][0])}/сутки\n"
+        f"💰 4–6 суток: "
+        f"{money(CARS[cid]['rates'][1])}/сутки\n"
+        f"💰 7+ суток: "
+        f"{money(CARS[cid]['rates'][2])}/сутки\n\n"
+        f"Статус: "
+        f"{'🟢 доступен' if enabled else '🔴 отключён'}",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text=toggle_text,
+                        callback_data=f"cartoggle:{cid}",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="📅 Календарь",
+                        callback_data=f"admincar:{cid}",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="◀️ К автомобилям",
+                        callback_data="admin:cars",
+                    )
+                ],
+            ]
+        ),
+    )
+
+    await callback.answer()
+
+
+async def admin_car_toggle(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer(
+            "Нет доступа.",
+            show_alert=True,
+        )
+        return
+
+    cid = callback.data.split(":", 1)[1]
+
+    current = is_car_enabled(cid)
+
+    set_car_enabled(
+        cid,
+        not current,
+    )
+
+    await callback.answer(
+        "Автомобиль включён."
+        if not current
+        else "Автомобиль отключён."
+    )
+
+    await admin_car_info(
+        callback
+    )
+
+
+# ============================================================
+# АДМИН: КАЛЕНДАРЬ
+# ============================================================
+
+async def admin_calendar(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer(
+            "Нет доступа.",
+            show_alert=True,
+        )
+        return
+
+    rows = []
+
+    for cid, car in CARS.items():
+        status = (
+            "🟢"
+            if is_car_enabled(cid)
+            else "🔴"
+        )
+
+        rows.append([
+            InlineKeyboardButton(
+                text=f"{status} {car['name']}",
+                callback_data=f"admincar:{cid}",
+            )
+        ])
+
+    rows.append([
+        InlineKeyboardButton(
+            text="◀️ Назад",
+            callback_data="admin:back",
+        )
+    ])
+
+    await callback.message.edit_text(
+        "📅 <b>Календарь занятости</b>\n\n"
+        "Выберите автомобиль:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=rows
+        ),
+    )
+
+    await callback.answer()
+
+
+async def admin_car_calendar(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer(
+            "Нет доступа.",
+            show_alert=True,
+        )
+        return
+
+    cid = callback.data.split(":", 1)[1]
+
+    today = datetime.now(TZ).date()
+
+    await callback.message.edit_text(
+        f"📅 <b>Календарь занятости</b>\n\n"
+        f"🚗 <b>{CARS[cid]['name']}</b>\n\n"
+        "🟢 свободно\n"
+        "🟡 ожидает подтверждения\n"
+        "🔴 подтверждено\n"
+        "⚪ прошедшая дата",
+        reply_markup=admin_busy_calendar_keyboard(
+            cid,
+            today.year,
+            today.month,
+        ),
+    )
+
+    await callback.answer()
+
+
+async def admin_month(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer(
+            "Нет доступа.",
+            show_alert=True,
+        )
+        return
+
+    _, car_id, iso = callback.data.split(":")
+
+    d = date.fromisoformat(iso)
+
+    await callback.message.edit_reply_markup(
+        reply_markup=admin_busy_calendar_keyboard(
+            car_id,
+            d.year,
+            d.month,
+        )
+    )
+
+    await callback.answer()
+
+
+async def admin_day(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer(
+            "Нет доступа.",
+            show_alert=True,
+        )
+        return
+
+    _, car_id, iso = callback.data.split(":")
+
+    selected = date.fromisoformat(iso)
+
+    cleanup_pending()
+
+    con = db()
+
+    rows = con.execute(
+        """
+        SELECT *
+        FROM bookings
+        WHERE car_id = ?
+          AND status IN ('pending', 'confirmed')
+          AND date(start_date) <= date(?)
+          AND date(end_date) > date(?)
+        ORDER BY
+            CASE status
+                WHEN 'confirmed' THEN 1
+                WHEN 'pending' THEN 2
+                ELSE 3
+            END,
+            id DESC
+        """,
+        (
+            car_id,
+            selected.isoformat(),
+            selected.isoformat(),
+        ),
+    ).fetchall()
+
+    con.close()
+
+    if not rows:
+        await callback.answer(
+            "В этот день бронирований нет.",
+            show_alert=True,
+        )
+        return
+
+    for row in rows:
+        keyboard = []
+
+        if row["status"] == "pending":
+            keyboard.append([
+                InlineKeyboardButton(
+                    text="✅ Подтвердить",
+                    callback_data=f"confirm:{row['id']}",
+                ),
+                InlineKeyboardButton(
+                    text="❌ Отклонить",
+                    callback_data=f"reject:{row['id']}",
+                ),
+            ])
+
+        await callback.message.answer(
+            format_booking(row),
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=keyboard
+            ) if keyboard else None,
+        )
+
+    await callback.answer()
+
+
+# ============================================================
+# ПОДТВЕРЖДЕНИЕ / ОТКЛОНЕНИЕ
+# ============================================================
 
 async def admin_action(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -1716,21 +2252,16 @@ async def admin_action(callback: CallbackQuery):
             "Заявка не найдена.",
             show_alert=True,
         )
-
         return
 
     if row["status"] != "pending":
-        current_status = status_text(
-            row["status"]
-        )
-
         con.close()
 
         await callback.answer(
-            f"Заявка уже обработана: {current_status}",
+            f"Заявка уже имеет статус: "
+            f"{booking_status_text(row['status'])}",
             show_alert=True,
         )
-
         return
 
     if action == "confirm":
@@ -1742,7 +2273,7 @@ async def admin_action(callback: CallbackQuery):
             row["end_date"]
         )
 
-        others = con.execute(
+        conflict = con.execute(
             """
             SELECT id
             FROM bookings
@@ -1756,12 +2287,12 @@ async def admin_action(callback: CallbackQuery):
             (
                 row["car_id"],
                 bid,
-                row["end_date"],
-                row["start_date"],
+                end_d.isoformat(),
+                start_d.isoformat(),
             ),
         ).fetchone()
 
-        if others:
+        if conflict:
             con.execute(
                 """
                 UPDATE bookings
@@ -1774,18 +2305,32 @@ async def admin_action(callback: CallbackQuery):
             con.commit()
             con.close()
 
+            try:
+                await callback.bot.send_message(
+                    row["user_id"],
+                    f"❌ <b>Заявка №{bid} отклонена</b>\n\n"
+                    "К сожалению, выбранные даты "
+                    "уже заняты.",
+                )
+            except Exception:
+                pass
+
             await callback.message.edit_reply_markup(
                 reply_markup=None
             )
 
-            await callback.bot.send_message(
-                row["user_id"],
-                f"❌ Заявка №{bid} отклонена:\n\n"
-                "выбранные даты уже заняты.",
-            )
-
             await callback.answer(
                 "Даты уже заняты.",
+                show_alert=True,
+            )
+
+            return
+
+        if not is_car_enabled(row["car_id"]):
+            con.close()
+
+            await callback.answer(
+                "Автомобиль сейчас отключён.",
                 show_alert=True,
             )
 
@@ -1804,18 +2349,28 @@ async def admin_action(callback: CallbackQuery):
         con.commit()
         con.close()
 
+        start_text = datetime.fromisoformat(
+            row["start_date"]
+        ).strftime("%d.%m.%Y")
+
+        end_text = datetime.fromisoformat(
+            row["end_date"]
+        ).strftime("%d.%m.%Y")
+
+        try:
+            await callback.bot.send_message(
+                row["user_id"],
+                f"✅ <b>Заявка №{bid} подтверждена!</b>\n\n"
+                f"🚗 {CARS[row['car_id']]['name']}\n"
+                f"📅 {start_text} — {end_text}\n"
+                f"💰 {money(row['total'])}\n\n"
+                "Спасибо за бронирование!",
+            )
+        except Exception:
+            pass
+
         await callback.message.edit_reply_markup(
             reply_markup=None
-        )
-
-        await callback.bot.send_message(
-            row["user_id"],
-            f"✅ <b>Заявка №{bid} подтверждена!</b>\n\n"
-            f"🚗 {CARS[row['car_id']]['name']}\n"
-            f"📅 "
-            f"{start_d.strftime('%d.%m.%Y')} — "
-            f"{end_d.strftime('%d.%m.%Y')}\n"
-            f"💰 {money(row['total'])}",
         )
 
         await callback.answer(
@@ -1835,13 +2390,18 @@ async def admin_action(callback: CallbackQuery):
         con.commit()
         con.close()
 
+        try:
+            await callback.bot.send_message(
+                row["user_id"],
+                f"❌ <b>Заявка №{bid} отклонена.</b>\n\n"
+                "Если хотите, вы можете выбрать "
+                "другой автомобиль или даты.",
+            )
+        except Exception:
+            pass
+
         await callback.message.edit_reply_markup(
             reply_markup=None
-        )
-
-        await callback.bot.send_message(
-            row["user_id"],
-            f"❌ Заявка №{bid} отклонена.",
         )
 
         await callback.answer(
@@ -1849,21 +2409,314 @@ async def admin_action(callback: CallbackQuery):
         )
 
 
-# =========================================================
-# PUBLISH
-# =========================================================
+# ============================================================
+# ДОГОВОР PDF
+# ============================================================
+
+def create_contract_pdf(row):
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.pdfgen import canvas
+    except ImportError:
+        return None
+
+    contracts_dir = Path("contracts")
+    contracts_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    font_regular = None
+    font_bold = None
+
+    possible_fonts = [
+        (
+            "/usr/share/fonts/truetype/dejavu/"
+            "DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/dejavu/"
+            "DejaVuSans-Bold.ttf",
+        ),
+        (
+            "/usr/share/fonts/dejavu/"
+            "DejaVuSans.ttf",
+            "/usr/share/fonts/dejavu/"
+            "DejaVuSans-Bold.ttf",
+        ),
+    ]
+
+    for regular, bold in possible_fonts:
+        if (
+            Path(regular).exists()
+            and Path(bold).exists()
+        ):
+            font_regular = regular
+            font_bold = bold
+            break
+
+    if font_regular and font_bold:
+        try:
+            pdfmetrics.registerFont(
+                TTFont(
+                    "BalticarRegular",
+                    font_regular,
+                )
+            )
+
+            pdfmetrics.registerFont(
+                TTFont(
+                    "BalticarBold",
+                    font_bold,
+                )
+            )
+
+            regular_name = "BalticarRegular"
+            bold_name = "BalticarBold"
+
+        except Exception:
+            regular_name = "Helvetica"
+            bold_name = "Helvetica-Bold"
+
+    else:
+        regular_name = "Helvetica"
+        bold_name = "Helvetica-Bold"
+
+    path = contracts_dir / (
+        f"contract_{row['id']}.pdf"
+    )
+
+    c = canvas.Canvas(
+        str(path),
+        pagesize=A4,
+    )
+
+    width, height = A4
+
+    y = height - 50
+
+    c.setFont(
+        bold_name,
+        18,
+    )
+
+    c.drawString(
+        50,
+        y,
+        "BALTICAR",
+    )
+
+    y -= 40
+
+    c.setFont(
+        bold_name,
+        14,
+    )
+
+    c.drawString(
+        50,
+        y,
+        "Договор аренды автомобиля",
+    )
+
+    y -= 40
+
+    c.setFont(
+        regular_name,
+        10,
+    )
+
+    start_d = date.fromisoformat(
+        row["start_date"]
+    )
+
+    end_d = date.fromisoformat(
+        row["end_date"]
+    )
+
+    lines = [
+        f"Номер бронирования: №{row['id']}",
+        "",
+        f"Арендатор: {row['name']}",
+        f"Телефон: {row['phone']}",
+        "",
+        f"Автомобиль: {CARS[row['car_id']]['name']}",
+        f"Коробка передач: {CARS[row['car_id']]['gear']}",
+        "",
+        (
+            "Срок аренды: "
+            f"{start_d.strftime('%d.%m.%Y')} — "
+            f"{end_d.strftime('%d.%m.%Y')}"
+        ),
+        (
+            "Количество суток: "
+            f"{(end_d - start_d).days}"
+        ),
+        f"Стоимость аренды: {money(row['total'])}",
+        "",
+        "Условия:",
+        "1. Автомобиль передаётся арендатору "
+        "в исправном состоянии.",
+        "2. Арендатор обязан бережно относиться "
+        "к автомобилю.",
+        "3. Дата и время получения и возврата "
+        "согласовываются с менеджером.",
+        "4. Дополнительные условия согласуются "
+        "сторонами отдельно.",
+        "",
+        "Арендодатель: Balticar",
+        "",
+        "Подпись арендатора: ____________________",
+        "",
+        "Подпись арендодателя: __________________",
+    ]
+
+    for line in lines:
+        if y < 50:
+            c.showPage()
+            y = height - 50
+            c.setFont(
+                regular_name,
+                10,
+            )
+
+        c.drawString(
+            50,
+            y,
+            line[:110],
+        )
+
+        y -= 18
+
+    c.save()
+
+    return path
+
+
+async def send_contract(
+    callback: CallbackQuery,
+    row,
+):
+    path = create_contract_pdf(row)
+
+    if path is None:
+        await callback.answer(
+            "Для PDF договора не установлен reportlab.",
+            show_alert=True,
+        )
+        return
+
+    await callback.message.answer_document(
+        FSInputFile(path),
+        caption=(
+            f"📄 Договор по бронированию "
+            f"№{row['id']}"
+        ),
+    )
+
+    await callback.answer()
+
+
+async def contract_admin(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer(
+            "Нет доступа.",
+            show_alert=True,
+        )
+        return
+
+    bid = int(callback.data.split(":", 1)[1])
+
+    con = db()
+
+    row = con.execute(
+        """
+        SELECT *
+        FROM bookings
+        WHERE id = ?
+          AND status = 'confirmed'
+        """,
+        (bid,),
+    ).fetchone()
+
+    con.close()
+
+    if not row:
+        await callback.answer(
+            "Подтверждённая заявка не найдена.",
+            show_alert=True,
+        )
+        return
+
+    await send_contract(
+        callback,
+        row,
+    )
+
+
+async def contract_user(callback: CallbackQuery):
+    bid = int(
+        callback.data.split(":", 1)[1]
+    )
+
+    con = db()
+
+    row = con.execute(
+        """
+        SELECT *
+        FROM bookings
+        WHERE id = ?
+          AND user_id = ?
+          AND status = 'confirmed'
+        """,
+        (
+            bid,
+            callback.from_user.id,
+        ),
+    ).fetchone()
+
+    con.close()
+
+    if not row:
+        await callback.answer(
+            "Договор недоступен.",
+            show_alert=True,
+        )
+        return
+
+    await send_contract(
+        callback,
+        row,
+    )
+
+
+# ============================================================
+# ОПЛАТА — ЗАГОТОВКА
+# ============================================================
+
+async def payment_placeholder(callback: CallbackQuery):
+    await callback.answer(
+        "Оплата пока не подключена.",
+        show_alert=True,
+    )
+
+
+# ============================================================
+# ПУБЛИКАЦИЯ В КАНАЛ
+# ============================================================
 
 async def publish(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
 
+    me = await message.bot.me()
+
     text = (
         "🚗 <b>Balticar — аренда автомобилей</b>\n\n"
-        "Выберите автомобиль, посмотрите стоимость "
-        "и забронируйте его прямо в Telegram."
+        "Выберите автомобиль, "
+        "посмотрите стоимость и "
+        "забронируйте его прямо в Telegram."
     )
-
-    me = await message.bot.me()
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -1883,13 +2736,14 @@ async def publish(message: Message):
     )
 
     await message.answer(
-        "Готово: пост с кнопкой опубликован в канале."
+        "Готово: пост с кнопкой опубликован "
+        "в канале."
     )
 
 
-# =========================================================
-# MAIN
-# =========================================================
+# ============================================================
+# ГЛАВНАЯ ФУНКЦИЯ
+# ============================================================
 
 async def main():
     if not BOT_TOKEN:
@@ -1908,9 +2762,9 @@ async def main():
 
     dp = Dispatcher()
 
-    # -----------------------------------------------------
+    # --------------------------------------------------------
     # COMMANDS
-    # -----------------------------------------------------
+    # --------------------------------------------------------
 
     dp.message.register(
         start_handler,
@@ -1932,9 +2786,9 @@ async def main():
         Command("admin"),
     )
 
-    # -----------------------------------------------------
-    # USER CALLBACKS
-    # -----------------------------------------------------
+    # --------------------------------------------------------
+    # CLIENT
+    # --------------------------------------------------------
 
     dp.callback_query.register(
         catalog,
@@ -1977,13 +2831,28 @@ async def main():
     )
 
     dp.callback_query.register(
+        mybooking_detail,
+        F.data.startswith("mybooking:"),
+    )
+
+    dp.callback_query.register(
         terms,
         F.data == "terms",
     )
 
-    # -----------------------------------------------------
-    # ADMIN CALLBACKS
-    # -----------------------------------------------------
+    dp.callback_query.register(
+        contract_user,
+        F.data.startswith("contract_user:"),
+    )
+
+    dp.callback_query.register(
+        payment_placeholder,
+        F.data.startswith("payment:"),
+    )
+
+    # --------------------------------------------------------
+    # ADMIN
+    # --------------------------------------------------------
 
     dp.callback_query.register(
         admin_back,
@@ -1996,13 +2865,13 @@ async def main():
     )
 
     dp.callback_query.register(
-        admin_calendar,
-        F.data == "admin:calendar",
+        admin_bookings,
+        F.data == "admin:bookings",
     )
 
     dp.callback_query.register(
-        admin_all_bookings,
-        F.data == "admin:bookings",
+        admin_filter,
+        F.data.startswith("adminfilter:"),
     )
 
     dp.callback_query.register(
@@ -2011,8 +2880,18 @@ async def main():
     )
 
     dp.callback_query.register(
-        admin_car_detail,
-        F.data.startswith("admincardetail:"),
+        admin_car_info,
+        F.data.startswith("admincarinfo:"),
+    )
+
+    dp.callback_query.register(
+        admin_car_toggle,
+        F.data.startswith("cartoggle:"),
+    )
+
+    dp.callback_query.register(
+        admin_calendar,
+        F.data == "admin:calendar",
     )
 
     dp.callback_query.register(
@@ -2031,6 +2910,11 @@ async def main():
     )
 
     dp.callback_query.register(
+        admin_booking_detail,
+        F.data.startswith("adminbooking:"),
+    )
+
+    dp.callback_query.register(
         admin_action,
         F.data.startswith("confirm:"),
     )
@@ -2041,13 +2925,31 @@ async def main():
     )
 
     dp.callback_query.register(
+        contract_admin,
+        F.data.startswith("contract:"),
+    )
+
+    # --------------------------------------------------------
+    # OTHER
+    # --------------------------------------------------------
+
+    dp.callback_query.register(
+        lambda c: c.message.answer(
+            "🚗 <b>Balticar</b>\n\n"
+            "Выберите действие:",
+            reply_markup=main_keyboard(),
+        ),
+        F.data == "back:main",
+    )
+
+    dp.callback_query.register(
         lambda c: c.answer(),
         F.data == "noop",
     )
 
-    # -----------------------------------------------------
+    # --------------------------------------------------------
     # FSM
-    # -----------------------------------------------------
+    # --------------------------------------------------------
 
     dp.message.register(
         name_handler,
@@ -2064,9 +2966,9 @@ async def main():
         Booking.comment,
     )
 
-    # -----------------------------------------------------
-    # WEBHOOK / POLLING
-    # -----------------------------------------------------
+    # --------------------------------------------------------
+    # WEBHOOK / RENDER
+    # --------------------------------------------------------
 
     external_url = os.getenv(
         "RENDER_EXTERNAL_URL",
@@ -2080,7 +2982,6 @@ async def main():
         )
 
         await dp.start_polling(bot)
-
         return
 
     webhook_url = (
