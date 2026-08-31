@@ -30,17 +30,13 @@ from aiogram.types import (
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0") or 0)
 
 CHANNEL_USERNAME = os.getenv(
     "CHANNEL_USERNAME",
     "@Balticar_kgd"
 )
-
-# ============================================================
-# NEON DATABASE
-# ============================================================
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
@@ -164,7 +160,7 @@ class Booking(StatesGroup):
 
 
 # ============================================================
-# DATABASE — NEON POSTGRESQL
+# DATABASE
 # ============================================================
 
 def db():
@@ -175,14 +171,13 @@ def db():
     return psycopg.connect(
         DATABASE_URL,
         row_factory=dict_row,
-        connect_timeout=15
+        connect_timeout=10
     )
 
 
 def init_db():
     """
-    Создаёт таблицу бронирований в Neon,
-    если её ещё нет.
+    Создаёт таблицу и необходимые индексы.
     """
 
     con = db()
@@ -210,15 +205,33 @@ def init_db():
                 """
             )
 
+            # Основной индекс для поиска занятости автомобиля.
             cur.execute(
                 """
-                CREATE INDEX IF NOT EXISTS idx_bookings_car_dates
+                CREATE INDEX IF NOT EXISTS idx_bookings_car_status_dates
                 ON bookings (
                     car_id,
+                    status,
                     start_date,
-                    end_date,
-                    status
+                    end_date
                 )
+                """
+            )
+
+            # Индекс для поиска заявок пользователя.
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_bookings_user_id
+                ON bookings (user_id, id DESC)
+                """
+            )
+
+            # Индекс для очистки pending.
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_bookings_pending_expiry
+                ON bookings (expires_at)
+                WHERE status = 'pending'
                 """
             )
 
@@ -231,13 +244,16 @@ def init_db():
 def cleanup_pending():
     """
     Освобождает даты истёкших pending-заявок.
+
+    ВАЖНО:
+    Эта функция вызывается только один раз перед загрузкой
+    календаря/списка, а не для каждого дня.
     """
 
     con = db()
 
     try:
         with con.cursor() as cur:
-
             cur.execute(
                 """
                 UPDATE bookings
@@ -254,6 +270,105 @@ def cleanup_pending():
         con.close()
 
 
+# ============================================================
+# БЫСТРАЯ ЗАГРУЗКА ЗАНЯТЫХ ИНТЕРВАЛОВ
+# ============================================================
+
+def get_bookings_for_month(
+    car_id,
+    month_start,
+    month_end
+):
+    """
+    Загружает все pending/confirmed бронирования автомобиля,
+    пересекающиеся с указанным месяцем.
+
+    ВАЖНО:
+    Один запрос вместо отдельного запроса на каждый день.
+    """
+
+    con = db()
+
+    try:
+        with con.cursor() as cur:
+
+            rows = cur.execute(
+                """
+                SELECT
+                    id,
+                    start_date,
+                    end_date,
+                    status
+                FROM bookings
+                WHERE car_id = %s
+                  AND status IN ('pending', 'confirmed')
+                  AND start_date < %s
+                  AND end_date > %s
+                ORDER BY start_date
+                """,
+                (
+                    car_id,
+                    month_end,
+                    month_start
+                )
+            ).fetchall()
+
+            return rows
+
+    finally:
+        con.close()
+
+
+def get_busy_dates_for_month(
+    car_id,
+    month_start,
+    month_end
+):
+    """
+    Возвращает словарь:
+
+        {
+            date: "confirmed",
+            date: "pending"
+        }
+
+    Один SQL-запрос.
+    """
+
+    rows = get_bookings_for_month(
+        car_id,
+        month_start,
+        month_end
+    )
+
+    busy = {}
+
+    for row in rows:
+
+        current = max(
+            row["start_date"],
+            month_start
+        )
+
+        last = min(
+            row["end_date"],
+            month_end
+        )
+
+        while current < last:
+
+            # confirmed имеет приоритет.
+            if (
+                current not in busy
+                or row["status"] == "confirmed"
+            ):
+                busy[current] = row["status"]
+
+            current += timedelta(days=1)
+
+    return busy
+
+
 def booking_overlaps(
     car_id,
     start_d,
@@ -263,16 +378,10 @@ def booking_overlaps(
     """
     Проверяет пересечение бронирований.
 
-    Используется интервал:
+    Интервал:
 
         [start_date, end_date)
 
-    Поэтому:
-
-        01.09 — 05.09
-        05.09 — 10.09
-
-    не пересекаются.
     """
 
     cleanup_pending()
@@ -280,6 +389,7 @@ def booking_overlaps(
     con = db()
 
     try:
+
         query = """
             SELECT id, status
             FROM bookings
@@ -329,28 +439,32 @@ def available(
     exclude_booking_id=None
 ):
     """
-    True — автомобиль свободен.
-    False — есть pending или confirmed бронь.
+    True — свободен.
+    False — занят.
     """
 
     if end_d <= start_d:
         return False
 
-    row = booking_overlaps(
-        car_id,
-        start_d,
-        end_d,
-        exclude_booking_id
+    return (
+        booking_overlaps(
+            car_id,
+            start_d,
+            end_d,
+            exclude_booking_id
+        )
+        is None
     )
 
-    return row is None
-
 
 # ============================================================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# HELPERS
 # ============================================================
 
-def rate_for_days(car_id, days):
+def rate_for_days(
+    car_id,
+    days
+):
 
     rates = CARS[car_id]["rates"]
 
@@ -383,6 +497,10 @@ def status_label(status):
         status
     )
 
+
+# ============================================================
+# CLIENT KEYBOARDS
+# ============================================================
 
 def main_keyboard():
 
@@ -490,6 +608,10 @@ def calendar_keyboard(
     month
 ):
 
+    # --------------------------------------------------------
+    # Только ОДИН cleanup.
+    # --------------------------------------------------------
+
     cleanup_pending()
 
     first = date(
@@ -536,6 +658,16 @@ def calendar_keyboard(
 
     today = datetime.now(TZ).date()
 
+    # --------------------------------------------------------
+    # Загружаем занятость ВСЕГО месяца одним запросом.
+    # --------------------------------------------------------
+
+    busy = get_busy_dates_for_month(
+        car_id,
+        first,
+        next_first
+    )
+
     months = [
         "Январь",
         "Февраль",
@@ -577,7 +709,10 @@ def calendar_keyboard(
         for _ in range(first.weekday())
     ]
 
-    for day_number in range(1, days + 1):
+    for day_number in range(
+        1,
+        days + 1
+    ):
 
         current = date(
             year,
@@ -592,13 +727,19 @@ def calendar_keyboard(
 
         else:
 
-            is_free = available(
-                car_id,
-                current,
-                current + timedelta(days=1)
-            )
+            status = busy.get(current)
 
-            if is_free:
+            if status == "confirmed":
+
+                text = f"🔴{day_number}"
+                callback_data = "noop"
+
+            elif status == "pending":
+
+                text = f"🟡{day_number}"
+                callback_data = "noop"
+
+            else:
 
                 text = f"🟢{day_number}"
 
@@ -607,11 +748,6 @@ def calendar_keyboard(
                     f"{car_id}:"
                     f"{current.isoformat()}"
                 )
-
-            else:
-
-                text = f"🔴{day_number}"
-                callback_data = "noop"
 
         week.append(
             InlineKeyboardButton(
@@ -732,6 +868,16 @@ def end_calendar_keyboard(
         next_first - first
     ).days
 
+    # --------------------------------------------------------
+    # Один запрос вместо запроса на каждый день.
+    # --------------------------------------------------------
+
+    busy = get_busy_dates_for_month(
+        car_id,
+        start_d,
+        next_first
+    )
+
     months = [
         "Январь",
         "Февраль",
@@ -773,7 +919,10 @@ def end_calendar_keyboard(
         for _ in range(first.weekday())
     ]
 
-    for day_number in range(1, days + 1):
+    for day_number in range(
+        1,
+        days + 1
+    ):
 
         current = date(
             year,
@@ -788,13 +937,27 @@ def end_calendar_keyboard(
 
         else:
 
-            is_free = available(
-                car_id,
-                start_d,
-                current
-            )
+            # Если хотя бы один день интервала
+            # занят, дата возврата недоступна.
+            has_overlap = False
 
-            if is_free:
+            check = start_d
+
+            while check < current:
+
+                if check in busy:
+
+                    has_overlap = True
+                    break
+
+                check += timedelta(days=1)
+
+            if has_overlap:
+
+                text = f"🔴{day_number}"
+                callback_data = "noop"
+
+            else:
 
                 text = f"🟢{day_number}"
 
@@ -803,11 +966,6 @@ def end_calendar_keyboard(
                     f"{car_id}:"
                     f"{current.isoformat()}"
                 )
-
-            else:
-
-                text = f"🔴{day_number}"
-                callback_data = "noop"
 
         week.append(
             InlineKeyboardButton(
@@ -876,7 +1034,7 @@ def end_calendar_keyboard(
 
 
 # ============================================================
-# АДМИН-КЛАВИАТУРЫ
+# ADMIN KEYBOARDS
 # ============================================================
 
 def admin_buttons(bid):
@@ -944,7 +1102,7 @@ def admin_back_keyboard():
 
 
 # ============================================================
-# АДМИН-КАЛЕНДАРЬ
+# ADMIN CALENDAR
 # ============================================================
 
 def admin_busy_calendar_keyboard(
@@ -999,6 +1157,16 @@ def admin_busy_calendar_keyboard(
 
     today = datetime.now(TZ).date()
 
+    # --------------------------------------------------------
+    # ОДИН запрос на весь месяц.
+    # --------------------------------------------------------
+
+    busy = get_busy_dates_for_month(
+        car_id,
+        first,
+        next_first
+    )
+
     months = [
         "Январь",
         "Февраль",
@@ -1040,7 +1208,10 @@ def admin_busy_calendar_keyboard(
         for _ in range(first.weekday())
     ]
 
-    for n in range(1, days + 1):
+    for n in range(
+        1,
+        days + 1
+    ):
 
         current = date(
             year,
@@ -1048,89 +1219,44 @@ def admin_busy_calendar_keyboard(
             n
         )
 
-        status = (
-            "past"
-            if current < today
-            else "free"
-        )
-
-        if status != "past":
-
-            con = db()
-
-            try:
-
-                with con.cursor() as cur:
-
-                    confirmed = cur.execute(
-                        """
-                        SELECT id
-                        FROM bookings
-                        WHERE car_id=%s
-                          AND status='confirmed'
-                          AND start_date<=%s
-                          AND end_date>%s
-                        LIMIT 1
-                        """,
-                        (
-                            car_id,
-                            current,
-                            current
-                        )
-                    ).fetchone()
-
-                    pending = cur.execute(
-                        """
-                        SELECT id
-                        FROM bookings
-                        WHERE car_id=%s
-                          AND status='pending'
-                          AND start_date<=%s
-                          AND end_date>%s
-                        LIMIT 1
-                        """,
-                        (
-                            car_id,
-                            current,
-                            current
-                        )
-                    ).fetchone()
-
-            finally:
-
-                con.close()
-
-            if confirmed:
-
-                status = "confirmed"
-
-            elif pending:
-
-                status = "pending"
-
-        if status == "confirmed":
-
-            text = f"🔴{n}"
-
-        elif status == "pending":
-
-            text = f"🟡{n}"
-
-        elif status == "past":
+        if current < today:
 
             text = "⚪"
+            callback_data = "noop"
 
         else:
 
-            text = f"🟢{n}"
+            status = busy.get(current)
 
-        callback_data = (
-            f"adminday:"
-            f"{car_id}:"
-            f"{current.isoformat()}"
-            if status != "past"
-            else "noop"
-        )
+            if status == "confirmed":
+
+                text = f"🔴{n}"
+
+                callback_data = (
+                    f"adminday:"
+                    f"{car_id}:"
+                    f"{current.isoformat()}"
+                )
+
+            elif status == "pending":
+
+                text = f"🟡{n}"
+
+                callback_data = (
+                    f"adminday:"
+                    f"{car_id}:"
+                    f"{current.isoformat()}"
+                )
+
+            else:
+
+                text = f"🟢{n}"
+
+                callback_data = (
+                    f"adminday:"
+                    f"{car_id}:"
+                    f"{current.isoformat()}"
+                )
 
         week.append(
             InlineKeyboardButton(
@@ -1197,7 +1323,7 @@ def admin_busy_calendar_keyboard(
 
 
 # ============================================================
-# ТЕКСТ АВТОМОБИЛЯ
+# CAR TEXT
 # ============================================================
 
 def car_text(cid):
@@ -1244,7 +1370,7 @@ async def send_car(
 
 
 # ============================================================
-# CLIENT
+# CLIENT START
 # ============================================================
 
 async def start_handler(
@@ -1350,12 +1476,11 @@ async def pick_dates(
 
     today = datetime.now(TZ).date()
 
-    cleanup_pending()
-
     await callback.message.answer(
         f"📅 <b>{CARS[cid]['name']}</b>\n\n"
         "Выберите дату получения.\n\n"
         "🟢 свободно   "
+        "🟡 ожидает   "
         "🔴 занято   "
         "⚪ недоступно",
         reply_markup=calendar_keyboard(
@@ -1473,9 +1598,13 @@ async def endmonth(
         callback.data.split(":")
     )
 
-    start_d = date.fromisoformat(start_iso)
+    start_d = date.fromisoformat(
+        start_iso
+    )
 
-    d = date.fromisoformat(iso)
+    d = date.fromisoformat(
+        iso
+    )
 
     await callback.message.edit_reply_markup(
         reply_markup=end_calendar_keyboard(
@@ -1565,7 +1694,10 @@ async def end_day(
 
     total = (
         days
-        * rate_for_days(cid, days)
+        * rate_for_days(
+            cid,
+            days
+        )
     )
 
     await state.update_data(
@@ -1718,7 +1850,7 @@ async def comment_handler(
     created_at = datetime.now(TZ)
 
     # ========================================================
-    # АТОМАРНАЯ БРОНЬ В NEON
+    # АТОМАРНАЯ БРОНЬ
     # ========================================================
 
     con = db()
@@ -1727,11 +1859,7 @@ async def comment_handler(
 
         with con.cursor() as cur:
 
-            # Блокируем общий ресурс бронирований.
-            #
-            # Это важно: два клиента не смогут одновременно
-            # создать бронь одного автомобиля на одни даты.
-
+            # Один глобальный lock для операций бронирования.
             cur.execute(
                 """
                 SELECT pg_advisory_xact_lock(
@@ -1740,8 +1868,7 @@ async def comment_handler(
                 """
             )
 
-            # Освобождаем истёкшие заявки.
-
+            # Освобождаем истёкшие pending.
             cur.execute(
                 """
                 UPDATE bookings
@@ -1753,7 +1880,6 @@ async def comment_handler(
             )
 
             # Проверяем пересечение.
-
             overlap = cur.execute(
                 """
                 SELECT id, status
@@ -1788,7 +1914,6 @@ async def comment_handler(
                 return
 
             # Создаём бронь.
-
             row = cur.execute(
                 """
                 INSERT INTO bookings (
@@ -1843,7 +1968,7 @@ async def comment_handler(
     await state.clear()
 
     # ========================================================
-    # КЛИЕНТ
+    # CLIENT
     # ========================================================
 
     await message.answer(
@@ -1861,7 +1986,7 @@ async def comment_handler(
     )
 
     # ========================================================
-    # АДМИН
+    # ADMIN
     # ========================================================
 
     if ADMIN_ID:
@@ -1897,7 +2022,7 @@ async def comment_handler(
 
 
 # ============================================================
-# МОИ ЗАЯВКИ
+# MY BOOKINGS
 # ============================================================
 
 async def mybookings(
@@ -1986,7 +2111,7 @@ async def mybookings(
 
 
 # ============================================================
-# УСЛОВИЯ
+# TERMS
 # ============================================================
 
 async def terms(
@@ -2680,13 +2805,9 @@ async def admin_action(
 
     try:
 
-        # ====================================================
-        # ВАЖНО:
-        # подтверждение тоже блокируется через advisory lock.
-        # ====================================================
-
         with con.cursor() as cur:
 
+            # Блокировка операций бронирования.
             cur.execute(
                 """
                 SELECT pg_advisory_xact_lock(
@@ -2695,8 +2816,7 @@ async def admin_action(
                 """
             )
 
-            # Освобождаем истёкшие заявки.
-
+            # Удаляем просроченные удержания.
             cur.execute(
                 """
                 UPDATE bookings
@@ -2921,9 +3041,9 @@ async def main():
             "BOT_TOKEN не задан в Environment Variables."
         )
 
-    # ========================================================
-    # NEON
-    # ========================================================
+    # --------------------------------------------------------
+    # DATABASE
+    # --------------------------------------------------------
 
     init_db()
 
@@ -2931,9 +3051,9 @@ async def main():
         "Neon PostgreSQL connected successfully."
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # BOT
-    # ========================================================
+    # --------------------------------------------------------
 
     bot = Bot(
         BOT_TOKEN,
