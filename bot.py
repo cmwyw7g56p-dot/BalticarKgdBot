@@ -87,30 +87,27 @@ WEBHOOK_SECRET = os.getenv(
 # ВРЕМЯ АРЕНДЫ
 # ============================================================
 
+# Получение и возврат:
+#
+# 08:00–20:00
+#
+# Время выбирается с шагом 1 час.
+
 PICKUP_START_HOUR = int(
     os.getenv(
         "PICKUP_START_HOUR",
-        "9"
+        "8"
     )
 )
 
 PICKUP_END_HOUR = int(
     os.getenv(
         "PICKUP_END_HOUR",
-        "21"
+        "20"
     )
 )
 
 # Технический промежуток между арендами.
-#
-# Например:
-#
-# возврат:       06.09 17:00
-# BUFFER_HOURS:  2
-# следующая:     не раньше 06.09 19:00
-#
-# Если поставить 0:
-# следующая аренда может начинаться сразу после возврата.
 
 BUFFER_HOURS = int(
     os.getenv(
@@ -218,21 +215,12 @@ def db():
 def init_db():
     """
     Создание таблицы и миграция старой структуры.
-
-    Старые записи:
-        start_date / end_date
-
-    Новые записи:
-        start_at / end_at
-
-    Для старых записей:
-        получение 10:00
-        возврат 17:00
     """
 
     con = db()
 
     try:
+
         with con.cursor() as cur:
 
             cur.execute(
@@ -319,6 +307,7 @@ def init_db():
         con.commit()
 
     finally:
+
         con.close()
 
 
@@ -351,6 +340,24 @@ def cleanup_pending():
 
 
 # ============================================================
+# ASYNC DATABASE HELPERS
+# ============================================================
+
+async def async_cleanup_pending():
+    """
+    Выполняет синхронный PostgreSQL-код
+    в отдельном потоке.
+
+    Это важно для aiogram:
+    event loop не блокируется ожиданием Neon.
+    """
+
+    await asyncio.to_thread(
+        cleanup_pending
+    )
+
+
+# ============================================================
 # DATETIME HELPERS
 # ============================================================
 
@@ -366,10 +373,12 @@ def local_dt(
 
 
 def ensure_tz(dt):
+
     if dt is None:
         return None
 
     if dt.tzinfo is None:
+
         return dt.replace(
             tzinfo=TZ
         )
@@ -378,6 +387,7 @@ def ensure_tz(dt):
 
 
 def format_dt(dt):
+
     if dt is None:
         return "—"
 
@@ -442,15 +452,6 @@ def booking_overlaps(
     Проверяет пересечение интервала.
 
     Учитывается BUFFER_HOURS.
-
-    ВАЖНО:
-
-    start_at < other_end
-    И
-    end_at > other_start
-
-    Это позволяет делать последовательные аренды
-    без ошибочной блокировки всего дня.
     """
 
     cleanup_pending()
@@ -528,6 +529,7 @@ def available(
     end_at,
     exclude_booking_id=None
 ):
+
     if end_at <= start_at:
         return False
 
@@ -539,6 +541,28 @@ def available(
             exclude_booking_id
         )
         is None
+    )
+
+
+async def async_available(
+    car_id,
+    start_at,
+    end_at,
+    exclude_booking_id=None
+):
+    """
+    Неблокирующая для event loop версия
+    проверки занятости.
+
+    PostgreSQL работает в отдельном потоке.
+    """
+
+    return await asyncio.to_thread(
+        available,
+        car_id,
+        start_at,
+        end_at,
+        exclude_booking_id
     )
 
 
@@ -554,7 +578,7 @@ def get_month_bookings(
     """
     Один запрос к Neon.
 
-    НИКАКИХ запросов по каждому дню.
+    Никаких запросов по каждому дню.
     """
 
     first = date(
@@ -623,6 +647,19 @@ def get_month_bookings(
         con.close()
 
 
+async def async_get_month_bookings(
+    car_id,
+    year,
+    month
+):
+    return await asyncio.to_thread(
+        get_month_bookings,
+        car_id,
+        year,
+        month
+    )
+
+
 # ============================================================
 # DAY STATUS
 # ============================================================
@@ -632,16 +669,6 @@ def day_status(
     bookings,
     today
 ):
-    """
-    Статус дня используется ТОЛЬКО для визуального
-    календаря.
-
-    Важно:
-    наличие брони в этот день НЕ означает,
-    что весь день заблокирован.
-
-    Точное время проверяется следующим шагом.
-    """
 
     if current < today:
         return "past"
@@ -697,6 +724,7 @@ def rate_for_days(
     car_id,
     days
 ):
+
     rates = CARS[car_id]["rates"]
 
     if days <= 3:
@@ -709,6 +737,7 @@ def rate_for_days(
 
 
 def money(n):
+
     return (
         f"{n:,}".replace(",", " ")
         + " ₽"
@@ -844,11 +873,17 @@ def time_keyboard(
         pickup
         return
 
-    Время показывается с PICKUP_START_HOUR
-    до PICKUP_END_HOUR.
+    Получение:
+        08:00–20:00
 
-    Проверка реальной занятости выполняется
-    при нажатии на конкретное время.
+    Возврат:
+        08:00–20:00
+
+    Проверка занятости НЕ выполняется
+    при построении клавиатуры.
+
+    Реальная проверка выполняется только
+    после нажатия конкретного времени.
     """
 
     rows = []
@@ -942,6 +977,7 @@ def time_keyboard(
             current_row = []
 
     if current_row:
+
         rows.append(
             current_row
         )
@@ -988,11 +1024,17 @@ def time_keyboard(
 # CLIENT CALENDAR
 # ============================================================
 
-def calendar_keyboard(
+def calendar_keyboard_sync(
     car_id,
     year,
     month
 ):
+    """
+    Синхронная часть построения календаря.
+
+    Вызов из Telegram выполняется через
+    asyncio.to_thread().
+    """
 
     first = date(
         year,
@@ -1206,37 +1248,37 @@ def calendar_keyboard(
     )
 
 
+async def calendar_keyboard(
+    car_id,
+    year,
+    month
+):
+
+    return await asyncio.to_thread(
+        calendar_keyboard_sync,
+        car_id,
+        year,
+        month
+    )
+
+
 # ============================================================
 # END DATE CALENDAR
 # ============================================================
 
-def end_calendar_keyboard(
+def end_calendar_keyboard_sync(
     car_id,
     start_at,
     year,
     month
 ):
     """
-    БЫСТРЫЙ календарь возврата.
+    Синхронная часть календаря возврата.
 
-    Здесь больше НЕТ:
+    Весь вызов выполняется через asyncio.to_thread().
 
-        available()
-        booking_overlaps()
-
-    для каждого часа каждого дня.
-
-    Поэтому календарь больше не создаёт десятки
-    соединений с Neon.
-
-    День подсвечивается:
-
-        🟢 — дата потенциально доступна
-        🔴 — нет подходящего времени
-        ⚪ — раньше/равна получению
-
-    Точная проверка выполняется при выборе
-    конкретного времени возврата.
+    Внутри календаря нет запросов по каждому дню.
+    Выполняется только один запрос месяца.
     """
 
     start_at = ensure_tz(
@@ -1300,8 +1342,6 @@ def end_calendar_keyboard(
         "Декабрь",
     ]
 
-    # Загружаем брони месяца ОДНИМ запросом.
-
     bookings = get_month_bookings(
         car_id,
         year,
@@ -1345,17 +1385,12 @@ def end_calendar_keyboard(
             n
         )
 
-        # Дата возврата должна быть ПОСЛЕ даты получения.
-
         if current <= start_at.date():
 
             text = "⚪"
             callback_data = "noop"
 
         else:
-
-            # Проверяем только данные уже загруженного
-            # месяца, без запросов к БД.
 
             day_start = local_dt(
                 current,
@@ -1386,23 +1421,6 @@ def end_calendar_keyboard(
 
                     has_booking = True
                     break
-
-            # Даже если в день есть бронь,
-            # день оставляем кликабельным.
-            #
-            # Почему?
-            #
-            # Например:
-            #
-            # старая бронь:
-            # 05.09 10:00 → 06.09 17:00
-            #
-            # новая аренда:
-            # 06.09 19:00 → ...
-            #
-            # 06.09 нельзя помечать полностью занятым.
-            #
-            # Точное время проверяется дальше.
 
             if has_booking:
 
@@ -1493,6 +1511,22 @@ def end_calendar_keyboard(
     )
 
 
+async def end_calendar_keyboard(
+    car_id,
+    start_at,
+    year,
+    month
+):
+
+    return await asyncio.to_thread(
+        end_calendar_keyboard_sync,
+        car_id,
+        start_at,
+        year,
+        month
+    )
+
+
 # ============================================================
 # ADMIN KEYBOARDS
 # ============================================================
@@ -1565,7 +1599,7 @@ def admin_back_keyboard():
 # ADMIN CALENDAR
 # ============================================================
 
-def admin_busy_calendar_keyboard(
+def admin_busy_calendar_keyboard_sync(
     car_id,
     year,
     month
@@ -1772,6 +1806,20 @@ def admin_busy_calendar_keyboard(
     )
 
 
+async def admin_busy_calendar_keyboard(
+    car_id,
+    year,
+    month
+):
+
+    return await asyncio.to_thread(
+        admin_busy_calendar_keyboard_sync,
+        car_id,
+        year,
+        month
+    )
+
+
 # ============================================================
 # CAR TEXT
 # ============================================================
@@ -1848,6 +1896,9 @@ async def home(
     state: FSMContext
 ):
 
+    # Отвечаем Telegram сразу.
+    await callback.answer()
+
     await state.clear()
 
     await callback.message.edit_text(
@@ -1856,8 +1907,6 @@ async def home(
         "Выберите нужное действие:",
         reply_markup=main_keyboard()
     )
-
-    await callback.answer()
 
 
 async def id_handler(
@@ -1874,6 +1923,8 @@ async def catalog(
     callback: CallbackQuery
 ):
 
+    await callback.answer()
+
     await callback.message.edit_text(
         "🚗 <b>Автомобили Balticar</b>\n\n"
         "Выберите автомобиль, чтобы посмотреть "
@@ -1881,12 +1932,12 @@ async def catalog(
         reply_markup=car_keyboard()
     )
 
-    await callback.answer()
-
 
 async def car_selected(
     callback: CallbackQuery
 ):
+
+    await callback.answer()
 
     cid = callback.data.split(
         ":",
@@ -1895,9 +1946,8 @@ async def car_selected(
 
     if cid not in CARS:
 
-        await callback.answer(
-            "Автомобиль не найден.",
-            show_alert=True
+        await callback.message.answer(
+            "Автомобиль не найден."
         )
 
         return
@@ -1908,12 +1958,12 @@ async def car_selected(
         cid
     )
 
-    await callback.answer()
-
 
 async def pick_dates(
     callback: CallbackQuery
 ):
+
+    await callback.answer()
 
     cid = callback.data.split(
         ":",
@@ -1922,14 +1972,19 @@ async def pick_dates(
 
     if cid not in CARS:
 
-        await callback.answer(
-            "Автомобиль не найден.",
-            show_alert=True
+        await callback.message.answer(
+            "Автомобиль не найден."
         )
 
         return
 
     today = datetime.now(TZ).date()
+
+    keyboard = await calendar_keyboard(
+        cid,
+        today.year,
+        today.month
+    )
 
     await callback.message.answer(
         f"📅 <b>{CARS[cid]['name']}</b>\n\n"
@@ -1938,19 +1993,15 @@ async def pick_dates(
         "🟡 есть заявка\n"
         "🔴 подтверждено\n"
         "⚪ прошедшая дата",
-        reply_markup=calendar_keyboard(
-            cid,
-            today.year,
-            today.month
-        )
+        reply_markup=keyboard
     )
-
-    await callback.answer()
 
 
 async def month(
     callback: CallbackQuery
 ):
+
+    await callback.answer()
 
     _, cid, iso = callback.data.split(":")
 
@@ -1958,15 +2009,15 @@ async def month(
         iso
     )
 
-    await callback.message.edit_reply_markup(
-        reply_markup=calendar_keyboard(
-            cid,
-            d.year,
-            d.month
-        )
+    keyboard = await calendar_keyboard(
+        cid,
+        d.year,
+        d.month
     )
 
-    await callback.answer()
+    await callback.message.edit_reply_markup(
+        reply_markup=keyboard
+    )
 
 
 # ============================================================
@@ -1978,13 +2029,14 @@ async def start_day(
     state: FSMContext
 ):
 
+    await callback.answer()
+
     _, cid, iso = callback.data.split(":")
 
     if cid not in CARS:
 
-        await callback.answer(
-            "Автомобиль не найден.",
-            show_alert=True
+        await callback.message.answer(
+            "Автомобиль не найден."
         )
 
         return
@@ -1997,9 +2049,8 @@ async def start_day(
 
     if start_d < today:
 
-        await callback.answer(
-            "Нельзя выбрать прошедшую дату.",
-            show_alert=True
+        await callback.message.answer(
+            "Нельзя выбрать прошедшую дату."
         )
 
         return
@@ -2024,8 +2075,6 @@ async def start_day(
         reply_markup=keyboard
     )
 
-    await callback.answer()
-
 
 # ============================================================
 # BACK TO START CALENDAR
@@ -2035,21 +2084,23 @@ async def backstart(
     callback: CallbackQuery
 ):
 
+    await callback.answer()
+
     _, cid, iso = callback.data.split(":")
 
     d = date.fromisoformat(
         iso
     )
 
-    await callback.message.edit_reply_markup(
-        reply_markup=calendar_keyboard(
-            cid,
-            d.year,
-            d.month
-        )
+    keyboard = await calendar_keyboard(
+        cid,
+        d.year,
+        d.month
     )
 
-    await callback.answer()
+    await callback.message.edit_reply_markup(
+        reply_markup=keyboard
+    )
 
 
 # ============================================================
@@ -2060,6 +2111,19 @@ async def pick_time(
     callback: CallbackQuery,
     state: FSMContext
 ):
+    """
+    ВАЖНО:
+
+    callback.answer() выполняется ПЕРЕД PostgreSQL.
+
+    Поэтому Telegram сразу прекращает
+    состояние "загрузка".
+
+    Проверка PostgreSQL выполняется
+    в отдельном потоке через async_available().
+    """
+
+    await callback.answer()
 
     _, cid, date_iso, time_text = (
         callback.data.split(":")
@@ -2067,9 +2131,8 @@ async def pick_time(
 
     if cid not in CARS:
 
-        await callback.answer(
-            "Автомобиль не найден.",
-            show_alert=True
+        await callback.message.answer(
+            "Автомобиль не найден."
         )
 
         return
@@ -2092,42 +2155,32 @@ async def pick_time(
 
     if start_at <= now:
 
-        await callback.answer(
-            "Это время уже прошло.",
-            show_alert=True
+        await callback.message.answer(
+            "Это время уже прошло."
         )
 
         return
 
     # ========================================================
-    # ВАЖНО
-    #
-    # Не создаём фиктивную бронь на 1 час.
-    #
-    # Проверяем только, что выбранный момент
-    # не находится внутри уже существующей аренды
-    # с учётом BUFFER_HOURS.
-    #
-    # Для этого используем небольшой тестовый интервал.
+    # PostgreSQL НЕ блокирует event loop.
     # ========================================================
 
     test_end = (
         start_at
-        + timedelta(
-            minutes=1
-        )
+        + timedelta(minutes=1)
     )
 
-    if not available(
+    is_available = await async_available(
         cid,
         start_at,
         test_end
-    ):
+    )
 
-        await callback.answer(
+    if not is_available:
+
+        await callback.message.answer(
             "❌ В это время автомобиль уже занят "
-            "или ещё действует технический интервал.",
-            show_alert=True
+            "или ещё действует технический интервал."
         )
 
         return
@@ -2141,20 +2194,20 @@ async def pick_time(
         Booking.end
     )
 
+    keyboard = await end_calendar_keyboard(
+        cid,
+        start_at,
+        start_at.year,
+        start_at.month
+    )
+
     await callback.message.answer(
         f"📅 <b>Получение автомобиля</b>\n\n"
         f"🚗 {CARS[cid]['name']}\n"
         f"🕐 <b>{format_date_time(start_at)}</b>\n\n"
         "Теперь выберите дату возврата:",
-        reply_markup=end_calendar_keyboard(
-            cid,
-            start_at,
-            start_at.year,
-            start_at.month
-        )
+        reply_markup=keyboard
     )
-
-    await callback.answer()
 
 
 # ============================================================
@@ -2165,15 +2218,16 @@ async def endmonth(
     callback: CallbackQuery
 ):
 
+    await callback.answer()
+
     _, cid, start_iso, iso = (
         callback.data.split(":")
     )
 
     if cid not in CARS:
 
-        await callback.answer(
-            "Автомобиль не найден.",
-            show_alert=True
+        await callback.message.answer(
+            "Автомобиль не найден."
         )
 
         return
@@ -2190,16 +2244,16 @@ async def endmonth(
         iso
     )
 
-    await callback.message.edit_reply_markup(
-        reply_markup=end_calendar_keyboard(
-            cid,
-            start_at,
-            d.year,
-            d.month
-        )
+    keyboard = await end_calendar_keyboard(
+        cid,
+        start_at,
+        d.year,
+        d.month
     )
 
-    await callback.answer()
+    await callback.message.edit_reply_markup(
+        reply_markup=keyboard
+    )
 
 
 # ============================================================
@@ -2211,13 +2265,14 @@ async def end_day(
     state: FSMContext
 ):
 
+    await callback.answer()
+
     _, cid, end_iso = callback.data.split(":")
 
     if cid not in CARS:
 
-        await callback.answer(
-            "Автомобиль не найден.",
-            show_alert=True
+        await callback.message.answer(
+            "Автомобиль не найден."
         )
 
         return
@@ -2228,10 +2283,10 @@ async def end_day(
 
         await state.clear()
 
-        await callback.answer(
+        await callback.message.answer(
             "Сессия устарела. "
             "Начните бронирование заново.",
-            show_alert=True
+            reply_markup=main_keyboard()
         )
 
         return
@@ -2250,9 +2305,8 @@ async def end_day(
 
     if end_d <= start_at.date():
 
-        await callback.answer(
-            "Дата возврата должна быть позже даты получения.",
-            show_alert=True
+        await callback.message.answer(
+            "Дата возврата должна быть позже даты получения."
         )
 
         return
@@ -2277,8 +2331,6 @@ async def end_day(
         reply_markup=keyboard
     )
 
-    await callback.answer()
-
 
 # ============================================================
 # BACK TO END CALENDAR
@@ -2287,6 +2339,8 @@ async def end_day(
 async def backend(
     callback: CallbackQuery
 ):
+
+    await callback.answer()
 
     _, cid, start_iso = callback.data.split(":")
 
@@ -2299,21 +2353,23 @@ async def backend(
         time(PICKUP_START_HOUR, 0)
     )
 
-    await callback.message.edit_reply_markup(
-        reply_markup=end_calendar_keyboard(
-            cid,
-            start_at,
-            start_d.year,
-            start_d.month
-        )
+    keyboard = await end_calendar_keyboard(
+        cid,
+        start_at,
+        start_d.year,
+        start_d.month
     )
 
-    await callback.answer()
+    await callback.message.edit_reply_markup(
+        reply_markup=keyboard
+    )
 
 
 async def backstarttime(
     callback: CallbackQuery
 ):
+
+    await callback.answer()
 
     _, cid, start_iso = callback.data.split(":")
 
@@ -2331,8 +2387,6 @@ async def backstarttime(
         reply_markup=keyboard
     )
 
-    await callback.answer()
-
 
 # ============================================================
 # END TIME
@@ -2342,6 +2396,15 @@ async def end_time_handler(
     callback: CallbackQuery,
     state: FSMContext
 ):
+    """
+    Финальная проверка времени.
+
+    callback.answer() выполняется сразу.
+
+    PostgreSQL запускается через asyncio.to_thread().
+    """
+
+    await callback.answer()
 
     _, cid, end_date_iso, time_text = (
         callback.data.split(":")
@@ -2349,9 +2412,8 @@ async def end_time_handler(
 
     if cid not in CARS:
 
-        await callback.answer(
-            "Автомобиль не найден.",
-            show_alert=True
+        await callback.message.answer(
+            "Автомобиль не найден."
         )
 
         return
@@ -2362,9 +2424,9 @@ async def end_time_handler(
 
         await state.clear()
 
-        await callback.answer(
+        await callback.message.answer(
             "Сессия устарела.",
-            show_alert=True
+            reply_markup=main_keyboard()
         )
 
         return
@@ -2393,9 +2455,8 @@ async def end_time_handler(
 
     if end_at <= start_at:
 
-        await callback.answer(
-            "Возврат должен быть позже получения.",
-            show_alert=True
+        await callback.message.answer(
+            "Возврат должен быть позже получения."
         )
 
         return
@@ -2403,22 +2464,20 @@ async def end_time_handler(
     # ========================================================
     # ФИНАЛЬНАЯ ПРОВЕРКА
     #
-    # Только здесь выполняется обращение к БД.
-    #
-    # Именно этот запрос определяет,
-    # действительно ли выбранный интервал свободен.
+    # PostgreSQL выполняется НЕ в event loop.
     # ========================================================
 
-    if not available(
+    is_available = await async_available(
         cid,
         start_at,
         end_at
-    ):
+    )
 
-        await callback.answer(
+    if not is_available:
+
+        await callback.message.answer(
             "❌ В этот период автомобиль уже занят "
-            "или между арендами недостаточно времени.",
-            show_alert=True
+            "или между арендами недостаточно времени."
         )
 
         return
@@ -2459,8 +2518,6 @@ async def end_time_handler(
         f"<b>{money(total)}</b>\n\n"
         "Введите ваше имя:"
     )
-
-    await callback.answer()
 
 
 # ============================================================
@@ -2535,6 +2592,188 @@ async def phone_handler(
 
 
 # ============================================================
+# CREATE BOOKING — DATABASE PART
+# ============================================================
+
+def create_booking_sync(
+    message_user_id,
+    username,
+    cid,
+    start_at,
+    end_at,
+    name,
+    phone,
+    comment
+):
+    """
+    Полностью синхронная транзакция PostgreSQL.
+
+    Вызывается только через asyncio.to_thread().
+
+    Это исключает блокировку event loop.
+    """
+
+    days = rental_days(
+        start_at,
+        end_at
+    )
+
+    total = (
+        days
+        * rate_for_days(
+            cid,
+            days
+        )
+    )
+
+    expires = (
+        datetime.now(TZ)
+        + timedelta(
+            minutes=HOLD_MINUTES
+        )
+    )
+
+    created_at = datetime.now(TZ)
+
+    con = db()
+
+    try:
+
+        with con.cursor() as cur:
+
+            # ==================================================
+            # АТОМАРНАЯ БЛОКИРОВКА
+            # ==================================================
+
+            cur.execute(
+                """
+                SELECT pg_advisory_xact_lock(
+                    hashtext('balticar-bookings')
+                )
+                """
+            )
+
+            # ==================================================
+            # Истёкшие pending
+            # ==================================================
+
+            cur.execute(
+                """
+                UPDATE bookings
+                SET status='expired'
+                WHERE status='pending'
+                  AND expires_at IS NOT NULL
+                  AND expires_at < NOW()
+                """
+            )
+
+            buffer_delta = timedelta(
+                hours=BUFFER_HOURS
+            )
+
+            check_start = (
+                start_at - buffer_delta
+            )
+
+            check_end = (
+                end_at + buffer_delta
+            )
+
+            overlap = cur.execute(
+                """
+                SELECT id, status
+                FROM bookings
+                WHERE car_id=%s
+                  AND status IN ('pending','confirmed')
+                  AND start_at < %s
+                  AND end_at > %s
+                LIMIT 1
+                """,
+                (
+                    cid,
+                    check_end,
+                    check_start
+                )
+            ).fetchone()
+
+            if overlap:
+
+                con.rollback()
+
+                return {
+                    "ok": False,
+                    "reason": "overlap"
+                }
+
+            start_date = start_at.date()
+            end_date = end_at.date()
+
+            row = cur.execute(
+                """
+                INSERT INTO bookings (
+                    user_id,
+                    username,
+                    car_id,
+                    start_date,
+                    end_date,
+                    start_at,
+                    end_at,
+                    name,
+                    phone,
+                    comment,
+                    total,
+                    status,
+                    created_at,
+                    expires_at
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s,
+                    %s, %s,
+                    %s, %s, %s, %s,
+                    'pending', %s, %s
+                )
+                RETURNING id
+                """,
+                (
+                    message_user_id,
+                    username,
+                    cid,
+                    start_date,
+                    end_date,
+                    start_at,
+                    end_at,
+                    name,
+                    phone,
+                    comment,
+                    total,
+                    created_at,
+                    expires
+                )
+            ).fetchone()
+
+            bid = row["id"]
+
+        con.commit()
+
+        return {
+            "ok": True,
+            "bid": bid,
+            "days": days,
+            "total": total,
+            "expires": expires
+        }
+
+    except Exception:
+
+        con.rollback()
+        raise
+
+    finally:
+
+        con.close()
+
+
+# ============================================================
 # CREATE BOOKING
 # ============================================================
 
@@ -2589,163 +2828,43 @@ async def comment_handler(
         end_at
     )
 
-    days = rental_days(
+    # ========================================================
+    # Вся тяжёлая работа с PostgreSQL —
+    # в отдельном потоке.
+    # ========================================================
+
+    result = await asyncio.to_thread(
+        create_booking_sync,
+        message.from_user.id,
+        message.from_user.username or "",
+        cid,
         start_at,
-        end_at
+        end_at,
+        data["name"],
+        data["phone"],
+        comment
     )
 
-    total = (
-        days
-        * rate_for_days(
-            cid,
-            days
+    if not result["ok"]:
+
+        await state.clear()
+
+        await message.answer(
+            "❌ <b>Автомобиль уже занят</b>\n\n"
+            "Пока вы заполняли данные, "
+            "другой клиент занял выбранное "
+            "время.\n\n"
+            "Пожалуйста, выберите другие "
+            "дату или время.",
+            reply_markup=main_keyboard()
         )
-    )
 
-    expires = (
-        datetime.now(TZ)
-        + timedelta(
-            minutes=HOLD_MINUTES
-        )
-    )
+        return
 
-    created_at = datetime.now(TZ)
-
-    # ========================================================
-    # АТОМАРНОЕ СОЗДАНИЕ БРОНИ
-    # ========================================================
-
-    con = db()
-
-    try:
-
-        with con.cursor() as cur:
-
-            cur.execute(
-                """
-                SELECT pg_advisory_xact_lock(
-                    hashtext('balticar-bookings')
-                )
-                """
-            )
-
-            # Истёкшие pending.
-
-            cur.execute(
-                """
-                UPDATE bookings
-                SET status='expired'
-                WHERE status='pending'
-                  AND expires_at IS NOT NULL
-                  AND expires_at < NOW()
-                """
-            )
-
-            buffer_delta = timedelta(
-                hours=BUFFER_HOURS
-            )
-
-            check_start = (
-                start_at - buffer_delta
-            )
-
-            check_end = (
-                end_at + buffer_delta
-            )
-
-            overlap = cur.execute(
-                """
-                SELECT id, status
-                FROM bookings
-                WHERE car_id=%s
-                  AND status IN ('pending','confirmed')
-                  AND start_at < %s
-                  AND end_at > %s
-                LIMIT 1
-                """,
-                (
-                    cid,
-                    check_end,
-                    check_start
-                )
-            ).fetchone()
-
-            if overlap:
-
-                con.rollback()
-
-                await state.clear()
-
-                await message.answer(
-                    "❌ <b>Автомобиль уже занят</b>\n\n"
-                    "Пока вы заполняли данные, "
-                    "другой клиент занял выбранное "
-                    "время.\n\n"
-                    "Пожалуйста, выберите другие "
-                    "дату или время.",
-                    reply_markup=main_keyboard()
-                )
-
-                return
-
-            start_date = start_at.date()
-            end_date = end_at.date()
-
-            row = cur.execute(
-                """
-                INSERT INTO bookings (
-                    user_id,
-                    username,
-                    car_id,
-                    start_date,
-                    end_date,
-                    start_at,
-                    end_at,
-                    name,
-                    phone,
-                    comment,
-                    total,
-                    status,
-                    created_at,
-                    expires_at
-                )
-                VALUES (
-                    %s, %s, %s, %s, %s,
-                    %s, %s,
-                    %s, %s, %s, %s,
-                    'pending', %s, %s
-                )
-                RETURNING id
-                """,
-                (
-                    message.from_user.id,
-                    message.from_user.username or "",
-                    cid,
-                    start_date,
-                    end_date,
-                    start_at,
-                    end_at,
-                    data["name"],
-                    data["phone"],
-                    comment,
-                    total,
-                    created_at,
-                    expires
-                )
-            ).fetchone()
-
-            bid = row["id"]
-
-        con.commit()
-
-    except Exception:
-
-        con.rollback()
-        raise
-
-    finally:
-
-        con.close()
+    bid = result["bid"]
+    days = result["days"]
+    total = result["total"]
+    expires = result["expires"]
 
     await state.clear()
 
@@ -2809,8 +2928,8 @@ async def comment_handler(
 # MY BOOKINGS
 # ============================================================
 
-async def mybookings(
-    callback: CallbackQuery
+def get_user_bookings_sync(
+    user_id
 ):
 
     cleanup_pending()
@@ -2821,7 +2940,7 @@ async def mybookings(
 
         with con.cursor() as cur:
 
-            rows = cur.execute(
+            return cur.execute(
                 """
                 SELECT *
                 FROM bookings
@@ -2830,13 +2949,25 @@ async def mybookings(
                 LIMIT 10
                 """,
                 (
-                    callback.from_user.id,
+                    user_id,
                 )
             ).fetchall()
 
     finally:
 
         con.close()
+
+
+async def mybookings(
+    callback: CallbackQuery
+):
+
+    await callback.answer()
+
+    rows = await asyncio.to_thread(
+        get_user_bookings_sync,
+        callback.from_user.id
+    )
 
     if not rows:
 
@@ -2910,8 +3041,6 @@ async def mybookings(
         )
     )
 
-    await callback.answer()
-
 
 # ============================================================
 # TERMS
@@ -2920,6 +3049,8 @@ async def mybookings(
 async def terms(
     callback: CallbackQuery
 ):
+
+    await callback.answer()
 
     await callback.message.answer(
         "ℹ️ <b>Условия аренды</b>\n\n"
@@ -2938,8 +3069,6 @@ async def terms(
         reply_markup=back_home_keyboard()
     )
 
-    await callback.answer()
-
 
 # ============================================================
 # CONTACT
@@ -2948,6 +3077,8 @@ async def terms(
 async def contact(
     callback: CallbackQuery
 ):
+
+    await callback.answer()
 
     await callback.message.answer(
         "📞 <b>Связаться с Balticar</b>\n\n"
@@ -2972,8 +3103,6 @@ async def contact(
             ]
         )
     )
-
-    await callback.answer()
 
 
 # ============================================================
@@ -3003,11 +3132,12 @@ async def admin_back(
     callback: CallbackQuery
 ):
 
+    await callback.answer()
+
     if callback.from_user.id != ADMIN_ID:
 
-        await callback.answer(
-            "Нет доступа.",
-            show_alert=True
+        await callback.message.answer(
+            "Нет доступа."
         )
 
         return
@@ -3018,8 +3148,6 @@ async def admin_back(
         reply_markup=admin_panel_keyboard()
     )
 
-    await callback.answer()
-
 
 # ============================================================
 # ADMIN CALENDAR
@@ -3029,11 +3157,12 @@ async def admin_calendar(
     callback: CallbackQuery
 ):
 
+    await callback.answer()
+
     if callback.from_user.id != ADMIN_ID:
 
-        await callback.answer(
-            "Нет доступа.",
-            show_alert=True
+        await callback.message.answer(
+            "Нет доступа."
         )
 
         return
@@ -3065,18 +3194,17 @@ async def admin_calendar(
         )
     )
 
-    await callback.answer()
-
 
 async def admin_car_calendar(
     callback: CallbackQuery
 ):
 
+    await callback.answer()
+
     if callback.from_user.id != ADMIN_ID:
 
-        await callback.answer(
-            "Нет доступа.",
-            show_alert=True
+        await callback.message.answer(
+            "Нет доступа."
         )
 
         return
@@ -3088,14 +3216,19 @@ async def admin_car_calendar(
 
     if cid not in CARS:
 
-        await callback.answer(
-            "Автомобиль не найден.",
-            show_alert=True
+        await callback.message.answer(
+            "Автомобиль не найден."
         )
 
         return
 
     today = datetime.now(TZ).date()
+
+    keyboard = await admin_busy_calendar_keyboard(
+        cid,
+        today.year,
+        today.month
+    )
 
     await callback.message.edit_text(
         "📅 <b>Календарь занятости</b>\n\n"
@@ -3106,25 +3239,20 @@ async def admin_car_calendar(
         "⚪ прошедшая дата\n\n"
         f"Буфер между арендами: "
         f"<b>{BUFFER_HOURS} ч.</b>",
-        reply_markup=admin_busy_calendar_keyboard(
-            cid,
-            today.year,
-            today.month
-        )
+        reply_markup=keyboard
     )
-
-    await callback.answer()
 
 
 async def admin_month(
     callback: CallbackQuery
 ):
 
+    await callback.answer()
+
     if callback.from_user.id != ADMIN_ID:
 
-        await callback.answer(
-            "Нет доступа.",
-            show_alert=True
+        await callback.message.answer(
+            "Нет доступа."
         )
 
         return
@@ -3135,39 +3263,25 @@ async def admin_month(
         iso
     )
 
-    await callback.message.edit_reply_markup(
-        reply_markup=admin_busy_calendar_keyboard(
-            cid,
-            d.year,
-            d.month
-        )
+    keyboard = await admin_busy_calendar_keyboard(
+        cid,
+        d.year,
+        d.month
     )
 
-    await callback.answer()
+    await callback.message.edit_reply_markup(
+        reply_markup=keyboard
+    )
 
 
 # ============================================================
 # ADMIN DAY
 # ============================================================
 
-async def admin_day(
-    callback: CallbackQuery
+def get_admin_day_bookings_sync(
+    car_id,
+    selected
 ):
-
-    if callback.from_user.id != ADMIN_ID:
-
-        await callback.answer(
-            "Нет доступа.",
-            show_alert=True
-        )
-
-        return
-
-    _, car_id, iso = callback.data.split(":")
-
-    selected = date.fromisoformat(
-        iso
-    )
 
     day_start = local_dt(
         selected,
@@ -3185,7 +3299,7 @@ async def admin_day(
 
         with con.cursor() as cur:
 
-            rows = cur.execute(
+            return cur.execute(
                 """
                 SELECT *
                 FROM bookings
@@ -3206,11 +3320,37 @@ async def admin_day(
 
         con.close()
 
+
+async def admin_day(
+    callback: CallbackQuery
+):
+
+    await callback.answer()
+
+    if callback.from_user.id != ADMIN_ID:
+
+        await callback.message.answer(
+            "Нет доступа."
+        )
+
+        return
+
+    _, car_id, iso = callback.data.split(":")
+
+    selected = date.fromisoformat(
+        iso
+    )
+
+    rows = await asyncio.to_thread(
+        get_admin_day_bookings_sync,
+        car_id,
+        selected
+    )
+
     if not rows:
 
-        await callback.answer(
-            "В этот день бронирований нет.",
-            show_alert=True
+        await callback.message.answer(
+            "В этот день бронирований нет."
         )
 
         return
@@ -3245,25 +3385,12 @@ async def admin_day(
         "\n".join(out)
     )
 
-    await callback.answer()
-
 
 # ============================================================
 # ADMIN NEW
 # ============================================================
 
-async def admin_new(
-    callback: CallbackQuery
-):
-
-    if callback.from_user.id != ADMIN_ID:
-
-        await callback.answer(
-            "Нет доступа.",
-            show_alert=True
-        )
-
-        return
+def get_admin_new_sync():
 
     cleanup_pending()
 
@@ -3273,7 +3400,7 @@ async def admin_new(
 
         with con.cursor() as cur:
 
-            rows = cur.execute(
+            return cur.execute(
                 """
                 SELECT *
                 FROM bookings
@@ -3287,6 +3414,25 @@ async def admin_new(
 
         con.close()
 
+
+async def admin_new(
+    callback: CallbackQuery
+):
+
+    await callback.answer()
+
+    if callback.from_user.id != ADMIN_ID:
+
+        await callback.message.answer(
+            "Нет доступа."
+        )
+
+        return
+
+    rows = await asyncio.to_thread(
+        get_admin_new_sync
+    )
+
     if not rows:
 
         await callback.message.edit_text(
@@ -3294,8 +3440,6 @@ async def admin_new(
             "Новых заявок нет.",
             reply_markup=admin_back_keyboard()
         )
-
-        await callback.answer()
 
         return
 
@@ -3332,32 +3476,14 @@ async def admin_new(
         )
     )
 
-    await callback.answer()
-
 
 # ============================================================
 # ADMIN BOOKING
 # ============================================================
 
-async def admin_booking(
-    callback: CallbackQuery
+def get_booking_sync(
+    bid
 ):
-
-    if callback.from_user.id != ADMIN_ID:
-
-        await callback.answer(
-            "Нет доступа.",
-            show_alert=True
-        )
-
-        return
-
-    bid = int(
-        callback.data.split(
-            ":",
-            1
-        )[1]
-    )
 
     con = db()
 
@@ -3365,7 +3491,7 @@ async def admin_booking(
 
         with con.cursor() as cur:
 
-            row = cur.execute(
+            return cur.execute(
                 """
                 SELECT *
                 FROM bookings
@@ -3378,11 +3504,37 @@ async def admin_booking(
 
         con.close()
 
+
+async def admin_booking(
+    callback: CallbackQuery
+):
+
+    await callback.answer()
+
+    if callback.from_user.id != ADMIN_ID:
+
+        await callback.message.answer(
+            "Нет доступа."
+        )
+
+        return
+
+    bid = int(
+        callback.data.split(
+            ":",
+            1
+        )[1]
+    )
+
+    row = await asyncio.to_thread(
+        get_booking_sync,
+        bid
+    )
+
     if not row:
 
-        await callback.answer(
-            "Заявка не найдена.",
-            show_alert=True
+        await callback.message.answer(
+            "Заявка не найдена."
         )
 
         return
@@ -3443,25 +3595,12 @@ async def admin_booking(
         )
     )
 
-    await callback.answer()
-
 
 # ============================================================
 # ADMIN ALL BOOKINGS
 # ============================================================
 
-async def admin_bookings(
-    callback: CallbackQuery
-):
-
-    if callback.from_user.id != ADMIN_ID:
-
-        await callback.answer(
-            "Нет доступа.",
-            show_alert=True
-        )
-
-        return
+def get_all_bookings_sync():
 
     cleanup_pending()
 
@@ -3471,7 +3610,7 @@ async def admin_bookings(
 
         with con.cursor() as cur:
 
-            rows = cur.execute(
+            return cur.execute(
                 """
                 SELECT *
                 FROM bookings
@@ -3484,6 +3623,25 @@ async def admin_bookings(
 
         con.close()
 
+
+async def admin_bookings(
+    callback: CallbackQuery
+):
+
+    await callback.answer()
+
+    if callback.from_user.id != ADMIN_ID:
+
+        await callback.message.answer(
+            "Нет доступа."
+        )
+
+        return
+
+    rows = await asyncio.to_thread(
+        get_all_bookings_sync
+    )
+
     if not rows:
 
         await callback.message.edit_text(
@@ -3491,8 +3649,6 @@ async def admin_bookings(
             "Бронирований пока нет.",
             reply_markup=admin_back_keyboard()
         )
-
-        await callback.answer()
 
         return
 
@@ -3529,8 +3685,6 @@ async def admin_bookings(
         )
     )
 
-    await callback.answer()
-
 
 # ============================================================
 # ADMIN CARS
@@ -3540,11 +3694,12 @@ async def admin_cars(
     callback: CallbackQuery
 ):
 
+    await callback.answer()
+
     if callback.from_user.id != ADMIN_ID:
 
-        await callback.answer(
-            "Нет доступа.",
-            show_alert=True
+        await callback.message.answer(
+            "Нет доступа."
         )
 
         return
@@ -3576,18 +3731,17 @@ async def admin_cars(
         )
     )
 
-    await callback.answer()
-
 
 async def admin_car_info(
     callback: CallbackQuery
 ):
 
+    await callback.answer()
+
     if callback.from_user.id != ADMIN_ID:
 
-        await callback.answer(
-            "Нет доступа.",
-            show_alert=True
+        await callback.message.answer(
+            "Нет доступа."
         )
 
         return
@@ -3599,9 +3753,8 @@ async def admin_car_info(
 
     if cid not in CARS:
 
-        await callback.answer(
-            "Автомобиль не найден.",
-            show_alert=True
+        await callback.message.answer(
+            "Автомобиль не найден."
         )
 
         return
@@ -3627,31 +3780,20 @@ async def admin_car_info(
         )
     )
 
-    await callback.answer()
-
 
 # ============================================================
 # CONFIRM / REJECT
 # ============================================================
 
-async def admin_action(
-    callback: CallbackQuery
+def admin_action_sync(
+    action,
+    bid
 ):
+    """
+    Полностью атомарная операция PostgreSQL.
 
-    if callback.from_user.id != ADMIN_ID:
-
-        await callback.answer(
-            "Нет доступа.",
-            show_alert=True
-        )
-
-        return
-
-    action, bid_s = callback.data.split(
-        ":"
-    )
-
-    bid = int(bid_s)
+    Возвращает данные заявки и результат.
+    """
 
     con = db()
 
@@ -3667,10 +3809,6 @@ async def admin_action(
                 """
             )
 
-            # ==================================================
-            # Истёкшие заявки
-            # ==================================================
-
             cur.execute(
                 """
                 UPDATE bookings
@@ -3680,10 +3818,6 @@ async def admin_action(
                   AND expires_at < NOW()
                 """
             )
-
-            # ==================================================
-            # Получаем заявку под блокировкой
-            # ==================================================
 
             row = cur.execute(
                 """
@@ -3699,24 +3833,20 @@ async def admin_action(
 
                 con.rollback()
 
-                await callback.answer(
-                    "Заявка не найдена.",
-                    show_alert=True
-                )
-
-                return
+                return {
+                    "ok": False,
+                    "reason": "not_found"
+                }
 
             if row["status"] != "pending":
 
                 con.rollback()
 
-                await callback.answer(
-                    f"Заявка уже имеет статус: "
-                    f"{status_label(row['status'])}",
-                    show_alert=True
-                )
-
-                return
+                return {
+                    "ok": False,
+                    "reason": "already_processed",
+                    "status": row["status"]
+                }
 
             start_at = row["start_at"]
             end_at = row["end_at"]
@@ -3742,10 +3872,6 @@ async def admin_action(
             end_at = ensure_tz(
                 end_at
             )
-
-            # ==================================================
-            # CONFIRM
-            # ==================================================
 
             if action == "confirm":
 
@@ -3785,25 +3911,13 @@ async def admin_action(
 
                     con.commit()
 
-                    await callback.message.edit_reply_markup(
-                        reply_markup=None
-                    )
-
-                    await callback.bot.send_message(
-                        row["user_id"],
-                        f"❌ <b>Заявка №{bid} отклонена</b>\n\n"
-                        "Выбранное время уже занято "
-                        "или недостаточно времени "
-                        "между арендами.",
-                        reply_markup=main_keyboard()
-                    )
-
-                    await callback.answer(
-                        "Время уже занято.",
-                        show_alert=True
-                    )
-
-                    return
+                    return {
+                        "ok": False,
+                        "reason": "overlap",
+                        "row": row,
+                        "start_at": start_at,
+                        "end_at": end_at
+                    }
 
                 cur.execute(
                     """
@@ -3817,32 +3931,13 @@ async def admin_action(
 
                 con.commit()
 
-                await callback.message.edit_reply_markup(
-                    reply_markup=None
-                )
-
-                await callback.bot.send_message(
-                    row["user_id"],
-                    f"✅ <b>Заявка №{bid} подтверждена!</b>\n\n"
-                    f"🚗 {CARS[row['car_id']]['name']}\n\n"
-                    f"📅 Получение:\n"
-                    f"<b>{format_date_time(start_at)}</b>\n\n"
-                    f"↩️ Возврат:\n"
-                    f"<b>{format_date_time(end_at)}</b>\n\n"
-                    f"⏱ {rental_days(start_at, end_at)} суток\n"
-                    f"💰 {money(row['total'])}\n\n"
-                    "Менеджер свяжется с вами "
-                    "для согласования деталей.",
-                    reply_markup=main_keyboard()
-                )
-
-                await callback.answer(
-                    "Заявка подтверждена."
-                )
-
-            # ==================================================
-            # REJECT
-            # ==================================================
+                return {
+                    "ok": True,
+                    "action": "confirm",
+                    "row": row,
+                    "start_at": start_at,
+                    "end_at": end_at
+                }
 
             else:
 
@@ -3857,21 +3952,13 @@ async def admin_action(
 
                 con.commit()
 
-                await callback.message.edit_reply_markup(
-                    reply_markup=None
-                )
-
-                await callback.bot.send_message(
-                    row["user_id"],
-                    f"❌ <b>Заявка №{bid} отклонена.</b>\n\n"
-                    "Вы можете выбрать другой "
-                    "автомобиль или другой период.",
-                    reply_markup=main_keyboard()
-                )
-
-                await callback.answer(
-                    "Заявка отклонена."
-                )
+                return {
+                    "ok": True,
+                    "action": "reject",
+                    "row": row,
+                    "start_at": start_at,
+                    "end_at": end_at
+                }
 
     except Exception:
 
@@ -3881,6 +3968,121 @@ async def admin_action(
     finally:
 
         con.close()
+
+
+async def admin_action(
+    callback: CallbackQuery
+):
+
+    # Отвечаем Telegram сразу.
+    await callback.answer()
+
+    if callback.from_user.id != ADMIN_ID:
+
+        await callback.message.answer(
+            "Нет доступа."
+        )
+
+        return
+
+    action, bid_s = callback.data.split(
+        ":"
+    )
+
+    bid = int(bid_s)
+
+    # ========================================================
+    # PostgreSQL выполняется в отдельном потоке.
+    # ========================================================
+
+    result = await asyncio.to_thread(
+        admin_action_sync,
+        action,
+        bid
+    )
+
+    if not result["ok"]:
+
+        if result["reason"] == "not_found":
+
+            await callback.message.answer(
+                "Заявка не найдена."
+            )
+
+            return
+
+        if result["reason"] == "already_processed":
+
+            await callback.message.answer(
+                f"Заявка уже имеет статус: "
+                f"{status_label(result['status'])}"
+            )
+
+            return
+
+        if result["reason"] == "overlap":
+
+            await callback.message.edit_reply_markup(
+                reply_markup=None
+            )
+
+            row = result["row"]
+
+            await callback.bot.send_message(
+                row["user_id"],
+                f"❌ <b>Заявка №{bid} отклонена</b>\n\n"
+                "Выбранное время уже занято "
+                "или недостаточно времени "
+                "между арендами.",
+                reply_markup=main_keyboard()
+            )
+
+            await callback.message.answer(
+                "Время уже занято. "
+                "Заявка автоматически отклонена."
+            )
+
+            return
+
+    row = result["row"]
+
+    start_at = result["start_at"]
+    end_at = result["end_at"]
+
+    if result["action"] == "confirm":
+
+        await callback.message.edit_reply_markup(
+            reply_markup=None
+        )
+
+        await callback.bot.send_message(
+            row["user_id"],
+            f"✅ <b>Заявка №{bid} подтверждена!</b>\n\n"
+            f"🚗 {CARS[row['car_id']]['name']}\n\n"
+            f"📅 Получение:\n"
+            f"<b>{format_date_time(start_at)}</b>\n\n"
+            f"↩️ Возврат:\n"
+            f"<b>{format_date_time(end_at)}</b>\n\n"
+            f"⏱ {rental_days(start_at, end_at)} суток\n"
+            f"💰 {money(row['total'])}\n\n"
+            "Менеджер свяжется с вами "
+            "для согласования деталей.",
+            reply_markup=main_keyboard()
+        )
+
+    else:
+
+        await callback.message.edit_reply_markup(
+            reply_markup=None
+        )
+
+        await callback.bot.send_message(
+            row["user_id"],
+            f"❌ <b>Заявка №{bid} отклонена.</b>\n\n"
+            "Вы можете выбрать другой "
+            "автомобиль или другой период.",
+            reply_markup=main_keyboard()
+        )
 
 
 # ============================================================
@@ -3939,9 +4141,13 @@ async def main():
 
     # ========================================================
     # DATABASE
+    #
+    # Инициализация происходит один раз при старте.
     # ========================================================
 
-    init_db()
+    await asyncio.to_thread(
+        init_db
+    )
 
     print(
         "Neon PostgreSQL connected successfully."
