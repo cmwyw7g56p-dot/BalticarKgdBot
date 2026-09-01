@@ -3932,10 +3932,7 @@ async def publish(
 # MAIN
 # ============================================================
 
-print(
-    "DEBUG end_time_handler:",
-    end_time_handler
-)
+
 async def main():
 
     if not BOT_TOKEN:
