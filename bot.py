@@ -2114,20 +2114,12 @@ async def pick_time(
     """
     Обработка выбора времени получения.
 
-    ВАЖНО:
+    callback_data имеет формат:
 
-    1. callback.answer() выполняется сразу.
-    2. PostgreSQL здесь НЕ вызывается.
-    3. Мы не делаем бессмысленную проверку
-       "start -> start + 1 минута", потому что
-       конечное время аренды ещё неизвестно.
-    4. Реальная проверка занятости выполняется
-       после выбора даты и времени возврата.
-    5. Дополнительная атомарная проверка выполняется
-       непосредственно при создании заявки.
+        picktime:CAR_ID:YYYY-MM-DD:HH:MM
 
-    Это убирает лишний запрос к Neon из критического
-    пути выбора времени получения.
+    Поэтому обычный split(":") даёт 5 частей.
+    Время собираем из последних двух частей.
     """
 
     # ========================================================
@@ -2138,8 +2130,20 @@ async def pick_time(
 
     try:
 
-        _, cid, date_iso, time_text = (
-            callback.data.split(":")
+        parts = callback.data.split(":")
+
+        if len(parts) != 5:
+
+            await callback.message.answer(
+                "❌ Некорректные данные выбора времени."
+            )
+
+            return
+
+        _, cid, date_iso, hour_s, minute_s = parts
+
+        time_text = (
+            f"{hour_s}:{minute_s}"
         )
 
     except (ValueError, AttributeError):
@@ -2150,6 +2154,10 @@ async def pick_time(
 
         return
 
+    # ========================================================
+    # Проверяем автомобиль.
+    # ========================================================
+
     if cid not in CARS:
 
         await callback.message.answer(
@@ -2158,16 +2166,18 @@ async def pick_time(
 
         return
 
+    # ========================================================
+    # Проверяем дату и время.
+    # ========================================================
+
     try:
 
         start_d = date.fromisoformat(
             date_iso
         )
 
-        hour, minute = map(
-            int,
-            time_text.split(":")
-        )
+        hour = int(hour_s)
+        minute = int(minute_s)
 
     except ValueError:
 
@@ -2178,8 +2188,24 @@ async def pick_time(
         return
 
     # ========================================================
-    # Дополнительная защита диапазона времени.
+    # Проверяем диапазон времени.
     # ========================================================
+
+    if hour < 0 or hour > 23:
+
+        await callback.message.answer(
+            "❌ Некорректный час."
+        )
+
+        return
+
+    if minute < 0 or minute > 59:
+
+        await callback.message.answer(
+            "❌ Некорректные минуты."
+        )
+
+        return
 
     if not (
         PICKUP_START_HOUR
@@ -2194,6 +2220,10 @@ async def pick_time(
         )
 
         return
+
+    # ========================================================
+    # Создаём timezone-aware datetime.
+    # ========================================================
 
     start_at = local_dt(
         start_d,
@@ -2212,8 +2242,6 @@ async def pick_time(
 
     # ========================================================
     # Сохраняем выбранное время.
-    #
-    # НИКАКОГО PostgreSQL здесь больше нет.
     # ========================================================
 
     await state.update_data(
@@ -2227,10 +2255,6 @@ async def pick_time(
 
     # ========================================================
     # Показываем календарь возврата.
-    #
-    # get_month_bookings() вызывается внутри
-    # end_calendar_keyboard() через asyncio.to_thread(),
-    # поэтому event loop не блокируется.
     # ========================================================
 
     keyboard = await end_calendar_keyboard(
@@ -2423,141 +2447,10 @@ async def backstarttime(
     )
 
     await callback.message.edit_reply_markup(
-        reply_markup=keyboard
+        reply_markup=
+
+keyboard
     )
-
-
-# ============================================================
-# END TIME
-# ============================================================
-
-async def end_time_handler(
-    callback: CallbackQuery,
-    state: FSMContext
-):
-    """
-    Финальная проверка времени.
-
-    callback.answer() выполняется сразу.
-
-    PostgreSQL запускается через asyncio.to_thread().
-    """
-
-    await callback.answer()
-
-    _, cid, end_date_iso, time_text = (
-        callback.data.split(":")
-    )
-
-    if cid not in CARS:
-
-        await callback.message.answer(
-            "Автомобиль не найден."
-        )
-
-        return
-
-    data = await state.get_data()
-
-    if not data.get("start_at"):
-
-        await state.clear()
-
-        await callback.message.answer(
-            "Сессия устарела.",
-            reply_markup=main_keyboard()
-        )
-
-        return
-
-    start_at = datetime.fromisoformat(
-        data["start_at"]
-    )
-
-    start_at = ensure_tz(
-        start_at
-    )
-
-    end_d = date.fromisoformat(
-        end_date_iso
-    )
-
-    hour, minute = map(
-        int,
-        time_text.split(":")
-    )
-
-    end_at = local_dt(
-        end_d,
-        time(hour, minute)
-    )
-
-    if end_at <= start_at:
-
-        await callback.message.answer(
-            "Возврат должен быть позже получения."
-        )
-
-        return
-
-    # ========================================================
-    # ФИНАЛЬНАЯ ПРОВЕРКА
-    #
-    # PostgreSQL выполняется НЕ в event loop.
-    # ========================================================
-
-    is_available = await async_available(
-        cid,
-        start_at,
-        end_at
-    )
-
-    if not is_available:
-
-        await callback.message.answer(
-            "❌ В этот период автомобиль уже занят "
-            "или между арендами недостаточно времени."
-        )
-
-        return
-
-    days = rental_days(
-        start_at,
-        end_at
-    )
-
-    total = (
-        days
-        * rate_for_days(
-            cid,
-            days
-        )
-    )
-
-    await state.update_data(
-        end_at=end_at.isoformat(),
-        days=days,
-        total=total
-    )
-
-    await state.set_state(
-        Booking.name
-    )
-
-    await callback.message.answer(
-        f"✅ <b>Период выбран</b>\n\n"
-        f"🚗 {CARS[cid]['name']}\n"
-        f"📅 Получение:\n"
-        f"<b>{format_date_time(start_at)}</b>\n\n"
-        f"📅 Возврат:\n"
-        f"<b>{format_date_time(end_at)}</b>\n\n"
-        f"⏱ Продолжительность: "
-        f"<b>{days} суток</b>\n"
-        f"💰 Стоимость: "
-        f"<b>{money(total)}</b>\n\n"
-        "Введите ваше имя:"
-    )
-
 
 # ============================================================
 # NAME
