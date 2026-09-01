@@ -2342,6 +2342,7 @@ async def end_time_handler(
     callback: CallbackQuery,
     state: FSMContext
 ):
+    # END_TIME_HANDLER_PRESENT
 
     _, cid, end_date_iso, time_text = (
         callback.data.split(":", 3)
