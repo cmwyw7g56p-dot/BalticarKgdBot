@@ -38,7 +38,7 @@ ADMIN_ID = int(
 
 CHANNEL_USERNAME = os.getenv(
     "CHANNEL_USERNAME",
-    "@Balticar_kgd"
+    "Balticarkgdbot"
 )
 
 DATABASE_URL = os.getenv(
@@ -3930,6 +3930,10 @@ async def publish(
 # MAIN
 # ============================================================
 
+print(
+    "DEBUG end_time_handler:",
+    end_time_handler
+)
 async def main():
 
     if not BOT_TOKEN:
