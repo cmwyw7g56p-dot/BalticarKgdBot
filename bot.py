@@ -2112,22 +2112,43 @@ async def pick_time(
     state: FSMContext
 ):
     """
+    Обработка выбора времени получения.
+
     ВАЖНО:
 
-    callback.answer() выполняется ПЕРЕД PostgreSQL.
+    1. callback.answer() выполняется сразу.
+    2. PostgreSQL здесь НЕ вызывается.
+    3. Мы не делаем бессмысленную проверку
+       "start -> start + 1 минута", потому что
+       конечное время аренды ещё неизвестно.
+    4. Реальная проверка занятости выполняется
+       после выбора даты и времени возврата.
+    5. Дополнительная атомарная проверка выполняется
+       непосредственно при создании заявки.
 
-    Поэтому Telegram сразу прекращает
-    состояние "загрузка".
-
-    Проверка PostgreSQL выполняется
-    в отдельном потоке через async_available().
+    Это убирает лишний запрос к Neon из критического
+    пути выбора времени получения.
     """
+
+    # ========================================================
+    # Telegram подтверждаем сразу.
+    # ========================================================
 
     await callback.answer()
 
-    _, cid, date_iso, time_text = (
-        callback.data.split(":")
-    )
+    try:
+
+        _, cid, date_iso, time_text = (
+            callback.data.split(":")
+        )
+
+    except (ValueError, AttributeError):
+
+        await callback.message.answer(
+            "❌ Некорректные данные выбора времени."
+        )
+
+        return
 
     if cid not in CARS:
 
@@ -2137,14 +2158,42 @@ async def pick_time(
 
         return
 
-    start_d = date.fromisoformat(
-        date_iso
-    )
+    try:
 
-    hour, minute = map(
-        int,
-        time_text.split(":")
-    )
+        start_d = date.fromisoformat(
+            date_iso
+        )
+
+        hour, minute = map(
+            int,
+            time_text.split(":")
+        )
+
+    except ValueError:
+
+        await callback.message.answer(
+            "❌ Некорректная дата или время."
+        )
+
+        return
+
+    # ========================================================
+    # Дополнительная защита диапазона времени.
+    # ========================================================
+
+    if not (
+        PICKUP_START_HOUR
+        <= hour
+        <= PICKUP_END_HOUR
+    ):
+
+        await callback.message.answer(
+            f"Время получения доступно "
+            f"с {PICKUP_START_HOUR:02d}:00 "
+            f"до {PICKUP_END_HOUR:02d}:00."
+        )
+
+        return
 
     start_at = local_dt(
         start_d,
@@ -2162,28 +2211,10 @@ async def pick_time(
         return
 
     # ========================================================
-    # PostgreSQL НЕ блокирует event loop.
+    # Сохраняем выбранное время.
+    #
+    # НИКАКОГО PostgreSQL здесь больше нет.
     # ========================================================
-
-    test_end = (
-        start_at
-        + timedelta(minutes=1)
-    )
-
-    is_available = await async_available(
-        cid,
-        start_at,
-        test_end
-    )
-
-    if not is_available:
-
-        await callback.message.answer(
-            "❌ В это время автомобиль уже занят "
-            "или ещё действует технический интервал."
-        )
-
-        return
 
     await state.update_data(
         car_id=cid,
@@ -2193,6 +2224,14 @@ async def pick_time(
     await state.set_state(
         Booking.end
     )
+
+    # ========================================================
+    # Показываем календарь возврата.
+    #
+    # get_month_bookings() вызывается внутри
+    # end_calendar_keyboard() через asyncio.to_thread(),
+    # поэтому event loop не блокируется.
+    # ========================================================
 
     keyboard = await end_calendar_keyboard(
         cid,
