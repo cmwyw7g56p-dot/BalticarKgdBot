@@ -1,5 +1,4 @@
 aiogram>=3.20,<4
 python-dotenv>=1.0
 tzdata>=2025.2
-
 aiohttp>=3.10,<4
