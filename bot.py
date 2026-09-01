@@ -1902,13 +1902,15 @@ async def car_selected(
 
         return
 
+    # Сразу подтверждаем нажатие кнопки.
+    # Нельзя делать долгие операции до callback.answer().
+    await callback.answer()
+
     await send_car(
         callback.bot,
         callback.message.chat.id,
         cid
     )
-
-    await callback.answer()
 
 
 async def pick_dates(
