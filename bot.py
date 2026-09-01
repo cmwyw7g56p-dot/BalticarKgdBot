@@ -5,8 +5,8 @@ from datetime import date, datetime, timedelta, time
 from zoneinfo import ZoneInfo
 
 import asyncpg
-from dotenv import load_dotenv
 from aiohttp import web
+from dotenv import load_dotenv
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
@@ -52,20 +52,10 @@ TIMEZONE = os.getenv(
     "Europe/Kaliningrad",
 ).strip()
 
-try:
-    TZ = ZoneInfo(TIMEZONE)
-except Exception:
-    print(
-        f"WARNING: некорректный TIMEZONE={TIMEZONE}. "
-        "Используется Europe/Kaliningrad."
-    )
-    TIMEZONE = "Europe/Kaliningrad"
-    TZ = ZoneInfo(TIMEZONE)
+TZ = ZoneInfo(TIMEZONE)
 
 try:
-    PORT = int(
-        os.getenv("PORT", "10000")
-    )
+    PORT = int(os.getenv("PORT", "10000"))
 except ValueError:
     PORT = 10000
 
@@ -124,32 +114,6 @@ except ValueError:
 
 
 # ============================================================
-# VALIDATE CONFIG
-# ============================================================
-
-if PICKUP_START_HOUR < 0:
-    PICKUP_START_HOUR = 0
-
-if PICKUP_START_HOUR > 23:
-    PICKUP_START_HOUR = 23
-
-if PICKUP_END_HOUR < 0:
-    PICKUP_END_HOUR = 0
-
-if PICKUP_END_HOUR > 23:
-    PICKUP_END_HOUR = 23
-
-if PICKUP_END_HOUR < PICKUP_START_HOUR:
-    PICKUP_END_HOUR = PICKUP_START_HOUR
-
-if TIME_STEP_MINUTES <= 0:
-    TIME_STEP_MINUTES = 30
-
-if HOLD_MINUTES <= 0:
-    HOLD_MINUTES = 60
-
-
-# ============================================================
 # CARS
 # ============================================================
 
@@ -163,7 +127,6 @@ CARS = {
             "photos/solaris_2021_2.jpeg",
         ],
     },
-
     "solaris20": {
         "name": "Hyundai Solaris 2020",
         "gear": "АКПП",
@@ -172,7 +135,6 @@ CARS = {
             "photos/solaris_2020.jpeg",
         ],
     },
-
     "solaris17": {
         "name": "Hyundai Solaris 2017",
         "gear": "АКПП",
@@ -182,7 +144,6 @@ CARS = {
             "photos/solaris_2017_2.jpeg",
         ],
     },
-
     "i30": {
         "name": "Hyundai i30 2014",
         "gear": "МКПП",
@@ -221,83 +182,68 @@ async def init_db():
     if not DATABASE_URL:
         raise RuntimeError(
             "DATABASE_URL не задан. "
-            "Добавьте DATABASE_URL от Neon "
-            "в Environment Variables Render."
+            "Добавьте DATABASE_URL от Neon в Environment Variables Render."
         )
 
-    try:
-        db_pool = await asyncpg.create_pool(
-            dsn=DATABASE_URL,
-            min_size=1,
-            max_size=5,
-            command_timeout=30,
+    db_pool = await asyncpg.create_pool(
+        dsn=DATABASE_URL,
+        min_size=1,
+        max_size=5,
+        command_timeout=30,
+    )
+
+    async with db_pool.acquire() as con:
+
+        await con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS bookings (
+                id BIGSERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                username TEXT,
+                car_id TEXT NOT NULL,
+                start_at TIMESTAMPTZ NOT NULL,
+                end_at TIMESTAMPTZ NOT NULL,
+                name TEXT NOT NULL,
+                phone TEXT NOT NULL,
+                comment TEXT,
+                total BIGINT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                expires_at TIMESTAMPTZ
+            )
+            """
         )
 
-        async with db_pool.acquire() as con:
-            await con.execute(
-                """
-                CREATE TABLE IF NOT EXISTS bookings (
-                    id BIGSERIAL PRIMARY KEY,
-                    user_id BIGINT NOT NULL,
-                    username TEXT,
-                    car_id TEXT NOT NULL,
-                    start_at TIMESTAMPTZ NOT NULL,
-                    end_at TIMESTAMPTZ NOT NULL,
-                    name TEXT NOT NULL,
-                    phone TEXT NOT NULL,
-                    comment TEXT,
-                    total BIGINT NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'pending',
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    expires_at TIMESTAMPTZ
-                )
-                """
-            )
-
-            await con.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_bookings_car_period
-                ON bookings (car_id, start_at, end_at)
-                """
-            )
-
-            await con.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_bookings_user
-                ON bookings (user_id)
-                """
-            )
-
-            await con.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_bookings_status
-                ON bookings (status)
-                """
-            )
-
-        print(
-            "Neon PostgreSQL connected successfully."
+        await con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_bookings_car_period
+            ON bookings (car_id, start_at, end_at)
+            """
         )
 
-    except Exception:
-        if db_pool is not None:
-            await db_pool.close()
-            db_pool = None
-        raise
+        await con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_bookings_user
+            ON bookings (user_id)
+            """
+        )
+
+        await con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_bookings_status
+            ON bookings (status)
+            """
+        )
+
+    print("Neon PostgreSQL connected successfully.")
 
 
 async def close_db():
     global db_pool
 
     if db_pool is not None:
-        try:
-            await db_pool.close()
-        except Exception as e:
-            print(
-                f"Database close error: {e}"
-            )
-        finally:
-            db_pool = None
+        await db_pool.close()
+        db_pool = None
 
 
 async def cleanup_pending():
@@ -329,9 +275,6 @@ async def available(
     start_at = ensure_tz(start_at)
     end_at = ensure_tz(end_at)
 
-    if end_at <= start_at:
-        return False
-
     await cleanup_pending()
 
     query = """
@@ -343,7 +286,7 @@ async def available(
           AND end_at > $2
     """
 
-    params = [
+    params: list = [
         car_id,
         start_at,
         end_at,
@@ -364,151 +307,6 @@ async def available(
     return row is None
 
 
-async def create_booking_atomic(
-    user_id: int,
-    username: str,
-    car_id: str,
-    start_at: datetime,
-    end_at: datetime,
-    name: str,
-    phone: str,
-    comment: str,
-    total: int,
-    expires_at: datetime,
-) -> tuple[int | None, bool]:
-
-    """
-    Атомарное создание заявки.
-
-    Возвращает:
-
-        (booking_id, True)
-            если заявка создана.
-
-        (None, False)
-            если период уже занят.
-
-    Для защиты от ситуации, когда два клиента одновременно
-    пытаются забронировать один автомобиль, используется
-    PostgreSQL advisory transaction lock по car_id.
-    """
-
-    if db_pool is None:
-        raise RuntimeError(
-            "Database pool is not initialized."
-        )
-
-    start_at = ensure_tz(start_at)
-    end_at = ensure_tz(end_at)
-    expires_at = ensure_tz(expires_at)
-
-    async with db_pool.acquire() as con:
-
-        async with con.transaction():
-
-            # ------------------------------------------------
-            # Блокируем операции бронирования этого автомобиля
-            # внутри текущей PostgreSQL-транзакции.
-            # ------------------------------------------------
-
-            await con.execute(
-                """
-                SELECT pg_advisory_xact_lock(
-                    hashtext($1)
-                )
-                """,
-                car_id,
-            )
-
-            # ------------------------------------------------
-            # Удаляем просроченные pending.
-            # ------------------------------------------------
-
-            await con.execute(
-                """
-                UPDATE bookings
-                SET status = 'expired'
-                WHERE status = 'pending'
-                  AND expires_at IS NOT NULL
-                  AND expires_at < NOW()
-                """
-            )
-
-            # ------------------------------------------------
-            # Проверяем пересечение.
-            # ------------------------------------------------
-
-            conflict = await con.fetchrow(
-                """
-                SELECT id
-                FROM bookings
-                WHERE car_id = $1
-                  AND status IN ('pending', 'confirmed')
-                  AND start_at < $3
-                  AND end_at > $2
-                LIMIT 1
-                """,
-                car_id,
-                start_at,
-                end_at,
-            )
-
-            if conflict:
-                return None, False
-
-            # ------------------------------------------------
-            # Создаём заявку.
-            # ------------------------------------------------
-
-            row = await con.fetchrow(
-                """
-                INSERT INTO bookings
-                (
-                    user_id,
-                    username,
-                    car_id,
-                    start_at,
-                    end_at,
-                    name,
-                    phone,
-                    comment,
-                    total,
-                    status,
-                    created_at,
-                    expires_at
-                )
-                VALUES
-                (
-                    $1,
-                    $2,
-                    $3,
-                    $4,
-                    $5,
-                    $6,
-                    $7,
-                    $8,
-                    $9,
-                    'pending',
-                    NOW(),
-                    $10
-                )
-                RETURNING id
-                """,
-                user_id,
-                username,
-                car_id,
-                start_at,
-                end_at,
-                name,
-                phone,
-                comment,
-                total,
-                expires_at,
-            )
-
-            return int(row["id"]), True
-
-
 # ============================================================
 # HELPERS
 # ============================================================
@@ -524,7 +322,6 @@ def local_dt(
     d: date,
     t: time,
 ) -> datetime:
-
     return datetime(
         d.year,
         d.month,
@@ -535,10 +332,7 @@ def local_dt(
     )
 
 
-def format_date_time(
-    value: datetime,
-) -> str:
-
+def format_date_time(value: datetime) -> str:
     value = ensure_tz(value)
 
     return value.strftime(
@@ -546,14 +340,8 @@ def format_date_time(
     )
 
 
-def money(
-    value: int,
-) -> str:
-
-    return (
-        f"{value:,}".replace(",", " ")
-        + " ₽"
-    )
+def money(value: int) -> str:
+    return f"{value:,}".replace(",", " ") + " ₽"
 
 
 def rental_days(
@@ -568,12 +356,7 @@ def rental_days(
         end_at - start_at
     ).total_seconds()
 
-    if seconds <= 0:
-        return 0
-
-    days = int(
-        seconds // 86400
-    )
+    days = int(seconds // 86400)
 
     if seconds % 86400:
         days += 1
@@ -585,11 +368,6 @@ def rate_for_days(
     car_id: str,
     days: int,
 ) -> int:
-
-    if car_id not in CARS:
-        raise ValueError(
-            "Unknown car_id"
-        )
 
     rates = CARS[car_id]["rates"]
 
@@ -603,7 +381,6 @@ def rate_for_days(
 
 
 def generate_time_values():
-
     values = []
 
     current = PICKUP_START_HOUR * 60
@@ -626,9 +403,7 @@ def generate_time_values():
     return values
 
 
-def is_valid_time(
-    t: time,
-) -> bool:
+def is_valid_time(t: time) -> bool:
 
     minutes = (
         t.hour * 60
@@ -639,61 +414,6 @@ def is_valid_time(
         PICKUP_START_HOUR * 60
         <= minutes
         <= PICKUP_END_HOUR * 60
-    )
-
-
-def parse_callback_time(
-    callback_data: str,
-    prefix: str,
-):
-    """
-    Разбирает callback:
-
-        picktime:car:YYYY-MM-DD:HH:MM
-
-    и
-
-        endtime:car:YYYY-MM-DD:HH:MM
-
-    """
-
-    parts = callback_data.split(":")
-
-    if len(parts) != 5:
-        return None
-
-    if parts[0] != prefix:
-        return None
-
-    cid = parts[1]
-    date_iso = parts[2]
-    hour_s = parts[3]
-    minute_s = parts[4]
-
-    if cid not in CARS:
-        return None
-
-    try:
-        selected_date = date.fromisoformat(
-            date_iso
-        )
-
-        hour = int(hour_s)
-        minute = int(minute_s)
-
-        selected_time = time(
-            hour,
-            minute,
-        )
-
-    except (ValueError, TypeError):
-        return None
-
-    return (
-        cid,
-        date_iso,
-        selected_date,
-        selected_time,
     )
 
 
@@ -746,15 +466,6 @@ def car_keyboard():
             ]
         )
 
-    rows.append(
-        [
-            InlineKeyboardButton(
-                text="◀️ Главное меню",
-                callback_data="home",
-            )
-        ]
-    )
-
     return InlineKeyboardMarkup(
         inline_keyboard=rows
     )
@@ -764,9 +475,7 @@ def car_keyboard():
 # CAR TEXT
 # ============================================================
 
-def car_text(
-    cid: str,
-):
+def car_text(cid: str):
 
     car = CARS[cid]
 
@@ -792,35 +501,25 @@ async def send_car(
     cid: str,
 ):
 
-    if cid not in CARS:
-        await bot.send_message(
-            chat_id,
-            "❌ Автомобиль не найден.",
-        )
-        return
-
     car = CARS[cid]
-
-    photos_sent = False
 
     for photo in car["photos"]:
 
-        if os.path.exists(photo):
+        if not os.path.exists(photo):
+            print(
+                f"Фото не найдено: {photo}"
+            )
+            continue
 
-            try:
-                await bot.send_photo(
-                    chat_id,
-                    FSInputFile(photo),
-                )
-
-                photos_sent = True
-
-            except Exception as e:
-
-                print(
-                    f"Ошибка отправки фото "
-                    f"{photo}: {e}"
-                )
+        try:
+            await bot.send_photo(
+                chat_id,
+                FSInputFile(photo),
+            )
+        except Exception as e:
+            print(
+                f"Ошибка отправки фото {photo}: {e}"
+            )
 
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -845,12 +544,6 @@ async def send_car(
         reply_markup=keyboard,
     )
 
-    if not photos_sent:
-        print(
-            f"Фото для {cid} не найдены "
-            f"или не отправились."
-        )
-
 
 # ============================================================
 # START
@@ -872,24 +565,6 @@ async def start_handler(
 
 
 # ============================================================
-# CANCEL
-# ============================================================
-
-async def cancel_handler(
-    message: Message,
-    state: FSMContext,
-):
-
-    await state.clear()
-
-    await message.answer(
-        "❌ Текущее оформление отменено.\n\n"
-        "Выберите действие:",
-        reply_markup=main_keyboard(),
-    )
-
-
-# ============================================================
 # ID
 # ============================================================
 
@@ -898,28 +573,8 @@ async def id_handler(
 ):
 
     await message.answer(
-        "Ваш Telegram ID: "
+        f"Ваш Telegram ID: "
         f"<code>{message.from_user.id}</code>"
-    )
-
-
-# ============================================================
-# HOME
-# ============================================================
-
-async def home_handler(
-    callback: CallbackQuery,
-    state: FSMContext,
-):
-
-    await state.clear()
-
-    await callback.answer()
-
-    await callback.message.answer(
-        "🚗 <b>Balticar</b>\n\n"
-        "Выберите действие:",
-        reply_markup=main_keyboard(),
     )
 
 
@@ -993,15 +648,12 @@ def calendar_keyboard(
     )
 
     if month == 12:
-
         next_month = date(
             year + 1,
             1,
             1,
         )
-
     else:
-
         next_month = date(
             year,
             month + 1,
@@ -1028,7 +680,7 @@ def calendar_keyboard(
                 text=x,
                 callback_data="noop",
             )
-            for x in [
+            for x in (
                 "Пн",
                 "Вт",
                 "Ср",
@@ -1036,7 +688,7 @@ def calendar_keyboard(
                 "Пт",
                 "Сб",
                 "Вс",
-            ]
+            )
         ]
     ]
 
@@ -1045,19 +697,12 @@ def calendar_keyboard(
             text=" ",
             callback_data="noop",
         )
-        for _ in range(
-            first.weekday()
-        )
+        for _ in range(first.weekday())
     ]
 
-    today = (
-        datetime.now(TZ).date()
-    )
+    today = datetime.now(TZ).date()
 
-    for number in range(
-        1,
-        days + 1,
-    ):
+    for number in range(1, days + 1):
 
         current = date(
             year,
@@ -1065,11 +710,7 @@ def calendar_keyboard(
             number,
         )
 
-        disabled = (
-            current < today
-        )
-
-        if disabled:
+        if current < today:
 
             button = InlineKeyboardButton(
                 text="·",
@@ -1115,12 +756,10 @@ def calendar_keyboard(
                     f"{prev_first.isoformat()}"
                 ),
             ),
-
             InlineKeyboardButton(
                 text=first.strftime("%m.%Y"),
                 callback_data="noop",
             ),
-
             InlineKeyboardButton(
                 text="›",
                 callback_data=(
@@ -1128,15 +767,6 @@ def calendar_keyboard(
                     f"{next_month.isoformat()}"
                 ),
             ),
-        ]
-    )
-
-    rows.append(
-        [
-            InlineKeyboardButton(
-                text="❌ Отмена",
-                callback_data="home",
-            )
         ]
     )
 
@@ -1151,7 +781,6 @@ def calendar_keyboard(
 
 async def pick_dates(
     callback: CallbackQuery,
-    state: FSMContext,
 ):
 
     parts = callback.data.split(":")
@@ -1174,11 +803,7 @@ async def pick_dates(
         )
         return
 
-    await state.clear()
-
-    today = (
-        datetime.now(TZ).date()
-    )
+    today = datetime.now(TZ).date()
 
     await callback.answer()
 
@@ -1194,7 +819,7 @@ async def pick_dates(
 
 
 # ============================================================
-# MONTH
+# START MONTH
 # ============================================================
 
 async def month(
@@ -1222,11 +847,7 @@ async def month(
         return
 
     try:
-
-        d = date.fromisoformat(
-            iso
-        )
-
+        d = date.fromisoformat(iso)
     except ValueError:
 
         await callback.answer(
@@ -1235,42 +856,13 @@ async def month(
         )
         return
 
-    today = (
-        datetime.now(TZ).date()
+    await callback.message.edit_reply_markup(
+        reply_markup=calendar_keyboard(
+            cid,
+            d.year,
+            d.month,
+        )
     )
-
-    # Не позволяем календарю уходить слишком далеко
-    # назад относительно текущего месяца.
-
-    if (
-        d.year < today.year
-        or (
-            d.year == today.year
-            and d.month < today.month
-        )
-    ):
-
-        d = date(
-            today.year,
-            today.month,
-            1,
-        )
-
-    try:
-
-        await callback.message.edit_reply_markup(
-            reply_markup=calendar_keyboard(
-                cid,
-                d.year,
-                d.month,
-            )
-        )
-
-    except Exception as e:
-
-        print(
-            f"Calendar edit error: {e}"
-        )
 
     await callback.answer()
 
@@ -1305,11 +897,7 @@ async def start_day(
         return
 
     try:
-
-        start_d = date.fromisoformat(
-            iso
-        )
-
+        start_d = date.fromisoformat(iso)
     except ValueError:
 
         await callback.answer(
@@ -1318,9 +906,7 @@ async def start_day(
         )
         return
 
-    today = (
-        datetime.now(TZ).date()
-    )
+    today = datetime.now(TZ).date()
 
     if start_d < today:
 
@@ -1391,15 +977,6 @@ def time_keyboard(
     if row:
         rows.append(row)
 
-    rows.append(
-        [
-            InlineKeyboardButton(
-                text="❌ Отмена",
-                callback_data="home",
-            )
-        ]
-    )
-
     return InlineKeyboardMarkup(
         inline_keyboard=rows
     )
@@ -1414,29 +991,49 @@ async def pick_time(
     state: FSMContext,
 ):
 
-    parsed = parse_callback_time(
-        callback.data,
-        "picktime",
-    )
+    parts = callback.data.split(":")
 
-    if parsed is None:
+    if len(parts) != 5:
 
         await callback.answer(
-            "Некорректные данные выбора времени.",
+            "Некорректные данные.",
             show_alert=True,
         )
         return
 
-    (
-        cid,
-        date_iso,
-        start_d,
-        selected_time,
-    ) = parsed
+    _, cid, date_iso, hour_s, minute_s = parts
 
-    if not is_valid_time(
-        selected_time
-    ):
+    if cid not in CARS:
+
+        await callback.answer(
+            "Автомобиль не найден.",
+            show_alert=True,
+        )
+        return
+
+    try:
+
+        start_d = date.fromisoformat(
+            date_iso
+        )
+
+        hour = int(hour_s)
+        minute = int(minute_s)
+
+        selected_time = time(
+            hour,
+            minute,
+        )
+
+    except ValueError:
+
+        await callback.answer(
+            "Некорректная дата или время.",
+            show_alert=True,
+        )
+        return
+
+    if not is_valid_time(selected_time):
 
         await callback.answer(
             "Это время недоступно.",
@@ -1531,30 +1128,13 @@ def end_calendar_keyboard(
         1,
     )
 
-    # Не разрешаем календарю возврата уходить
-    # в месяц раньше месяца получения.
-
-    if (
-        prev_first.year < start_d.year
-        or (
-            prev_first.year == start_d.year
-            and prev_first.month < start_d.month
-        )
-    ):
-
-        prev_first = date(
-            start_d.year,
-            start_d.month,
-            1,
-        )
-
     rows = [
         [
             InlineKeyboardButton(
                 text=x,
                 callback_data="noop",
             )
-            for x in [
+            for x in (
                 "Пн",
                 "Вт",
                 "Ср",
@@ -1562,7 +1142,7 @@ def end_calendar_keyboard(
                 "Пт",
                 "Сб",
                 "Вс",
-            ]
+            )
         ]
     ]
 
@@ -1571,15 +1151,10 @@ def end_calendar_keyboard(
             text=" ",
             callback_data="noop",
         )
-        for _ in range(
-            first.weekday()
-        )
+        for _ in range(first.weekday())
     ]
 
-    for number in range(
-        1,
-        days + 1,
-    ):
+    for number in range(1, days + 1):
 
         current = date(
             year,
@@ -1587,11 +1162,7 @@ def end_calendar_keyboard(
             number,
         )
 
-        disabled = (
-            current <= start_d
-        )
-
-        if disabled:
+        if current <= start_d:
 
             button = InlineKeyboardButton(
                 text="·",
@@ -1638,12 +1209,10 @@ def end_calendar_keyboard(
                     f"{prev_first.isoformat()}"
                 ),
             ),
-
             InlineKeyboardButton(
                 text=first.strftime("%m.%Y"),
                 callback_data="noop",
             ),
-
             InlineKeyboardButton(
                 text="›",
                 callback_data=(
@@ -1652,15 +1221,6 @@ def end_calendar_keyboard(
                     f"{next_month.isoformat()}"
                 ),
             ),
-        ]
-    )
-
-    rows.append(
-        [
-            InlineKeyboardButton(
-                text="❌ Отмена",
-                callback_data="home",
-            )
         ]
     )
 
@@ -1715,36 +1275,14 @@ async def endmonth(
         )
         return
 
-    if (
-        d.year < start_d.year
-        or (
-            d.year == start_d.year
-            and d.month < start_d.month
+    await callback.message.edit_reply_markup(
+        reply_markup=end_calendar_keyboard(
+            cid,
+            start_d,
+            d.year,
+            d.month,
         )
-    ):
-
-        d = date(
-            start_d.year,
-            start_d.month,
-            1,
-        )
-
-    try:
-
-        await callback.message.edit_reply_markup(
-            reply_markup=end_calendar_keyboard(
-                cid,
-                start_d,
-                d.year,
-                d.month,
-            )
-        )
-
-    except Exception as e:
-
-        print(
-            f"End calendar edit error: {e}"
-        )
+    )
 
     await callback.answer()
 
@@ -1812,7 +1350,7 @@ async def end_day(
     except ValueError:
 
         await callback.answer(
-            "Некорректные данные.",
+            "Некорректная дата.",
             show_alert=True,
         )
         return
@@ -1820,8 +1358,7 @@ async def end_day(
     if end_d <= start_at.date():
 
         await callback.answer(
-            "Дата возврата должна быть позже "
-            "даты получения.",
+            "Дата возврата должна быть позже даты получения.",
             show_alert=True,
         )
         return
@@ -1850,6 +1387,8 @@ async def end_day(
 
 # ============================================================
 # END TIME
+#
+# ЭТА ФУНКЦИЯ ОБЯЗАТЕЛЬНО ДОЛЖНА БЫТЬ ДО main()
 # ============================================================
 
 async def end_time_handler(
@@ -1857,38 +1396,17 @@ async def end_time_handler(
     state: FSMContext,
 ):
 
-    """
-    Финальный выбор времени возврата.
+    parts = callback.data.split(":")
 
-    callback_data:
-
-        endtime:CAR_ID:YYYY-MM-DD:HH:MM
-
-    Время содержит двоеточие, поэтому нельзя разбирать
-    callback четырьмя переменными.
-
-    Используется полный разбор пяти частей.
-    """
-
-    parsed = parse_callback_time(
-        callback.data,
-        "endtime",
-    )
-
-    if parsed is None:
+    if len(parts) != 5:
 
         await callback.answer(
-            "Некорректные данные выбора времени.",
+            "Некорректные данные.",
             show_alert=True,
         )
         return
 
-    (
-        cid,
-        end_date_iso,
-        end_d,
-        selected_time,
-    ) = parsed
+    _, cid, end_date_iso, hour_s, minute_s = parts
 
     if cid not in CARS:
 
@@ -1910,7 +1428,6 @@ async def end_time_handler(
         )
 
         await callback.message.answer(
-            "❌ Сессия устарела.\n\n"
             "Начните бронирование заново: /start",
             reply_markup=main_keyboard(),
         )
@@ -1926,25 +1443,27 @@ async def end_time_handler(
             start_at
         )
 
-    except ValueError:
-
-        await state.clear()
-
-        await callback.answer(
-            "Ошибка данных.",
-            show_alert=True,
+        end_d = date.fromisoformat(
+            end_date_iso
         )
 
-        await callback.message.answer(
-            "❌ Ошибка данных бронирования.\n\n"
-            "Начните заново: /start",
-            reply_markup=main_keyboard(),
+        hour = int(hour_s)
+        minute = int(minute_s)
+
+        selected_time = time(
+            hour,
+            minute,
+        )
+
+    except ValueError:
+
+        await callback.answer(
+            "Некорректная дата или время.",
+            show_alert=True,
         )
         return
 
-    if not is_valid_time(
-        selected_time
-    ):
+    if not is_valid_time(selected_time):
 
         await callback.answer(
             "Это время недоступно.",
@@ -1966,16 +1485,14 @@ async def end_time_handler(
         return
 
     # --------------------------------------------------------
-    # ФИНАЛЬНАЯ ПРОВЕРКА ЗАНЯТОСТИ
+    # ПРОВЕРКА ЗАНЯТОСТИ
     # --------------------------------------------------------
 
-    is_available = await available(
+    if not await available(
         cid,
         start_at,
         end_at,
-    )
-
-    if not is_available:
+    ):
 
         await callback.answer(
             "Автомобиль уже занят.",
@@ -1984,9 +1501,8 @@ async def end_time_handler(
 
         await callback.message.answer(
             "❌ В этот период автомобиль уже занят.\n\n"
-            "Выберите другие даты или время."
+            "Выберите другие даты."
         )
-
         return
 
     # --------------------------------------------------------
@@ -1998,22 +1514,12 @@ async def end_time_handler(
         end_at,
     )
 
-    if days <= 0:
-
-        await callback.answer(
-            "Некорректная продолжительность.",
-            show_alert=True,
-        )
-        return
-
     rate = rate_for_days(
         cid,
         days,
     )
 
-    total = (
-        days * rate
-    )
+    total = days * rate
 
     await state.update_data(
         end_date=end_date_iso,
@@ -2063,14 +1569,6 @@ async def name_handler(
         )
         return
 
-    if len(text) > 100:
-
-        await message.answer(
-            "Имя слишком длинное. "
-            "Введите имя ещё раз."
-        )
-        return
-
     await state.update_data(
         name=text
     )
@@ -2105,14 +1603,6 @@ async def phone_handler(
         )
         return
 
-    if len(phone) > 50:
-
-        await message.answer(
-            "Номер телефона слишком длинный.\n"
-            "Введите его ещё раз."
-        )
-        return
-
     await state.update_data(
         phone=phone
     )
@@ -2128,13 +1618,48 @@ async def phone_handler(
 
 
 # ============================================================
-# COMMENT / CREATE BOOKING
+# ADMIN BUTTONS
+# ============================================================
+
+def admin_buttons(
+    bid: int,
+):
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Подтвердить",
+                    callback_data=f"confirm:{bid}",
+                ),
+                InlineKeyboardButton(
+                    text="❌ Отклонить",
+                    callback_data=f"reject:{bid}",
+                ),
+            ]
+        ]
+    )
+
+
+# ============================================================
+# CREATE BOOKING
 # ============================================================
 
 async def comment_handler(
     message: Message,
     state: FSMContext,
 ):
+
+    if db_pool is None:
+
+        await state.clear()
+
+        await message.answer(
+            "❌ База данных временно недоступна.\n"
+            "Попробуйте позже.",
+            reply_markup=main_keyboard(),
+        )
+        return
 
     data = await state.get_data()
 
@@ -2189,18 +1714,7 @@ async def comment_handler(
             )
         )
 
-        total = int(
-            data["total"]
-        )
-
-        days = int(
-            data["days"]
-        )
-
-    except (
-        ValueError,
-        TypeError,
-    ):
+    except ValueError:
 
         await state.clear()
 
@@ -2216,7 +1730,7 @@ async def comment_handler(
         await state.clear()
 
         await message.answer(
-            "❌ Некорректный период бронирования.\n\n"
+            "❌ Некорректный период бронирования.\n"
             "Начните заново: /start",
             reply_markup=main_keyboard(),
         )
@@ -2232,38 +1746,6 @@ async def comment_handler(
         else comment_text
     )
 
-    if len(comment) > 2000:
-
-        await message.answer(
-            "Комментарий слишком длинный. "
-            "Максимум 2000 символов."
-        )
-        return
-
-    # --------------------------------------------------------
-    # Ещё одна проверка перед созданием.
-    # --------------------------------------------------------
-
-    if not await available(
-        cid,
-        start_at,
-        end_at,
-    ):
-
-        await state.clear()
-
-        await message.answer(
-            "❌ К сожалению, автомобиль только что "
-            "забронировали на выбранный период.\n\n"
-            "Пожалуйста, начните бронирование заново: /start",
-            reply_markup=main_keyboard(),
-        )
-        return
-
-    # --------------------------------------------------------
-    # Временное удержание заявки.
-    # --------------------------------------------------------
-
     expires_at = (
         datetime.now(TZ)
         + timedelta(
@@ -2271,62 +1753,116 @@ async def comment_handler(
         )
     )
 
-    username = (
-        message.from_user.username
-        or ""
-    )
-
     # --------------------------------------------------------
-    # АТОМАРНОЕ СОЗДАНИЕ В POSTGRESQL.
+    # АТОМАРНАЯ ОПЕРАЦИЯ POSTGRESQL
+    #
+    # pg_advisory_xact_lock не позволяет двум одновременным
+    # заявкам на одну машину пройти INSERT одновременно.
+    # Это устраняет race condition.
     # --------------------------------------------------------
 
-    try:
+    async with db_pool.acquire() as con:
 
-        bid, created = await create_booking_atomic(
-            user_id=message.from_user.id,
-            username=username,
-            car_id=cid,
-            start_at=start_at,
-            end_at=end_at,
-            name=data["name"],
-            phone=data["phone"],
-            comment=comment,
-            total=total,
-            expires_at=expires_at,
-        )
+        async with con.transaction():
 
-    except Exception as e:
+            await con.execute(
+                """
+                SELECT pg_advisory_xact_lock(
+                    hashtext($1)
+                )
+                """,
+                f"balticar:{cid}",
+            )
 
-        print(
-            f"Booking creation error: {e}"
-        )
+            await con.execute(
+                """
+                UPDATE bookings
+                SET status = 'expired'
+                WHERE status = 'pending'
+                  AND expires_at IS NOT NULL
+                  AND expires_at < NOW()
+                """
+            )
 
-        await state.clear()
+            conflict = await con.fetchrow(
+                """
+                SELECT id
+                FROM bookings
+                WHERE car_id = $1
+                  AND status IN ('pending', 'confirmed')
+                  AND start_at < $3
+                  AND end_at > $2
+                LIMIT 1
+                """,
+                cid,
+                start_at,
+                end_at,
+            )
 
-        await message.answer(
-            "❌ Не удалось создать заявку "
-            "из-за ошибки базы данных.\n\n"
-            "Попробуйте ещё раз через несколько секунд.",
-            reply_markup=main_keyboard(),
-        )
-        return
+            if conflict:
 
-    if not created or bid is None:
+                await state.clear()
 
-        await state.clear()
+                await message.answer(
+                    "❌ Автомобиль уже забронировали "
+                    "на этот период.\n\n"
+                    "Начните бронирование заново: /start",
+                    reply_markup=main_keyboard(),
+                )
+                return
 
-        await message.answer(
-            "❌ К сожалению, автомобиль только что "
-            "забронировали на выбранный период.\n\n"
-            "Пожалуйста, начните бронирование заново: /start",
-            reply_markup=main_keyboard(),
-        )
-        return
+            row = await con.fetchrow(
+                """
+                INSERT INTO bookings
+                (
+                    user_id,
+                    username,
+                    car_id,
+                    start_at,
+                    end_at,
+                    name,
+                    phone,
+                    comment,
+                    total,
+                    status,
+                    created_at,
+                    expires_at
+                )
+                VALUES
+                (
+                    $1,
+                    $2,
+                    $3,
+                    $4,
+                    $5,
+                    $6,
+                    $7,
+                    $8,
+                    $9,
+                    'pending',
+                    NOW(),
+                    $10
+                )
+                RETURNING id
+                """,
+                message.from_user.id,
+                message.from_user.username or "",
+                cid,
+                start_at,
+                end_at,
+                data["name"],
+                data["phone"],
+                comment,
+                int(data["total"]),
+                expires_at,
+            )
+
+            bid = int(row["id"])
 
     await state.clear()
 
     # --------------------------------------------------------
-    # КЛИЕНТУ
+    # CLIENT
     # --------------------------------------------------------
 
     await message.answer(
@@ -2336,24 +1872,25 @@ async def comment_handler(
         f"<b>{format_date_time(start_at)}</b>\n\n"
         f"📅 Возврат:\n"
         f"<b>{format_date_time(end_at)}</b>\n\n"
-        f"⏱ {days} суток\n"
-        f"💰 <b>{money(total)}</b>\n\n"
-        "Мы свяжемся с вами после подтверждения заявки."
+        f"⏱ {data['days']} суток\n"
+        f"💰 <b>{money(int(data['total']))}</b>\n\n"
+        "Мы свяжемся с вами после подтверждения заявки.",
+        reply_markup=main_keyboard(),
     )
 
     # --------------------------------------------------------
-    # АДМИНУ
+    # ADMIN
     # --------------------------------------------------------
 
     if ADMIN_ID:
 
-        username_display = (
+        username = (
             f"@{message.from_user.username}"
             if message.from_user.username
             else "без username"
         )
 
-        text = (
+        admin_text = (
             f"🔔 <b>Новая заявка №{bid}</b>\n\n"
             f"🚗 {CARS[cid]['name']} "
             f"({CARS[cid]['gear']})\n\n"
@@ -2361,11 +1898,11 @@ async def comment_handler(
             f"<b>{format_date_time(start_at)}</b>\n\n"
             f"📅 Возврат:\n"
             f"<b>{format_date_time(end_at)}</b>\n\n"
-            f"⏱ {days} суток\n"
-            f"💰 <b>{money(total)}</b>\n\n"
+            f"⏱ {data['days']} суток\n"
+            f"💰 <b>{money(int(data['total']))}</b>\n\n"
             f"👤 {data['name']}\n"
             f"📞 {data['phone']}\n"
-            f"Telegram: {username_display}\n"
+            f"Telegram: {username}\n"
             f"📝 {comment or '—'}\n\n"
             f"⏳ Ожидает подтверждения до "
             f"{expires_at.astimezone(TZ).strftime('%d.%m.%Y %H:%M')}"
@@ -2375,41 +1912,15 @@ async def comment_handler(
 
             await message.bot.send_message(
                 ADMIN_ID,
-                text,
-                reply_markup=admin_buttons(
-                    bid
-                ),
+                admin_text,
+                reply_markup=admin_buttons(bid),
             )
 
         except Exception as e:
 
             print(
-                f"Admin notification error: {e}"
+                f"Ошибка отправки заявки админу: {e}"
             )
-
-
-# ============================================================
-# ADMIN BUTTONS
-# ============================================================
-
-def admin_buttons(
-    bid: int,
-):
-
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="✅ Подтвердить",
-                    callback_data=f"confirm:{bid}",
-                ),
-                InlineKeyboardButton(
-                    text="❌ Отклонить",
-                    callback_data=f"reject:{bid}",
-                ),
-            ]
-        ]
-    )
 
 
 # ============================================================
@@ -2420,103 +1931,85 @@ async def mybookings(
     callback: CallbackQuery,
 ):
 
-    await callback.answer()
-
     if db_pool is None:
 
-        await callback.message.answer(
-            "❌ База данных временно недоступна."
+        await callback.answer(
+            "База данных недоступна.",
+            show_alert=True,
         )
         return
 
-    try:
+    await cleanup_pending()
 
-        await cleanup_pending()
+    async with db_pool.acquire() as con:
 
-        async with db_pool.acquire() as con:
-
-            rows = await con.fetch(
-                """
-                SELECT
-                    id,
-                    car_id,
-                    start_at,
-                    end_at,
-                    total,
-                    status
-                FROM bookings
-                WHERE user_id = $1
-                ORDER BY id DESC
-                LIMIT 10
-                """,
-                callback.from_user.id,
-            )
-
-    except Exception as e:
-
-        print(
-            f"My bookings error: {e}"
+        rows = await con.fetch(
+            """
+            SELECT *
+            FROM bookings
+            WHERE user_id = $1
+            ORDER BY id DESC
+            LIMIT 10
+            """,
+            callback.from_user.id,
         )
-
-        await callback.message.answer(
-            "❌ Не удалось загрузить заявки."
-        )
-        return
 
     if not rows:
 
         await callback.message.answer(
             "У вас пока нет заявок."
         )
-        return
 
-    labels = {
-        "pending": "⏳ ожидает подтверждения",
-        "confirmed": "✅ подтверждена",
-        "rejected": "❌ отклонена",
-        "expired": "⌛ истекла",
-    }
+    else:
 
-    out = [
-        "📋 <b>Ваши заявки:</b>"
-    ]
+        labels = {
+            "pending": "⏳ ожидает подтверждения",
+            "confirmed": "✅ подтверждена",
+            "rejected": "❌ отклонена",
+            "expired": "⌛ истекла",
+        }
 
-    for row in rows:
+        out = [
+            "📋 <b>Ваши заявки:</b>"
+        ]
 
-        status = labels.get(
-            row["status"],
-            row["status"],
+        for row in rows:
+
+            status = labels.get(
+                row["status"],
+                row["status"],
+            )
+
+            start_at = ensure_tz(
+                row["start_at"]
+            )
+
+            end_at = ensure_tz(
+                row["end_at"]
+            )
+
+            car = CARS.get(
+                row["car_id"],
+                {
+                    "name": row["car_id"]
+                },
+            )
+
+            out.append(
+                f"\n№{row['id']} — "
+                f"{car['name']}\n"
+                f"📅 "
+                f"{format_date_time(start_at)} — "
+                f"{format_date_time(end_at)}\n"
+                f"💰 {money(row['total'])}\n"
+                f"Статус: {status}"
+            )
+
+        await callback.message.answer(
+            "\n".join(out)
         )
 
-        car_name = CARS.get(
-            row["car_id"],
-            {},
-        ).get(
-            "name",
-            row["car_id"],
-        )
-
-        start_at = ensure_tz(
-            row["start_at"]
-        )
-
-        end_at = ensure_tz(
-            row["end_at"]
-        )
-
-        out.append(
-            f"\n№{row['id']} — "
-            f"{car_name}\n"
-            f"📅 "
-            f"{format_date_time(start_at)} — "
-            f"{format_date_time(end_at)}\n"
-            f"💰 {money(row['total'])}\n"
-            f"Статус: {status}"
-        )
-
-    await callback.message.answer(
-        "\n".join(out)
-    )
+    await callback.answer()
 
 
 # ============================================================
@@ -2527,12 +2020,9 @@ async def terms(
     callback: CallbackQuery,
 ):
 
-    await callback.answer()
-
     await callback.message.answer(
         "ℹ️ <b>Условия</b>\n\n"
-        "• Бронирование оформляется после "
-        "подтверждения заявки.\n"
+        "• Бронирование оформляется после подтверждения заявки.\n"
         "• Цена рассчитывается автоматически "
         "по продолжительности аренды.\n"
         "• Заявка временно удерживает выбранный "
@@ -2540,6 +2030,8 @@ async def terms(
         "• Детали получения и возврата согласовываются "
         "с менеджером."
     )
+
+    await callback.answer()
 
 
 # ============================================================
@@ -2579,9 +2071,7 @@ async def admin_action(
     action = parts[0]
 
     try:
-
         bid = int(parts[1])
-
     except ValueError:
 
         await callback.answer(
@@ -2590,161 +2080,109 @@ async def admin_action(
         )
         return
 
-    if action not in {
-        "confirm",
-        "reject",
-    }:
+    async with db_pool.acquire() as con:
+
+        row = await con.fetchrow(
+            """
+            SELECT *
+            FROM bookings
+            WHERE id = $1
+            """,
+            bid,
+        )
+
+    if not row:
 
         await callback.answer(
-            "Неизвестное действие.",
+            "Заявка не найдена.",
             show_alert=True,
         )
         return
 
-    # --------------------------------------------------------
+    # ========================================================
     # CONFIRM
-    # --------------------------------------------------------
+    # ========================================================
 
     if action == "confirm":
 
-        try:
+        start_at = ensure_tz(
+            row["start_at"]
+        )
 
-            async with db_pool.acquire() as con:
+        end_at = ensure_tz(
+            row["end_at"]
+        )
 
-                async with con.transaction():
+        async with db_pool.acquire() as con:
 
-                    # ----------------------------------------
-                    # Получаем заявку.
-                    # ----------------------------------------
+            async with con.transaction():
 
-                    row = await con.fetchrow(
-                        """
-                        SELECT *
-                        FROM bookings
-                        WHERE id = $1
-                        FOR UPDATE
-                        """,
-                        bid,
+                await con.execute(
+                    """
+                    SELECT pg_advisory_xact_lock(
+                        hashtext($1)
                     )
+                    """,
+                    f"balticar:{row['car_id']}",
+                )
 
-                    if not row:
+                await con.execute(
+                    """
+                    UPDATE bookings
+                    SET status = 'expired'
+                    WHERE status = 'pending'
+                      AND expires_at IS NOT NULL
+                      AND expires_at < NOW()
+                    """
+                )
 
-                        await callback.answer(
-                            "Заявка не найдена.",
-                            show_alert=True,
-                        )
-                        return
+                conflict = await con.fetchrow(
+                    """
+                    SELECT id
+                    FROM bookings
+                    WHERE car_id = $1
+                      AND id <> $2
+                      AND status IN ('pending', 'confirmed')
+                      AND start_at < $4
+                      AND end_at > $3
+                    LIMIT 1
+                    """,
+                    row["car_id"],
+                    bid,
+                    start_at,
+                    end_at,
+                )
 
-                    if row["status"] != "pending":
-
-                        await callback.answer(
-                            "Заявка уже обработана.",
-                            show_alert=True,
-                        )
-                        return
-
-                    start_at = ensure_tz(
-                        row["start_at"]
-                    )
-
-                    end_at = ensure_tz(
-                        row["end_at"]
-                    )
-
-                    car_id = row["car_id"]
-
-                    # ----------------------------------------
-                    # Блокируем операции по этому автомобилю.
-                    # ----------------------------------------
-
-                    await con.execute(
-                        """
-                        SELECT pg_advisory_xact_lock(
-                            hashtext($1)
-                        )
-                        """,
-                        car_id,
-                    )
-
-                    # ----------------------------------------
-                    # Удаляем истёкшие заявки.
-                    # ----------------------------------------
+                if conflict:
 
                     await con.execute(
                         """
                         UPDATE bookings
-                        SET status = 'expired'
-                        WHERE status = 'pending'
-                          AND expires_at IS NOT NULL
-                          AND expires_at < NOW()
-                        """
-                    )
-
-                    # ----------------------------------------
-                    # Повторная проверка конфликта.
-                    # ----------------------------------------
-
-                    conflict = await con.fetchrow(
-                        """
-                        SELECT id
-                        FROM bookings
-                        WHERE car_id = $1
-                          AND id <> $2
-                          AND status IN ('pending', 'confirmed')
-                          AND start_at < $4
-                          AND end_at > $3
-                        LIMIT 1
+                        SET status = 'rejected'
+                        WHERE id = $1
+                        AND status = 'pending'
                         """,
-                        car_id,
                         bid,
-                        start_at,
-                        end_at,
                     )
 
-                    if conflict:
+                    conflict_found = True
+                    updated = None
 
-                        await con.execute(
-                            """
-                            UPDATE bookings
-                            SET status = 'rejected'
-                            WHERE id = $1
-                            """,
-                            bid,
-                        )
+                else:
 
-                        conflict_found = True
-                        updated = False
+                    updated = await con.fetchrow(
+                        """
+                        UPDATE bookings
+                        SET status = 'confirmed',
+                            expires_at = NULL
+                        WHERE id = $1
+                          AND status = 'pending'
+                        RETURNING id
+                        """,
+                        bid,
+                    )
 
-                    else:
-
-                        updated_row = await con.fetchrow(
-                            """
-                            UPDATE bookings
-                            SET status = 'confirmed',
-                                expires_at = NULL
-                            WHERE id = $1
-                              AND status = 'pending'
-                            RETURNING id
-                            """,
-                            bid,
-                        )
-
-                        conflict_found = False
-                        updated = (
-                            updated_row is not None
-                        )
-
-        except Exception as e:
-
-            print(
-                f"Confirm booking error: {e}"
-            )
-
-            await callback.answer(
-                "Ошибка базы данных.",
-                show_alert=True,
-            )
-            return
+                    conflict_found = False
 
         if conflict_found:
 
@@ -2768,7 +2206,7 @@ async def admin_action(
             except Exception as e:
 
                 print(
-                    f"Client conflict notification error: {e}"
+                    f"Ошибка уведомления клиента: {e}"
                 )
 
             await callback.answer(
@@ -2811,7 +2249,7 @@ async def admin_action(
         except Exception as e:
 
             print(
-                f"Client confirmation notification error: {e}"
+                f"Ошибка уведомления клиента: {e}"
             )
 
         await callback.answer(
@@ -2820,72 +2258,25 @@ async def admin_action(
 
         return
 
-    # --------------------------------------------------------
+    # ========================================================
     # REJECT
-    # --------------------------------------------------------
+    # ========================================================
 
     if action == "reject":
 
-        try:
+        async with db_pool.acquire() as con:
 
-            async with db_pool.acquire() as con:
-
-                async with con.transaction():
-
-                    row = await con.fetchrow(
-                        """
-                        SELECT *
-                        FROM bookings
-                        WHERE id = $1
-                        FOR UPDATE
-                        """,
-                        bid,
-                    )
-
-                    if not row:
-
-                        await callback.answer(
-                            "Заявка не найдена.",
-                            show_alert=True,
-                        )
-                        return
-
-                    if row["status"] != "pending":
-
-                        await callback.answer(
-                            "Заявка уже обработана.",
-                            show_alert=True,
-                        )
-                        return
-
-                    updated_row = await con.fetchrow(
-                        """
-                        UPDATE bookings
-                        SET status = 'rejected'
-                        WHERE id = $1
-                          AND status = 'pending'
-                        RETURNING id
-                        """,
-                        bid,
-                    )
-
-                    updated = (
-                        updated_row is not None
-                    )
-
-        except Exception as e:
-
-            print(
-                f"Reject booking error: {e}"
+            result = await con.execute(
+                """
+                UPDATE bookings
+                SET status = 'rejected'
+                WHERE id = $1
+                  AND status = 'pending'
+                """,
+                bid,
             )
 
-            await callback.answer(
-                "Ошибка базы данных.",
-                show_alert=True,
-            )
-            return
-
-        if not updated:
+        if result.endswith("0"):
 
             await callback.answer(
                 "Заявка уже обработана.",
@@ -2912,12 +2303,19 @@ async def admin_action(
         except Exception as e:
 
             print(
-                f"Client rejection notification error: {e}"
+                f"Ошибка уведомления клиента: {e}"
             )
 
         await callback.answer(
             "Заявка отклонена."
         )
+
+        return
+
+    await callback.answer(
+        "Неизвестное действие.",
+        show_alert=True,
+    )
 
 
 # ============================================================
@@ -2931,13 +2329,6 @@ async def publish(
     if message.from_user.id != ADMIN_ID:
         return
 
-    if not CHANNEL_USERNAME:
-
-        await message.answer(
-            "CHANNEL_USERNAME не задан."
-        )
-        return
-
     try:
 
         bot_me = await message.bot.get_me()
@@ -2945,7 +2336,7 @@ async def publish(
         if not bot_me.username:
 
             await message.answer(
-                "У бота нет username."
+                "У бота отсутствует username."
             )
             return
 
@@ -2976,18 +2367,17 @@ async def publish(
         )
 
         await message.answer(
-            "Готово: пост с кнопкой опубликован "
-            "в канале."
+            "Готово: пост с кнопкой опубликован в канале."
         )
 
     except Exception as e:
 
         print(
-            f"Publish error: {e}"
+            f"Ошибка публикации: {e}"
         )
 
         await message.answer(
-            "❌ Не удалось опубликовать пост.\n\n"
+            "❌ Не удалось опубликовать пост.\n"
             f"Ошибка: {e}"
         )
 
@@ -3001,8 +2391,7 @@ async def health(
 ):
 
     return web.Response(
-        text="Balticar bot is running",
-        status=200,
+        text="Balticar bot is running"
     )
 
 
@@ -3046,8 +2435,7 @@ async def telegram_webhook(
         )
 
         return web.Response(
-            text="OK",
-            status=200,
+            text="OK"
         )
 
     except Exception as e:
@@ -3063,17 +2451,35 @@ async def telegram_webhook(
 
 
 # ============================================================
-# ERROR HANDLER
+# CREATE WEB APP
 # ============================================================
 
-async def error_handler(
-    update,
-    exception,
+async def create_web_app(
+    bot: Bot,
+    dp: Dispatcher,
 ):
 
-    print(
-        f"Dispatcher error: {exception}"
+    app = web.Application()
+
+    app["bot"] = bot
+    app["dp"] = dp
+
+    app.router.add_get(
+        "/",
+        health,
     )
+
+    app.router.add_get(
+        "/health",
+        health,
+    )
+
+    app.router.add_post(
+        WEBHOOK_PATH,
+        telegram_webhook,
+    )
+
+    return app
 
 
 # ============================================================
@@ -3094,24 +2500,24 @@ async def main():
             "DATABASE_URL не задан."
         )
 
+    # --------------------------------------------------------
+    # DATABASE
+    # --------------------------------------------------------
+
     await init_db()
 
+    # --------------------------------------------------------
+    # BOT
+    # --------------------------------------------------------
+
     bot = Bot(
-        BOT_TOKEN,
+        token=BOT_TOKEN,
         default=DefaultBotProperties(
-            parse_mode=ParseMode.HTML
+            parse_mode=ParseMode.HTML,
         ),
     )
 
     dp = Dispatcher()
-
-    # ========================================================
-    # ERROR HANDLER
-    # ========================================================
-
-    dp.errors.register(
-        error_handler
-    )
 
     # ========================================================
     # COMMANDS
@@ -3128,11 +2534,6 @@ async def main():
     )
 
     dp.message.register(
-        cancel_handler,
-        Command("cancel"),
-    )
-
-    dp.message.register(
         publish,
         Command("publish"),
     )
@@ -3140,11 +2541,6 @@ async def main():
     # ========================================================
     # CATALOG
     # ========================================================
-
-    dp.callback_query.register(
-        home_handler,
-        F.data == "home",
-    )
 
     dp.callback_query.register(
         catalog,
@@ -3200,18 +2596,10 @@ async def main():
 
     # ========================================================
     # RETURN TIME
-    # ========================================================
-
+    #
     # ВАЖНО:
-    # Здесь теперь действительно существует функция
-    # end_time_handler.
-    #
-    # Именно её не хватало в предыдущей версии, из-за чего
-    # Render выдавал:
-    #
-    # NameError:
-    # name 'end_time_handler' is not defined
-    #
+    # Здесь теперь существует функция
+    # end_time_handler выше.
     # ========================================================
 
     dp.callback_query.register(
@@ -3254,7 +2642,6 @@ async def main():
     async def noop_handler(
         callback: CallbackQuery,
     ):
-
         await callback.answer()
 
     dp.callback_query.register(
@@ -3290,46 +2677,31 @@ async def main():
         "",
     ).strip().rstrip("/")
 
-    # --------------------------------------------------------
-    # Если Render URL отсутствует — polling.
-    # --------------------------------------------------------
+    # ========================================================
+    # POLLING
+    # ========================================================
 
     if not external_url:
 
         print(
-            "========================================"
+            "RENDER_EXTERNAL_URL не задан."
         )
 
         print(
-            "Balticar bot started in POLLING mode"
-        )
-
-        print(
-            f"Timezone: {TIMEZONE}"
-        )
-
-        print(
-            "Database: PostgreSQL / Neon"
-        )
-
-        print(
-            "========================================"
+            "Запуск polling."
         )
 
         try:
 
             await dp.start_polling(
-                bot
+                bot,
             )
 
         finally:
 
             await close_db()
 
-            try:
-                await bot.session.close()
-            except Exception:
-                pass
+            await bot.session.close()
 
         return
 
@@ -3342,123 +2714,65 @@ async def main():
         f"{WEBHOOK_PATH}"
     )
 
-    # --------------------------------------------------------
-    # Если секрет задан в Environment Variables — используем
-    # его.
+    # Если WEBHOOK_SECRET задан в Render —
+    # используем его.
     #
-    # Если не задан — генерируем секрет автоматически.
-    # Важно: сгенерированный секрет используется только
-    # Telegram API. Проверка заголовка ниже в этом случае
-    # специально не включается, потому что после рестарта
-    # Render значение может измениться.
+    # Если не задан — генерируем случайный секрет.
+    # Он действует только во время текущего запуска.
+    # Для постоянного секрета лучше задать WEBHOOK_SECRET
+    # в Environment Variables Render.
+
+    secret = (
+        WEBHOOK_SECRET
+        or secrets.token_urlsafe(32)
+    )
+
+    await bot.set_webhook(
+        url=webhook_url,
+        secret_token=secret,
+        allowed_updates=(
+            dp.resolve_used_update_types()
+        ),
+        drop_pending_updates=False,
+    )
+
+    print(
+        "========================================"
+    )
+
+    print(
+        "Balticar bot started"
+    )
+
+    print(
+        f"Webhook: {webhook_url}"
+    )
+
+    print(
+        f"Timezone: {TIMEZONE}"
+    )
+
+    print(
+        f"Pickup time: "
+        f"{PICKUP_START_HOUR:02d}:00 - "
+        f"{PICKUP_END_HOUR:02d}:00"
+    )
+
+    print(
+        "Database: PostgreSQL / Neon"
+    )
+
+    print(
+        "========================================"
+    )
+
+    # --------------------------------------------------------
+    # WEB APP
     # --------------------------------------------------------
 
-    generated_secret = False
-
-    if WEBHOOK_SECRET:
-
-        secret = WEBHOOK_SECRET
-
-    else:
-
-        secret = secrets.token_urlsafe(32)
-        generated_secret = True
-
-    try:
-
-        await bot.set_webhook(
-            webhook_url,
-            secret_token=secret,
-            allowed_updates=(
-                dp.resolve_used_update_types()
-            ),
-            drop_pending_updates=False,
-        )
-
-        print(
-            "========================================"
-        )
-
-        print(
-            "Balticar bot started"
-        )
-
-        print(
-            f"Webhook: {webhook_url}"
-        )
-
-        print(
-            f"Timezone: {TIMEZONE}"
-        )
-
-        print(
-            f"Pickup time: "
-            f"{PICKUP_START_HOUR:02d}:00 - "
-            f"{PICKUP_END_HOUR:02d}:00"
-        )
-
-        print(
-            f"Hold time: {HOLD_MINUTES} minutes"
-        )
-
-        print(
-            "Database: PostgreSQL / Neon"
-        )
-
-        if generated_secret:
-
-            print(
-                "Webhook secret: generated automatically"
-            )
-
-        else:
-
-            print(
-                "Webhook secret: configured "
-                "in Environment Variables"
-            )
-
-        print(
-            "========================================"
-        )
-
-    except Exception as e:
-
-        print(
-            f"Webhook setup error: {e}"
-        )
-
-        await close_db()
-
-        try:
-            await bot.session.close()
-        except Exception:
-            pass
-
-        raise
-
-    # ========================================================
-    # AIOHTTP
-    # ========================================================
-
-    app = web.Application()
-
-    app["bot"] = bot
-    app["dp"] = dp
-
-    app.router.add_get(
-        "/",
-        health,
-    )
-
-    app.router.add_get(
-        "/health",
-        health,
-    )
-
-    app.router.add_post(
-        WEBHOOK_PATH,
-        telegram_webhook,
+    app = await create_web_app(
+        bot,
+        dp,
     )
 
     runner = web.AppRunner(
@@ -3483,14 +2797,6 @@ async def main():
 
         await asyncio.Event().wait()
 
-    except asyncio.CancelledError:
-
-        print(
-            "Main task cancelled."
-        )
-
-        raise
-
     finally:
 
         print(
@@ -3509,27 +2815,11 @@ async def main():
                 f"Webhook delete error: {e}"
             )
 
-        try:
-
-            await runner.cleanup()
-
-        except Exception as e:
-
-            print(
-                f"Runner cleanup error: {e}"
-            )
+        await runner.cleanup()
 
         await close_db()
 
-        try:
-
-            await bot.session.close()
-
-        except Exception as e:
-
-            print(
-                f"Bot session close error: {e}"
-            )
+        await bot.session.close()
 
 
 # ============================================================
@@ -3549,19 +2839,3 @@ if __name__ == "__main__":
         print(
             "Balticar bot stopped."
         )
-
-    except Exception as e:
-
-        print(
-            "========================================"
-        )
-
-        print(
-            f"FATAL ERROR: {e}"
-        )
-
-        print(
-            "========================================"
-        )
-
-        raise
