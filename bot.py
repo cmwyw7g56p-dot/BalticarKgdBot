@@ -13,6 +13,7 @@ from psycopg.rows import dict_row
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -1914,7 +1915,7 @@ async def home(
 ):
 
     # Отвечаем Telegram сразу.
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     await state.clear()
 
@@ -1940,7 +1941,7 @@ async def catalog(
     callback: CallbackQuery
 ):
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     await callback.message.edit_text(
         "🚗 <b>Автомобили Balticar</b>\n\n"
@@ -1954,7 +1955,7 @@ async def car_selected(
     callback: CallbackQuery
 ):
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     cid = callback.data.split(
         ":",
@@ -1980,7 +1981,7 @@ async def pick_dates(
     callback: CallbackQuery
 ):
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     cid = callback.data.split(
         ":",
@@ -2018,7 +2019,7 @@ async def month(
     callback: CallbackQuery
 ):
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     _, cid, iso = callback.data.split(":")
 
@@ -2046,7 +2047,7 @@ async def start_day(
     state: FSMContext
 ):
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     _, cid, iso = callback.data.split(":")
 
@@ -2101,7 +2102,7 @@ async def backstart(
     callback: CallbackQuery
 ):
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     _, cid, iso = callback.data.split(":")
 
@@ -2143,7 +2144,7 @@ async def pick_time(
     # Telegram подтверждаем сразу.
     # ========================================================
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     try:
 
@@ -2291,6 +2292,44 @@ async def pick_time(
 
 
 # ============================================================
+# SAFE CALLBACK ANSWER
+# ============================================================
+
+async def safe_callback_answer(
+    callback: CallbackQuery,
+    **kwargs
+):
+    """
+    Безопасное подтверждение callback-запроса.
+
+    Telegram может прислать повторный callback или callback,
+    который к моменту обработки уже стал недействительным.
+    В таком случае ошибка TelegramBadRequest не должна падать
+    и останавливать обработку update.
+    """
+
+    try:
+        await callback.answer(**kwargs)
+        return True
+    except TelegramBadRequest as exc:
+        text = str(exc).lower()
+
+        if (
+            "query is too old" in text
+            or "response timeout expired" in text
+            or "query id is invalid" in text
+            or "query is invalid" in text
+        ):
+            print(
+                f"[CALLBACK] answer skipped: "
+                f"id={callback.id} error={exc}"
+            )
+            return False
+
+        raise
+
+
+# ============================================================
 # END MONTH
 # ============================================================
 
@@ -2307,7 +2346,7 @@ async def endmonth(
         f"t={started:.3f}"
     )
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     print(
         f"[ENDMONTH] ANSWERED "
@@ -2360,7 +2399,7 @@ async def end_day(
     state: FSMContext
 ):
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     _, cid, end_iso = callback.data.split(":")
 
@@ -2435,7 +2474,7 @@ async def backend(
     callback: CallbackQuery
 ):
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     _, cid, start_iso = callback.data.split(":")
 
@@ -2473,7 +2512,7 @@ async def backstarttime(
         f"t={started:.3f}"
     )
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     print(
         f"[BACKSTARTTIME] ANSWERED "
@@ -2517,7 +2556,7 @@ async def end_time_handler(
     автомобиля и только затем переходим к вводу данных клиента.
     """
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     try:
         parts = callback.data.split(":")
@@ -3088,7 +3127,7 @@ async def mybookings(
     callback: CallbackQuery
 ):
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     rows = await asyncio.to_thread(
         get_user_bookings_sync,
@@ -3176,7 +3215,7 @@ async def terms(
     callback: CallbackQuery
 ):
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     await callback.message.answer(
         "ℹ️ <b>Условия аренды</b>\n\n"
@@ -3204,7 +3243,7 @@ async def contact(
     callback: CallbackQuery
 ):
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     await callback.message.answer(
         "📞 <b>Связаться с Balticar</b>\n\n"
@@ -3258,7 +3297,7 @@ async def admin_back(
     callback: CallbackQuery
 ):
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     if callback.from_user.id != ADMIN_ID:
 
@@ -3283,7 +3322,7 @@ async def admin_calendar(
     callback: CallbackQuery
 ):
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     if callback.from_user.id != ADMIN_ID:
 
@@ -3325,7 +3364,7 @@ async def admin_car_calendar(
     callback: CallbackQuery
 ):
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     if callback.from_user.id != ADMIN_ID:
 
@@ -3373,7 +3412,7 @@ async def admin_month(
     callback: CallbackQuery
 ):
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     if callback.from_user.id != ADMIN_ID:
 
@@ -3451,7 +3490,7 @@ async def admin_day(
     callback: CallbackQuery
 ):
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     if callback.from_user.id != ADMIN_ID:
 
@@ -3545,7 +3584,7 @@ async def admin_new(
     callback: CallbackQuery
 ):
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     if callback.from_user.id != ADMIN_ID:
 
@@ -3635,7 +3674,7 @@ async def admin_booking(
     callback: CallbackQuery
 ):
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     if callback.from_user.id != ADMIN_ID:
 
@@ -3754,7 +3793,7 @@ async def admin_bookings(
     callback: CallbackQuery
 ):
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     if callback.from_user.id != ADMIN_ID:
 
@@ -3820,7 +3859,7 @@ async def admin_cars(
     callback: CallbackQuery
 ):
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     if callback.from_user.id != ADMIN_ID:
 
@@ -3862,7 +3901,7 @@ async def admin_car_info(
     callback: CallbackQuery
 ):
 
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     if callback.from_user.id != ADMIN_ID:
 
@@ -4101,7 +4140,7 @@ async def admin_action(
 ):
 
     # Отвечаем Telegram сразу.
-    await callback.answer()
+    await safe_callback_answer(callback)
 
     if callback.from_user.id != ADMIN_ID:
 
@@ -4465,7 +4504,7 @@ async def main():
     )
 
     dp.callback_query.register(
-        lambda c: c.answer(),
+        lambda c: safe_callback_answer(c),
         F.data == "noop"
     )
 
@@ -4575,17 +4614,32 @@ async def main():
             f"received={monotonic_time.monotonic():.3f}"
         )
 
-        started = monotonic_time.monotonic()
+        # Telegram должен получить HTTP 200 как можно быстрее.
+        # Долгая обработка через await dp.feed_update() здесь
+        # заставляет Telegram ждать и может привести к повторной
+        # доставке одного и того же callback query.
+        async def process_update():
+            started = monotonic_time.monotonic()
 
-        await dp.feed_update(
-            bot,
-            update
-        )
+            try:
+                await dp.feed_update(
+                    bot,
+                    update
+                )
+            except Exception as exc:
+                print(
+                    f"[WEBHOOK] update_id={update.update_id} "
+                    f"ERROR={type(exc).__name__}: {exc}"
+                )
+            finally:
+                print(
+                    f"[WEBHOOK] update_id={update.update_id} "
+                    f"finished={monotonic_time.monotonic():.3f} "
+                    f"duration={monotonic_time.monotonic() - started:.3f}s"
+                )
 
-        print(
-            f"[WEBHOOK] update_id={update.update_id} "
-            f"finished={monotonic_time.monotonic():.3f} "
-            f"duration={monotonic_time.monotonic() - started:.3f}s"
+        asyncio.create_task(
+            process_update()
         )
 
         return web.Response(
