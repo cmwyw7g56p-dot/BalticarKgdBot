@@ -753,6 +753,7 @@ def status_label(status):
         "confirmed": "🟢 Подтверждена",
         "rejected": "🔴 Отклонена",
         "expired": "⚪ Истекла",
+        "cancelled": "⚫ Отменена",
     }.get(
         status,
         status
@@ -3691,6 +3692,7 @@ async def admin_day(
         )
         if row["status"] in ("pending", "confirmed"):
             keyboard.append([InlineKeyboardButton(text=f"✏️ Изменить даты №{row['id']}", callback_data=f"adminedit:{row['id']}")])
+            keyboard.append([InlineKeyboardButton(text=f"🚫 Отменить бронь №{row['id']}", callback_data=f"cancel:{row['id']}")])
         keyboard.append([InlineKeyboardButton(text=f"📋 Открыть заявку №{row['id']}", callback_data=f"adminbooking:{row['id']}")])
 
     keyboard.append([InlineKeyboardButton(text="◀️ К календарю", callback_data=f"admincar:{car_id}")])
@@ -3723,7 +3725,9 @@ def admin_edit_calendar_sync(bid, car_id, year, month, mode):
 
     for n in range(1, days + 1):
         current = date(year, month, n)
-        blocked = current < today
+        # В админ-редактировании можно перенести активную бронь даже на прошедшую дату.
+        # Это нужно, например, для исправления брони 02.09–07.09 -> 01.09–05.09.
+        blocked = False
         if not blocked:
             day_start = local_dt(current, time(0, 0))
             day_end = day_start + timedelta(days=1)
@@ -3737,7 +3741,7 @@ def admin_edit_calendar_sync(bid, car_id, year, month, mode):
                     break
 
         if blocked:
-            text, cb = "🔴" if current >= today else "⚪", "noop"
+            text, cb = "🔴", "noop"
         else:
             text = f"🟢{n}"
             cb = f"aeditday:{bid}:{mode}:{current.isoformat()}"
@@ -3769,8 +3773,7 @@ def admin_edit_time_keyboard_sync(bid, car_id, selected_date, mode, start_at=Non
     for hour in range(PICKUP_START_HOUR, PICKUP_END_HOUR + 1):
         dt = local_dt(selected_date, time(hour, 0))
         if mode == "start":
-            if dt <= now:
-                continue
+            # Для админа разрешено редактировать бронь на прошедшую дату.
             # Existing booking is excluded; all other bookings and the buffer are respected.
             if booking_overlaps(car_id, dt, dt + timedelta(hours=1), exclude_booking_id=bid):
                 continue
@@ -3881,12 +3884,25 @@ async def admin_edit_end_time(callback: CallbackQuery, state: FSMContext):
     if not result["ok"]:
         await callback.message.answer(result.get("message","Не удалось изменить бронь.")); return
     await state.clear()
+
+    # После изменения сразу показываем свежий календарь из БД.
+    # Это гарантирует, что соседние/следующие брони не пропадают из интерфейса.
+    refreshed_calendar = await admin_busy_calendar_keyboard(
+        row["car_id"],
+        start_at.year,
+        start_at.month
+    )
+
     await callback.message.edit_text(
-        f"✅ <b>Заявка №{bid} изменена</b>\n\n🚗 {CARS[row['car_id']]['name']}\n\n📅 Получение: <b>{format_date_time(start_at)}</b>\n↩️ Возврат: <b>{format_date_time(end_at)}</b>\n⏱ {days} суток\n💰 <b>{money(total)}</b>\n\nСтатус: {status_label(row['status'])}",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📋 Открыть заявку", callback_data=f"adminbooking:{bid}")],
-            [InlineKeyboardButton(text="📅 К календарю", callback_data=f"admincar:{row['car_id']}")],
-        ])
+        f"✅ <b>Заявка №{bid} изменена</b>\n\n"
+        f"🚗 {CARS[row['car_id']]['name']}\n\n"
+        f"📅 Получение: <b>{format_date_time(start_at)}</b>\n"
+        f"↩️ Возврат: <b>{format_date_time(end_at)}</b>\n"
+        f"⏱ {days} суток\n"
+        f"💰 <b>{money(total)}</b>\n\n"
+        f"Статус: {status_label(row['status'])}\n\n"
+        "📅 Календарь обновлён. Другие активные бронирования сохранены.",
+        reply_markup=refreshed_calendar
     )
     try:
         await callback.bot.send_message(row["user_id"], f"ℹ️ <b>Изменение заявки №{bid}</b>\n\nВаше бронирование автомобиля {CARS[row['car_id']]['name']} было изменено.\n\n📅 Получение: <b>{format_date_time(start_at)}</b>\n↩️ Возврат: <b>{format_date_time(end_at)}</b>\n💰 <b>{money(total)}</b>", reply_markup=main_keyboard())
@@ -4139,16 +4155,21 @@ async def admin_booking(
     )
 
     if row["status"] in ("pending", "confirmed"):
-        reply_markup = InlineKeyboardMarkup(inline_keyboard=[
+        buttons = [
             [InlineKeyboardButton(text="✏️ Изменить даты", callback_data=f"adminedit:{bid}")],
-            [InlineKeyboardButton(text="◀️ Назад", callback_data=f"admincar:{row['car_id']}")],
-        ])
+        ]
         if row["status"] == "pending":
-            reply_markup = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✏️ Изменить даты", callback_data=f"adminedit:{bid}")],
-                [InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"confirm:{bid}"), InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{bid}")],
-                [InlineKeyboardButton(text="◀️ Назад", callback_data=f"admincar:{row['car_id']}")],
+            buttons.append([
+                InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"confirm:{bid}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{bid}"),
             ])
+        buttons.append([
+            InlineKeyboardButton(text="🚫 Отменить бронь", callback_data=f"cancel:{bid}")
+        ])
+        buttons.append([
+            InlineKeyboardButton(text="◀️ Назад", callback_data=f"admincar:{row['car_id']}")
+        ])
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=buttons)
     else:
         reply_markup = admin_back_keyboard()
 
@@ -4397,10 +4418,16 @@ def admin_action_sync(
                     "reason": "not_found"
                 }
 
-            if row["status"] != "pending":
-
+            if action == "cancel":
+                if row["status"] not in ("pending", "confirmed"):
+                    con.rollback()
+                    return {
+                        "ok": False,
+                        "reason": "already_processed",
+                        "status": row["status"]
+                    }
+            elif row["status"] != "pending":
                 con.rollback()
-
                 return {
                     "ok": False,
                     "reason": "already_processed",
@@ -4431,6 +4458,28 @@ def admin_action_sync(
             end_at = ensure_tz(
                 end_at
             )
+
+            if action == "cancel":
+
+                cur.execute(
+                    """
+                    UPDATE bookings
+                    SET status='cancelled',
+                        expires_at=NULL
+                    WHERE id=%s
+                    """,
+                    (bid,)
+                )
+
+                con.commit()
+
+                return {
+                    "ok": True,
+                    "action": "cancel",
+                    "row": row,
+                    "start_at": start_at,
+                    "end_at": end_at
+                }
 
             if action == "confirm":
 
@@ -4608,7 +4657,27 @@ async def admin_action(
     start_at = result["start_at"]
     end_at = result["end_at"]
 
-    if result["action"] == "confirm":
+    if result["action"] == "cancel":
+
+        await callback.message.edit_reply_markup(reply_markup=None)
+
+        await callback.bot.send_message(
+            row["user_id"],
+            f"🚫 <b>Бронирование №{bid} отменено</b>.\n\n"
+            f"🚗 {CARS[row['car_id']]['name']}\n"
+            f"📅 {format_date_time(start_at)} → {format_date_time(end_at)}\n\n"
+            "Вы можете выбрать другой свободный период.",
+            reply_markup=main_keyboard()
+        )
+
+        await callback.message.answer(
+            f"🚫 Бронь №{bid} отменена. Даты снова свободны для бронирования.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📅 К календарю", callback_data=f"admincar:{row['car_id']}")]
+            ])
+        )
+
+    elif result["action"] == "confirm":
 
         await callback.message.edit_reply_markup(
             reply_markup=None
@@ -4925,6 +4994,11 @@ async def main():
     dp.callback_query.register(
         admin_action,
         F.data.startswith("reject:")
+    )
+
+    dp.callback_query.register(
+        admin_action,
+        F.data.startswith("cancel:")
     )
 
     async def noop_handler(
