@@ -1,7 +1,7 @@
 import asyncio
 import os
 import secrets
-import time
+import time as monotonic_time
 from datetime import date, datetime, timedelta, time
 from zoneinfo import ZoneInfo
 
@@ -1519,7 +1519,7 @@ async def end_calendar_keyboard(
     month
 ):
 
-    started = time.monotonic()
+    started = monotonic_time.monotonic()
 
     print(
         f"[END_CALENDAR] START "
@@ -1538,7 +1538,7 @@ async def end_calendar_keyboard(
 
     print(
         f"[END_CALENDAR] FINISHED "
-        f"duration={time.monotonic() - started:.3f}s"
+        f"duration={monotonic_time.monotonic() - started:.3f}s"
     )
 
     return result
@@ -2298,7 +2298,7 @@ async def endmonth(
     callback: CallbackQuery
 ):
 
-    started = time.monotonic()
+    started = monotonic_time.monotonic()
 
     print(
         f"[ENDMONTH] START "
@@ -2312,7 +2312,7 @@ async def endmonth(
     print(
         f"[ENDMONTH] ANSWERED "
         f"id={callback.id} "
-        f"after={time.monotonic() - started:.3f}s"
+        f"after={monotonic_time.monotonic() - started:.3f}s"
     )
 
     _, cid, start_iso, iso = (
@@ -2464,7 +2464,7 @@ async def backstarttime(
     callback: CallbackQuery
 ):
 
-    started = time.monotonic()
+    started = monotonic_time.monotonic()
 
     print(
         f"[BACKSTARTTIME] START "
@@ -2478,7 +2478,7 @@ async def backstarttime(
     print(
         f"[BACKSTARTTIME] ANSWERED "
         f"id={callback.id} "
-        f"after={time.monotonic() - started:.3f}s"
+        f"after={monotonic_time.monotonic() - started:.3f}s"
     )
 
     _, cid, start_iso = callback.data.split(":")
@@ -4572,10 +4572,10 @@ async def main():
         print(
             f"[WEBHOOK] update_id={update.update_id} "
             f"type={update.event_type} "
-            f"received={time.monotonic():.3f}"
+            f"received={monotonic_time.monotonic():.3f}"
         )
 
-        started = time.monotonic()
+        started = monotonic_time.monotonic()
 
         await dp.feed_update(
             bot,
@@ -4584,8 +4584,8 @@ async def main():
 
         print(
             f"[WEBHOOK] update_id={update.update_id} "
-            f"finished={time.monotonic():.3f} "
-            f"duration={time.monotonic() - started:.3f}s"
+            f"finished={monotonic_time.monotonic():.3f} "
+            f"duration={monotonic_time.monotonic() - started:.3f}s"
         )
 
         return web.Response(
