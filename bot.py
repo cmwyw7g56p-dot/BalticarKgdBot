@@ -666,6 +666,49 @@ async def async_get_month_bookings(
 # DAY STATUS
 # ============================================================
 
+
+def interval_overlaps_bookings(start_at, end_at, bookings, exclude_booking_id=None):
+    """Проверка пересечения с уже загруженными бронями, включая буфер."""
+    start_at = ensure_tz(start_at)
+    end_at = ensure_tz(end_at)
+    check_start = start_at - timedelta(hours=BUFFER_HOURS)
+    check_end = end_at + timedelta(hours=BUFFER_HOURS)
+
+    for row in bookings:
+        if exclude_booking_id is not None and row["id"] == exclude_booking_id:
+            continue
+        rs = ensure_tz(row["start_at"])
+        re = ensure_tz(row["end_at"])
+        if rs < check_end and re > check_start:
+            return True
+    return False
+
+
+def day_has_available_pickup(current, bookings, exclude_booking_id=None):
+    """Есть ли хотя бы одно доступное время получения в этот день."""
+    for hour in range(PICKUP_START_HOUR, PICKUP_END_HOUR + 1):
+        start_at = local_dt(current, time(hour, 0))
+        end_at = start_at + timedelta(hours=1)
+        if not interval_overlaps_bookings(
+            start_at, end_at, bookings, exclude_booking_id
+        ):
+            return True
+    return False
+
+
+def day_has_available_return(current, start_at, bookings, exclude_booking_id=None):
+    """Есть ли хотя бы одно доступное время возврата в этот день."""
+    start_at = ensure_tz(start_at)
+    for hour in range(PICKUP_START_HOUR, PICKUP_END_HOUR + 1):
+        end_at = local_dt(current, time(hour, 0))
+        if end_at <= start_at:
+            continue
+        if not interval_overlaps_bookings(
+            start_at, end_at, bookings, exclude_booking_id
+        ):
+            return True
+    return False
+
 def day_status(
     current,
     bookings,
@@ -1153,47 +1196,18 @@ def calendar_keyboard_sync(
             n
         )
 
-        status = day_status(
-            current,
-            bookings,
-            today
-        )
-
-        if status == "past":
-
+        if current < today:
             text = "⚪"
             callback_data = "noop"
-
-        elif status == "confirmed":
-
-            # День с бронью может быть доступен для нового заезда
-            # позже в этот же день. Поэтому дату НЕ блокируем целиком.
-            # Точное пересечение с учётом BUFFER_HOURS проверяется
-            # после выбора времени получения.
-            text = f"🔴{n}"
-            callback_data = (
-                f"day:"
-                f"{car_id}:"
-                f"{current.isoformat()}"
-            )
-
-        elif status == "pending":
-
-            text = f"🟡{n}"
-            callback_data = (
-                f"day:"
-                f"{car_id}:"
-                f"{current.isoformat()}"
-            )
-
-        else:
-
+        elif day_has_available_pickup(current, bookings):
+            # День может содержать другую бронь, но если после неё
+            # остаётся хотя бы одно доступное время получения,
+            # дату оставляем доступной.
             text = f"🟢{n}"
-            callback_data = (
-                f"day:"
-                f"{car_id}:"
-                f"{current.isoformat()}"
-            )
+            callback_data = f"day:{car_id}:{current.isoformat()}"
+        else:
+            text = f"🔴{n}"
+            callback_data = "noop"
 
         week.append(
             InlineKeyboardButton(
@@ -1418,39 +1432,12 @@ def end_calendar_keyboard_sync(
                 + timedelta(days=1)
             )
 
-            has_booking = False
-
-            for row in bookings:
-
-                row_start = ensure_tz(
-                    row["start_at"]
-                )
-
-                row_end = ensure_tz(
-                    row["end_at"]
-                )
-
-                if (
-                    row_start < day_end
-                    and row_end > day_start
-                ):
-
-                    has_booking = True
-                    break
-
-            if has_booking:
-
-                text = f"🟡{n}"
-
-            else:
-
+            if day_has_available_return(current, start_at, bookings):
                 text = f"🟢{n}"
-
-            callback_data = (
-                f"end:"
-                f"{car_id}:"
-                f"{current.isoformat()}"
-            )
+                callback_data = f"end:{car_id}:{current.isoformat()}"
+            else:
+                text = f"🔴{n}"
+                callback_data = "noop"
 
         week.append(
             InlineKeyboardButton(
@@ -3740,24 +3727,23 @@ def admin_edit_calendar_sync(bid, car_id, year, month, mode):
         current = date(year, month, n)
         # В админ-редактировании можно перенести активную бронь даже на прошедшую дату.
         # Это нужно, например, для исправления брони 02.09–07.09 -> 01.09–05.09.
-        blocked = False
-        if not blocked:
-            day_start = local_dt(current, time(0, 0))
-            day_end = day_start + timedelta(days=1)
-            for row in bookings:
-                if row["id"] == bid:
-                    continue
-                rs = ensure_tz(row["start_at"])
-                re = ensure_tz(row["end_at"])
-                if rs < day_end + timedelta(hours=BUFFER_HOURS) and re > day_start - timedelta(hours=BUFFER_HOURS):
-                    blocked = True
-                    break
-
-        if blocked:
-            text, cb = "🔴", "noop"
+        if mode == "start":
+            available_day = day_has_available_pickup(
+                current, bookings, exclude_booking_id=bid
+            )
         else:
+            data_start = None
+            # На этапе выбора даты возврата дата допустима, если
+            # на ней есть хотя бы одно время возврата после выбранного старта.
+            # Точный start_at берём из FSM в обработчике даты, поэтому
+            # здесь не блокируем дату целиком из-за чужой брони.
+            available_day = True
+
+        if available_day:
             text = f"🟢{n}"
             cb = f"aeditday:{bid}:{mode}:{current.isoformat()}"
+        else:
+            text, cb = f"🔴{n}", "noop"
         week.append(InlineKeyboardButton(text=text, callback_data=cb))
         if len(week) == 7:
             rows.append(week); week=[]
