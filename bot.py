@@ -2336,57 +2336,208 @@ async def safe_callback_answer(
 async def endmonth(
     callback: CallbackQuery
 ):
+    """
+    Переключение месяца календаря возврата.
+
+    Обработчик специально сделан максимально самостоятельным:
+    callback подтверждается сразу, входные данные проверяются
+    поэтапно, а ошибка редактирования клавиатуры явно
+    логируется и не теряется.
+    """
 
     started = monotonic_time.monotonic()
+    data = callback.data or ""
 
     print(
         f"[ENDMONTH] START "
         f"id={callback.id} "
-        f"data={callback.data} "
+        f"data={data!r} "
         f"t={started:.3f}"
     )
 
-    await safe_callback_answer(callback)
+    # Подтверждаем callback как можно раньше.
+    try:
+        answered = await safe_callback_answer(callback)
+        print(
+            f"[ENDMONTH] ANSWERED "
+            f"id={callback.id} "
+            f"result={answered} "
+            f"after={monotonic_time.monotonic() - started:.3f}s"
+        )
+    except Exception as exc:
+        print(
+            f"[ENDMONTH] callback.answer ERROR "
+            f"id={callback.id} "
+            f"type={type(exc).__name__} "
+            f"error={exc!r}"
+        )
+        raise
+
+    # --------------------------------------------------------
+    # Проверяем формат callback_data.
+    # Ожидается:
+    # endmonth:<car_id>:<start_datetime>:<YYYY-MM-DD>
+    # --------------------------------------------------------
+    parts = data.split(":")
 
     print(
-        f"[ENDMONTH] ANSWERED "
-        f"id={callback.id} "
-        f"after={monotonic_time.monotonic() - started:.3f}s"
+        f"[ENDMONTH] PARSE "
+        f"parts_count={len(parts)} "
+        f"parts={parts!r}"
     )
 
-    _, cid, start_iso, iso = (
-        callback.data.split(":")
+    if len(parts) != 4 or parts[0] != "endmonth":
+        print(
+            f"[ENDMONTH] INVALID CALLBACK FORMAT "
+            f"data={data!r}"
+        )
+        return
+
+    _, cid, start_iso, month_iso = parts
+
+    print(
+        f"[ENDMONTH] VALUES "
+        f"car_id={cid!r} "
+        f"start_iso={start_iso!r} "
+        f"month_iso={month_iso!r}"
     )
 
+    # --------------------------------------------------------
+    # Проверяем автомобиль.
+    # --------------------------------------------------------
     if cid not in CARS:
+        print(
+            f"[ENDMONTH] INVALID CAR "
+            f"car_id={cid!r}"
+        )
 
         await callback.message.answer(
             "Автомобиль не найден."
         )
-
         return
 
-    start_at = datetime.fromisoformat(
-        start_iso
+    # --------------------------------------------------------
+    # Проверяем дату/время начала аренды.
+    # --------------------------------------------------------
+    try:
+        start_at = datetime.fromisoformat(
+            start_iso
+        )
+        start_at = ensure_tz(
+            start_at
+        )
+    except (TypeError, ValueError, AttributeError) as exc:
+        print(
+            f"[ENDMONTH] INVALID START DATE "
+            f"start_iso={start_iso!r} "
+            f"type={type(exc).__name__} "
+            f"error={exc!r}"
+        )
+
+        await callback.message.answer(
+            "❌ Некорректная дата начала аренды. "
+            "Начните бронирование заново."
+        )
+        return
+
+    # --------------------------------------------------------
+    # Проверяем дату выбранного месяца.
+    # --------------------------------------------------------
+    try:
+        selected_month = date.fromisoformat(
+            month_iso
+        )
+    except (TypeError, ValueError, AttributeError) as exc:
+        print(
+            f"[ENDMONTH] INVALID MONTH DATE "
+            f"month_iso={month_iso!r} "
+            f"type={type(exc).__name__} "
+            f"error={exc!r}"
+        )
+
+        await callback.message.answer(
+            "❌ Некорректный месяц календаря. "
+            "Откройте календарь заново."
+        )
+        return
+
+    year = selected_month.year
+    month_number = selected_month.month
+
+    print(
+        f"[ENDMONTH] TARGET MONTH "
+        f"car_id={cid} "
+        f"start={start_at.isoformat()} "
+        f"year={year} "
+        f"month={month_number}"
     )
 
-    start_at = ensure_tz(
-        start_at
+    # --------------------------------------------------------
+    # Формируем календарь. Логику выбора даты возврата
+    # здесь не меняем.
+    # --------------------------------------------------------
+    try:
+        keyboard = await end_calendar_keyboard(
+            cid,
+            start_at,
+            year,
+            month_number
+        )
+    except Exception as exc:
+        print(
+            f"[ENDMONTH] CALENDAR BUILD ERROR "
+            f"car_id={cid} "
+            f"year={year} "
+            f"month={month_number} "
+            f"type={type(exc).__name__} "
+            f"error={exc!r}"
+        )
+        raise
+
+    print(
+        f"[ENDMONTH] CALENDAR READY "
+        f"car_id={cid} "
+        f"year={year} "
+        f"month={month_number} "
+        f"after={monotonic_time.monotonic() - started:.3f}s"
     )
 
-    d = date.fromisoformat(
-        iso
-    )
+    # --------------------------------------------------------
+    # Отдельно контролируем Telegram-редактирование клавиатуры.
+    # --------------------------------------------------------
+    try:
+        await callback.message.edit_reply_markup(
+            reply_markup=keyboard
+        )
+    except TelegramBadRequest as exc:
+        print(
+            f"[ENDMONTH] edit_reply_markup TelegramBadRequest "
+            f"id={callback.id} "
+            f"car_id={cid} "
+            f"year={year} "
+            f"month={month_number} "
+            f"error={exc!r}"
+        )
+        return
+    except Exception as exc:
+        print(
+            f"[ENDMONTH] edit_reply_markup ERROR "
+            f"id={callback.id} "
+            f"car_id={cid} "
+            f"year={year} "
+            f"month={month_number} "
+            f"type={type(exc).__name__} "
+            f"error={exc!r}"
+        )
+        raise
 
-    keyboard = await end_calendar_keyboard(
-        cid,
-        start_at,
-        d.year,
-        d.month
-    )
-
-    await callback.message.edit_reply_markup(
-        reply_markup=keyboard
+    print(
+        f"[ENDMONTH] DONE "
+        f"id={callback.id} "
+        f"car_id={cid} "
+        f"year={year} "
+        f"month={month_number} "
+        f"total={monotonic_time.monotonic() - started:.3f}s"
     )
 
 
@@ -4503,8 +4654,20 @@ async def main():
         F.data.startswith("reject:")
     )
 
+    async def noop_handler(
+        callback: CallbackQuery
+    ):
+        """Безопасно подтверждает декоративные callback-кнопки."""
+
+        print(
+            f"[NOOP] callback id={callback.id} "
+            f"data={callback.data!r}"
+        )
+
+        await safe_callback_answer(callback)
+
     dp.callback_query.register(
-        lambda c: safe_callback_answer(c),
+        noop_handler,
         F.data == "noop"
     )
 
