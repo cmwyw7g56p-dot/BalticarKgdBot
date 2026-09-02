@@ -937,6 +937,18 @@ def time_keyboard(
             if dt <= now:
                 continue
 
+            # День с предыдущей арендой не блокируется целиком.
+            # Здесь уже известно время получения, поэтому можно
+            # точно убрать часы, конфликтующие с существующей бронью
+            # и BUFFER_HOURS. Например, если возврат в 09:00,
+            # при буфере 2 часа заезд с 11:00 уже доступен.
+            if booking_overlaps(
+                car_id,
+                dt,
+                dt + timedelta(hours=1)
+            ):
+                continue
+
             callback = (
                 f"picktime:"
                 f"{car_id}:"
@@ -1154,8 +1166,11 @@ def calendar_keyboard_sync(
 
         elif status == "confirmed":
 
+            # День с бронью может быть доступен для нового заезда
+            # позже в этот же день. Поэтому дату НЕ блокируем целиком.
+            # Точное пересечение с учётом BUFFER_HOURS проверяется
+            # после выбора времени получения.
             text = f"🔴{n}"
-
             callback_data = (
                 f"day:"
                 f"{car_id}:"
@@ -1165,7 +1180,6 @@ def calendar_keyboard_sync(
         elif status == "pending":
 
             text = f"🟡{n}"
-
             callback_data = (
                 f"day:"
                 f"{car_id}:"
@@ -1175,7 +1189,6 @@ def calendar_keyboard_sync(
         else:
 
             text = f"🟢{n}"
-
             callback_data = (
                 f"day:"
                 f"{car_id}:"
