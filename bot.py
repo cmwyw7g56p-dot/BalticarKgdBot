@@ -4548,7 +4548,7 @@ async def main():
 
     dp.callback_query.register(
         endmonth,
-        F.data.startswith("endmonth:")
+        F.data.startswith(("endmonth:", "endmonth|"))
     )
 
     dp.callback_query.register(
