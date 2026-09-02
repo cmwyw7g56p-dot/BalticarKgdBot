@@ -1473,10 +1473,7 @@ def end_calendar_keyboard_sync(
             InlineKeyboardButton(
                 text="‹",
                 callback_data=(
-                    f"endmonth:"
-                    f"{car_id}:"
-                    f"{start_at.isoformat()}:"
-                    f"{prev_first.isoformat()}"
+                    f"endmonth|{car_id}|{start_at.isoformat()}|{prev_first.isoformat()}"
                 )
             ),
             InlineKeyboardButton(
@@ -1486,10 +1483,7 @@ def end_calendar_keyboard_sync(
             InlineKeyboardButton(
                 text="›",
                 callback_data=(
-                    f"endmonth:"
-                    f"{car_id}:"
-                    f"{start_at.isoformat()}:"
-                    f"{next_first.isoformat()}"
+                    f"endmonth|{car_id}|{start_at.isoformat()}|{next_first.isoformat()}"
                 )
             ),
         ]
@@ -2375,10 +2369,12 @@ async def endmonth(
 
     # --------------------------------------------------------
     # Проверяем формат callback_data.
+    # Формат специально использует |, потому что ISO datetime
+    # содержит двоеточия.
     # Ожидается:
-    # endmonth:<car_id>:<start_datetime>:<YYYY-MM-DD>
+    # endmonth|<car_id>|<start_datetime>|<YYYY-MM-DD>
     # --------------------------------------------------------
-    parts = data.split(":")
+    parts = data.split("|")
 
     print(
         f"[ENDMONTH] PARSE "
