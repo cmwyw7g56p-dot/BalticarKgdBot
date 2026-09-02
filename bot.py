@@ -1,6 +1,7 @@
 import asyncio
 import os
 import secrets
+import time
 from datetime import date, datetime, timedelta, time
 from zoneinfo import ZoneInfo
 
@@ -1518,13 +1519,29 @@ async def end_calendar_keyboard(
     month
 ):
 
-    return await asyncio.to_thread(
+    started = time.monotonic()
+
+    print(
+        f"[END_CALENDAR] START "
+        f"car={car_id} "
+        f"year={year} "
+        f"month={month}"
+    )
+
+    result = await asyncio.to_thread(
         end_calendar_keyboard_sync,
         car_id,
         start_at,
         year,
         month
     )
+
+    print(
+        f"[END_CALENDAR] FINISHED "
+        f"duration={time.monotonic() - started:.3f}s"
+    )
+
+    return result
 
 
 # ============================================================
@@ -2281,7 +2298,22 @@ async def endmonth(
     callback: CallbackQuery
 ):
 
+    started = time.monotonic()
+
+    print(
+        f"[ENDMONTH] START "
+        f"id={callback.id} "
+        f"data={callback.data} "
+        f"t={started:.3f}"
+    )
+
     await callback.answer()
+
+    print(
+        f"[ENDMONTH] ANSWERED "
+        f"id={callback.id} "
+        f"after={time.monotonic() - started:.3f}s"
+    )
 
     _, cid, start_iso, iso = (
         callback.data.split(":")
@@ -2432,7 +2464,22 @@ async def backstarttime(
     callback: CallbackQuery
 ):
 
+    started = time.monotonic()
+
+    print(
+        f"[BACKSTARTTIME] START "
+        f"id={callback.id} "
+        f"data={callback.data} "
+        f"t={started:.3f}"
+    )
+
     await callback.answer()
+
+    print(
+        f"[BACKSTARTTIME] ANSWERED "
+        f"id={callback.id} "
+        f"after={time.monotonic() - started:.3f}s"
+    )
 
     _, cid, start_iso = callback.data.split(":")
 
@@ -4522,9 +4569,23 @@ async def main():
             }
         )
 
+        print(
+            f"[WEBHOOK] update_id={update.update_id} "
+            f"type={update.event_type} "
+            f"received={time.monotonic():.3f}"
+        )
+
+        started = time.monotonic()
+
         await dp.feed_update(
             bot,
             update
+        )
+
+        print(
+            f"[WEBHOOK] update_id={update.update_id} "
+            f"finished={time.monotonic():.3f} "
+            f"duration={time.monotonic() - started:.3f}s"
         )
 
         return web.Response(
