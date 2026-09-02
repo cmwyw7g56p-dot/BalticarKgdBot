@@ -752,6 +752,7 @@ def status_label(status):
         "pending": "🟡 Ожидает подтверждения",
         "confirmed": "🟢 Подтверждена",
         "rejected": "🔴 Отклонена",
+        "cancelled": "⚫ Отменена",
         "expired": "⚪ Истекла",
     }.get(
         status,
@@ -1154,22 +1155,12 @@ def calendar_keyboard_sync(
         elif status == "confirmed":
 
             text = f"🔴{n}"
-
-            callback_data = (
-                f"day:"
-                f"{car_id}:"
-                f"{current.isoformat()}"
-            )
+            callback_data = "noop"
 
         elif status == "pending":
 
             text = f"🟡{n}"
-
-            callback_data = (
-                f"day:"
-                f"{car_id}:"
-                f"{current.isoformat()}"
-            )
+            callback_data = "noop"
 
         else:
 
@@ -1427,16 +1418,16 @@ def end_calendar_keyboard_sync(
             if has_booking:
 
                 text = f"🟡{n}"
+                callback_data = "noop"
 
             else:
 
                 text = f"🟢{n}"
-
-            callback_data = (
-                f"end:"
-                f"{car_id}:"
-                f"{current.isoformat()}"
-            )
+                callback_data = (
+                    f"end:"
+                    f"{car_id}:"
+                    f"{current.isoformat()}"
+                )
 
         week.append(
             InlineKeyboardButton(
@@ -1543,22 +1534,38 @@ async def end_calendar_keyboard(
 # ADMIN KEYBOARDS
 # ============================================================
 
-def admin_buttons(bid):
+def admin_buttons(bid, status="pending"):
 
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="✅ Подтвердить",
-                    callback_data=f"confirm:{bid}"
-                ),
-                InlineKeyboardButton(
-                    text="❌ Отклонить",
-                    callback_data=f"reject:{bid}"
-                ),
-            ]
-        ]
-    )
+    rows = []
+
+    if status == "pending":
+        rows.append([
+            InlineKeyboardButton(
+                text="✅ Подтвердить",
+                callback_data=f"confirm:{bid}"
+            ),
+            InlineKeyboardButton(
+                text="❌ Отклонить",
+                callback_data=f"reject:{bid}"
+            ),
+        ])
+
+    if status in ("pending", "confirmed"):
+        rows.append([
+            InlineKeyboardButton(
+                text="🚫 Отменить бронь",
+                callback_data=f"cancel:{bid}"
+            ),
+        ])
+
+    rows.append([
+        InlineKeyboardButton(
+            text="◀️ К бронированиям",
+            callback_data="admin:bookings"
+        )
+    ])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def admin_panel_keyboard():
@@ -3673,15 +3680,12 @@ async def admin_day(
         ""
     ]
 
+    keyboard = []
+
     for row in rows:
 
-        start_at = ensure_tz(
-            row["start_at"]
-        )
-
-        end_at = ensure_tz(
-            row["end_at"]
-        )
+        start_at = ensure_tz(row["start_at"])
+        end_at = ensure_tz(row["end_at"])
 
         out.append(
             f"📋 <b>Заявка №{row['id']}</b>\n"
@@ -3692,9 +3696,23 @@ async def admin_day(
             f"📞 {row['phone']}\n"
             f"💰 {money(row['total'])}\n"
         )
+        keyboard.append([
+            InlineKeyboardButton(
+                text=f"📋 Открыть заявку №{row['id']}",
+                callback_data=f"adminbooking:{row['id']}"
+            )
+        ])
+
+    keyboard.append([
+        InlineKeyboardButton(
+            text="◀️ К календарю",
+            callback_data=f"admincar:{car_id}"
+        )
+    ])
 
     await callback.message.answer(
-        "\n".join(out)
+        "\n".join(out),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
     )
 
 
@@ -3901,9 +3919,7 @@ async def admin_booking(
     await callback.message.edit_text(
         text,
         reply_markup=(
-            admin_buttons(bid)
-            if row["status"] == "pending"
-            else admin_back_keyboard()
+            admin_buttons(bid, row["status"])
         )
     )
 
@@ -4282,6 +4298,92 @@ def admin_action_sync(
         con.close()
 
 
+def cancel_booking_sync(bid):
+
+    con = db()
+    try:
+        with con.cursor() as cur:
+            row = cur.execute(
+                "SELECT * FROM bookings WHERE id=%s FOR UPDATE",
+                (bid,)
+            ).fetchone()
+
+            if not row:
+                con.rollback()
+                return {"ok": False, "reason": "not_found"}
+
+            if row["status"] not in ("pending", "confirmed"):
+                con.rollback()
+                return {
+                    "ok": False,
+                    "reason": "already_processed",
+                    "status": row["status"]
+                }
+
+            cur.execute(
+                "UPDATE bookings SET status='cancelled', expires_at=NULL WHERE id=%s",
+                (bid,)
+            )
+            con.commit()
+            return {"ok": True, "row": row}
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+
+
+async def admin_cancel(
+    callback: CallbackQuery
+):
+
+    await safe_callback_answer(callback)
+
+    if callback.from_user.id != ADMIN_ID:
+        await callback.message.answer("Нет доступа.")
+        return
+
+    bid = int(callback.data.split(":", 1)[1])
+    result = await asyncio.to_thread(cancel_booking_sync, bid)
+
+    if not result["ok"]:
+        if result["reason"] == "not_found":
+            await callback.message.answer("Заявка не найдена.")
+        else:
+            await callback.message.answer(
+                f"Заявка уже имеет статус: {status_label(result['status'])}"
+            )
+        return
+
+    row = result["row"]
+    await callback.message.edit_text(
+        f"🚫 <b>Заявка №{bid} отменена</b>\n\n"
+        f"🚗 {CARS[row['car_id']]['name']}\n"
+        f"Клиент: {row['name']}\n\n"
+        "Даты снова доступны для бронирования.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(
+                text="📅 К календарю",
+                callback_data=f"admincar:{row['car_id']}"
+            ),
+            InlineKeyboardButton(
+                text="📋 Все бронирования",
+                callback_data="admin:bookings"
+            )
+        ]])
+    )
+
+    try:
+        await callback.bot.send_message(
+            row["user_id"],
+            f"❌ <b>Заявка №{bid} отменена</b>\n\n"
+            "Если вы хотите оформить другую аренду, выберите автомобиль и свободные даты.",
+            reply_markup=main_keyboard()
+        )
+    except Exception as e:
+        print(f"[ADMIN_CANCEL] client notification failed: {e}")
+
+
 async def admin_action(
     callback: CallbackQuery
 ):
@@ -4648,6 +4750,11 @@ async def main():
     dp.callback_query.register(
         admin_action,
         F.data.startswith("reject:")
+    )
+
+    dp.callback_query.register(
+        admin_cancel,
+        F.data.startswith("cancel:")
     )
 
     async def noop_handler(
