@@ -201,6 +201,8 @@ class Booking(StatesGroup):
     name = State()
     phone = State()
     comment = State()
+    confirm = State()
+    review = State()
 
 
 class AdminFeature(StatesGroup):
@@ -338,6 +340,20 @@ def init_db():
                     rate_4_6 INTEGER NOT NULL,
                     rate_7_plus INTEGER NOT NULL,
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS reviews (
+                    id BIGSERIAL PRIMARY KEY,
+                    booking_id BIGINT UNIQUE NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    car_id TEXT NOT NULL,
+                    rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+                    review_text TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
                 """
             )
@@ -1052,83 +1068,36 @@ def status_label(status):
 # ============================================================
 
 def main_keyboard():
-
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="🚗 Выбрать автомобиль", callback_data="catalog")],
+            [InlineKeyboardButton(text="📋 Мои бронирования", callback_data="mybookings")],
             [
-                InlineKeyboardButton(
-                    text="🚗 Забронировать автомобиль",
-                    callback_data="catalog"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="📋 Мои заявки",
-                    callback_data="mybookings"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="ℹ️ Условия",
-                    callback_data="terms"
-                ),
-                InlineKeyboardButton(
-                    text="📞 Связаться",
-                    callback_data="contact"
-                )
+                InlineKeyboardButton(text="ℹ️ Условия аренды", callback_data="terms"),
+                InlineKeyboardButton(text="📞 Связаться", callback_data="contact")
             ],
         ]
     )
 
 
 def car_keyboard():
-
-    rows = [
-        [
-            InlineKeyboardButton(
-                text=f"🚗 {car['name']}",
-                callback_data=f"car:{cid}"
-            )
-        ]
-        for cid, car in active_cars().items()
-    ]
-
-    rows.append(
-        [
-            InlineKeyboardButton(
-                text="◀️ Главное меню",
-                callback_data="home"
-            )
-        ]
-    )
-
-    return InlineKeyboardMarkup(
-        inline_keyboard=rows
-    )
+    rows = []
+    for cid, car in active_cars().items():
+        rows.append([InlineKeyboardButton(
+            text=f"🚗 {car['name']} · от {money(car['rates'][2])}",
+            callback_data=f"car:{cid}"
+        )])
+    rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def car_actions_keyboard(cid):
-
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="📅 Забронировать",
-                    callback_data=f"pick:{cid}"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="◀️ К автомобилям",
-                    callback_data="catalog"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🏠 Главное меню",
-                    callback_data="home"
-                )
-            ],
+            [InlineKeyboardButton(text="📅 Забронировать", callback_data=f"pick:{cid}")],
+            [InlineKeyboardButton(text="📋 Мои бронирования", callback_data="mybookings")],
+            [InlineKeyboardButton(text="◀️ К автомобилям", callback_data="catalog")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")],
         ]
     )
 
@@ -2093,26 +2062,20 @@ async def admin_busy_calendar_keyboard(
 # ============================================================
 
 def car_text(cid):
-
     car = CARS[cid]
-
     return (
-        f"<b>{car['name']}</b>\n\n"
+        f"🚗 <b>{car['name']}</b>\n\n"
         f"⚙️ Коробка: <b>{car['gear']}</b>\n"
         f"⛽ Топливо: <b>{car['fuel']}</b>\n"
         f"👥 Мест: <b>{car['seats']}</b>\n\n"
         f"{car['description']}\n\n"
-        f"💰 1–3 суток: "
-        f"<b>{money(car['rates'][0])}/сутки</b>\n"
-        f"💰 4–6 суток: "
-        f"<b>{money(car['rates'][1])}/сутки</b>\n"
-        f"💰 7+ суток: "
-        f"<b>{money(car['rates'][2])}/сутки</b>\n\n"
-        f"🕐 Выдача/возврат: "
-        f"<b>{PICKUP_START_HOUR:02d}:00–"
-        f"{PICKUP_END_HOUR:02d}:00</b>\n"
-        f"🔧 Технический интервал между арендами: "
-        f"<b>{BUFFER_HOURS} ч.</b>"
+        f"💰 <b>Тарифы:</b>\n"
+        f"• 1–3 суток — {money(car['rates'][0])}/сутки\n"
+        f"• 4–6 суток — {money(car['rates'][1])}/сутки\n"
+        f"• 7+ суток — {money(car['rates'][2])}/сутки\n\n"
+        f"🕐 Выдача/возврат: <b>{PICKUP_START_HOUR:02d}:00–{PICKUP_END_HOUR:02d}:00</b>\n"
+        f"🔧 Между арендами: <b>{BUFFER_HOURS} ч.</b>\n\n"
+        "📅 Стоимость за выбранный период бот покажет до подтверждения заявки."
     )
 
 
@@ -2153,8 +2116,9 @@ async def start_handler(
 
     await message.answer(
         "🚗 <b>Balticar</b>\n\n"
-        "Аренда автомобилей в Калининграде.\n\n"
-        "Выберите нужное действие:",
+        "Аренда автомобилей в Калининграде.\n"
+        "Выберите автомобиль, даты и время — итоговую стоимость увидите до отправки заявки.\n\n"
+        "Бронирование проходит прямо в Telegram.",
         reply_markup=main_keyboard()
     )
 
@@ -2171,8 +2135,9 @@ async def home(
 
     await callback.message.edit_text(
         "🚗 <b>Balticar</b>\n\n"
-        "Аренда автомобилей в Калининграде.\n\n"
-        "Выберите нужное действие:",
+        "Аренда автомобилей в Калининграде.\n"
+        "Выберите автомобиль, даты и время — итоговую стоимость увидите до отправки заявки.\n\n"
+        "Бронирование проходит прямо в Telegram.",
         reply_markup=main_keyboard()
     )
 
@@ -3188,14 +3153,13 @@ async def phone_handler(
         phone=phone
     )
 
-    await state.set_state(
-        Booking.comment
-    )
-
+    await state.set_state(Booking.comment)
     await message.answer(
-        "📝 Добавьте комментарий к заказу.\n"
-        "Если комментарий не нужен — "
-        "отправьте «-»."
+        "🧳 <b>Дополнительные пожелания</b>\n\n"
+        "Если нужны дополнительные услуги или особые условия, укажите их ниже. "
+        "Стоимость дополнительных услуг, если она потребуется, менеджер согласует отдельно.\n\n"
+        "Например: детское кресло, подача автомобиля, пожелания по месту встречи.\n\n"
+        "Если ничего не нужно — отправьте «-»."
     )
 
 
@@ -3403,151 +3367,98 @@ def create_booking_sync(
 # CREATE BOOKING
 # ============================================================
 
-async def comment_handler(
-    message: Message,
-    state: FSMContext
-):
-
+async def comment_handler(message: Message, state: FSMContext):
     data = await state.get_data()
-
-    if (
-        not data.get("car_id")
-        or not data.get("start_at")
-        or not data.get("end_at")
-    ):
-
+    if not data.get("car_id") or not data.get("start_at") or not data.get("end_at"):
         await state.clear()
-
-        await message.answer(
-            "Сессия бронирования устарела.\n\n"
-            "Начните заново:",
-            reply_markup=main_keyboard()
-        )
-
+        await message.answer("Сессия бронирования устарела.\n\nНачните заново:", reply_markup=main_keyboard())
         return
 
-    comment_text = (
-        message.text or ""
-    ).strip()
-
-    comment = (
-        ""
-        if comment_text == "-"
-        else comment_text
-    )
-
+    comment_text = (message.text or "").strip()
+    comment = "" if comment_text == "-" else comment_text
     cid = data["car_id"]
+    start_at = ensure_tz(datetime.fromisoformat(data["start_at"]))
+    end_at = ensure_tz(datetime.fromisoformat(data["end_at"]))
+    days = rental_days(start_at, end_at)
+    total = days * rate_for_days(cid, days)
 
-    start_at = datetime.fromisoformat(
-        data["start_at"]
-    )
-
-    end_at = datetime.fromisoformat(
-        data["end_at"]
-    )
-
-    start_at = ensure_tz(
-        start_at
-    )
-
-    end_at = ensure_tz(
-        end_at
-    )
-
-    # ========================================================
-    # Вся тяжёлая работа с PostgreSQL —
-    # в отдельном потоке.
-    # ========================================================
-
-    result = await asyncio.to_thread(
-        create_booking_sync,
-        message.from_user.id,
-        message.from_user.username or "",
-        cid,
-        start_at,
-        end_at,
-        data["name"],
-        data["phone"],
-        comment
-    )
-
-    if not result["ok"]:
-
+    if not await async_available(cid, start_at, end_at):
         await state.clear()
-
         await message.answer(
-            "❌ <b>Автомобиль уже занят</b>\n\n"
-            "Пока вы заполняли данные, "
-            "другой клиент занял выбранное "
-            "время.\n\n"
-            "Пожалуйста, выберите другие "
-            "дату или время.",
+            "❌ <b>Период уже занят</b>\n\nПока вы заполняли данные, выбранное время стало недоступно. Выберите другой период.",
             reply_markup=main_keyboard()
         )
-
         return
 
-    bid = result["bid"]
-    days = result["days"]
-    total = result["total"]
-    expires = result["expires"]
-
-    await state.clear()
-
-    # ========================================================
-    # CLIENT
-    # ========================================================
-
+    await state.update_data(comment=comment, days=days, total=total)
+    await state.set_state(Booking.confirm)
     await message.answer(
+        f"🧾 <b>Проверьте бронирование</b>\n\n"
+        f"🚗 <b>{CARS[cid]['name']}</b>\n"
+        f"📅 Получение: <b>{format_date_time(start_at)}</b>\n"
+        f"↩️ Возврат: <b>{format_date_time(end_at)}</b>\n"
+        f"⏱ {days} суток\n"
+        f"👤 {data['name']}\n"
+        f"📞 {data['phone']}\n"
+        f"📝 {comment or '—'}\n\n"
+        f"💰 <b>Итого: {money(total)}</b>\n\n"
+        "Всё верно?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Подтвердить заявку", callback_data="booking:confirm")],
+            [InlineKeyboardButton(text="✏️ Изменить данные", callback_data="booking:edit")],
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="booking:abort")],
+        ])
+    )
+
+
+async def booking_confirm(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
+    data = await state.get_data()
+    required = ("car_id", "start_at", "end_at", "name", "phone")
+    if not all(data.get(k) for k in required):
+        await state.clear()
+        await callback.message.answer("Сессия бронирования устарела. Начните заново.", reply_markup=main_keyboard())
+        return
+    cid = data["car_id"]
+    start_at = ensure_tz(datetime.fromisoformat(data["start_at"]))
+    end_at = ensure_tz(datetime.fromisoformat(data["end_at"]))
+    result = await asyncio.to_thread(create_booking_sync, callback.from_user.id, callback.from_user.username or "", cid, start_at, end_at, data["name"], data["phone"], data.get("comment", ""))
+    if not result["ok"]:
+        await state.clear()
+        reason = result.get("reason")
+        text = "❌ <b>Не удалось создать заявку.</b>\n\n" + ("Автомобиль уже занят или недостаточно технического интервала." if reason == "overlap" else "Автомобиль недоступен из-за технического обслуживания." if reason == "maintenance" else "Попробуйте выбрать другой период.")
+        await callback.message.edit_text(text, reply_markup=main_keyboard())
+        return
+    bid, days, total, expires = result["bid"], result["days"], result["total"], result["expires"]
+    await state.clear()
+    await callback.message.edit_text(
         f"📩 <b>Заявка №{bid} отправлена!</b>\n\n"
-        f"🚗 {CARS[cid]['name']}\n\n"
-        f"📅 Получение:\n"
-        f"<b>{format_date_time(start_at)}</b>\n\n"
-        f"📅 Возврат:\n"
-        f"<b>{format_date_time(end_at)}</b>\n\n"
-        f"⏱ <b>{days} суток</b>\n"
+        f"🚗 {CARS[cid]['name']}\n"
+        f"📅 {format_date_time(start_at)} → {format_date_time(end_at)}\n"
+        f"⏱ {days} суток\n"
         f"💰 <b>{money(total)}</b>\n\n"
-        f"⏳ Выбранное время удерживается "
-        f"до {expires.strftime('%d.%m.%Y %H:%M')}.\n\n"
-        "Мы свяжемся с вами после подтверждения заявки.",
+        f"⏳ Заявка удерживается до <b>{expires.strftime('%d.%m.%Y %H:%M')}</b>.\n\n"
+        "Мы отправим вам уведомление после решения менеджера.",
         reply_markup=main_keyboard()
     )
-
-    # ========================================================
-    # ADMIN
-    # ========================================================
-
     if ADMIN_ID:
+        uname = f"@{callback.from_user.username}" if callback.from_user.username else "без username"
+        await callback.bot.send_message(ADMIN_ID,
+            f"🔔 <b>Новая заявка №{bid}</b>\n\n🚗 {CARS[cid]['name']} ({CARS[cid]['gear']})\n📅 {format_date_time(start_at)} → {format_date_time(end_at)}\n⏱ {days} суток\n💰 <b>{money(total)}</b>\n👤 {data['name']}\n📞 {data['phone']}\nTelegram: {uname}\n📝 {data.get('comment') or '—'}\n\n⏳ Ожидает подтверждения до {expires.strftime('%d.%m.%Y %H:%M')}",
+            reply_markup=admin_buttons(bid))
 
-        uname = (
-            f"@{message.from_user.username}"
-            if message.from_user.username
-            else "без username"
-        )
 
-        text = (
-            f"🔔 <b>Новая заявка №{bid}</b>\n\n"
-            f"🚗 {CARS[cid]['name']} "
-            f"({CARS[cid]['gear']})\n\n"
-            f"📅 Получение:\n"
-            f"<b>{format_date_time(start_at)}</b>\n\n"
-            f"📅 Возврат:\n"
-            f"<b>{format_date_time(end_at)}</b>\n\n"
-            f"⏱ {days} суток\n"
-            f"💰 <b>{money(total)}</b>\n"
-            f"👤 {data['name']}\n"
-            f"📞 {data['phone']}\n"
-            f"Telegram: {uname}\n"
-            f"📝 {comment or '—'}\n\n"
-            f"⏳ Ожидает подтверждения до "
-            f"{expires.strftime('%d.%m.%Y %H:%M')}"
-        )
+async def booking_edit(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
+    data = await state.get_data()
+    await state.set_state(Booking.name)
+    await callback.message.answer("✏️ Введите имя заново:")
 
-        await message.bot.send_message(
-            ADMIN_ID,
-            text,
-            reply_markup=admin_buttons(bid)
-        )
+
+async def booking_abort(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
+    await state.clear()
+    await callback.message.edit_text("Бронирование отменено. Вы можете начать заново.", reply_markup=main_keyboard())
 
 
 # ============================================================
@@ -3584,88 +3495,100 @@ def get_user_bookings_sync(
         con.close()
 
 
-async def mybookings(
-    callback: CallbackQuery
-):
-
+async def mybookings(callback: CallbackQuery):
     await safe_callback_answer(callback)
-
-    rows = await asyncio.to_thread(
-        get_user_bookings_sync,
-        callback.from_user.id
-    )
-
+    rows = await asyncio.to_thread(get_user_bookings_sync, callback.from_user.id)
     if not rows:
+        await callback.message.edit_text("📋 <b>Мои бронирования</b>\n\nУ вас пока нет заявок.", reply_markup=main_keyboard())
+        return
+    buttons=[]
+    for row in rows:
+        car_name=CARS.get(row['car_id'],{}).get('name',row['car_id'])
+        buttons.append([InlineKeyboardButton(text=f"№{row['id']} · {car_name} · {status_label(row['status'])[:2]}", callback_data=f"mybooking:{row['id']}")])
+    buttons.append([InlineKeyboardButton(text="🚗 Новое бронирование", callback_data="catalog")])
+    buttons.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")])
+    await callback.message.edit_text("📋 <b>Мои бронирования</b>\n\nВыберите заявку:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 
-        text = (
-            "📋 <b>Мои заявки</b>\n\n"
-            "У вас пока нет заявок."
-        )
 
-    else:
+def get_user_booking_sync(user_id, bid):
+    cleanup_pending(); con=db()
+    try:
+        with con.cursor() as cur:
+            return cur.execute("SELECT * FROM bookings WHERE id=%s AND user_id=%s",(bid,user_id)).fetchone()
+    finally: con.close()
 
-        out = [
-            "📋 <b>Мои заявки</b>"
-        ]
 
-        for row in rows:
+def user_cancel_booking_sync(user_id,bid):
+    con=db()
+    try:
+        with con.cursor() as cur:
+            row=cur.execute("SELECT * FROM bookings WHERE id=%s AND user_id=%s FOR UPDATE",(bid,user_id)).fetchone()
+            if not row or row['status'] not in ('pending','confirmed'):
+                con.rollback(); return None
+            cur.execute("UPDATE bookings SET status='cancelled', expires_at=NULL WHERE id=%s",(bid,)); con.commit(); return row
+    finally: con.close()
 
-            start_at = row["start_at"]
-            end_at = row["end_at"]
 
-            if start_at is None:
+async def mybooking_detail(callback: CallbackQuery):
+    await safe_callback_answer(callback)
+    try: bid=int(callback.data.split(':',1)[1])
+    except ValueError: return
+    row=await asyncio.to_thread(get_user_booking_sync, callback.from_user.id,bid)
+    if not row:
+        await callback.message.answer("Бронирование не найдено."); return
+    start_at=ensure_tz(row['start_at'] or local_dt(row['start_date'],time(10)))
+    end_at=ensure_tz(row['end_at'] or local_dt(row['end_date'],time(17)))
+    buttons=[]
+    if row['status'] in ('pending','confirmed'):
+        buttons.append([InlineKeyboardButton(text="🚫 Отменить бронирование", callback_data=f"usercancel:{bid}")])
+    if end_at < datetime.now(TZ) and row['status']=='confirmed':
+        buttons.append([InlineKeyboardButton(text="⭐ Оставить отзыв", callback_data=f"review:{bid}")])
+    buttons.append([InlineKeyboardButton(text="◀️ Мои бронирования", callback_data="mybookings")])
+    text=(f"🧾 <b>Бронирование №{bid}</b>\n\n🚗 <b>{CARS[row['car_id']]['name']}</b>\n📅 Получение: <b>{format_date_time(start_at)}</b>\n↩️ Возврат: <b>{format_date_time(end_at)}</b>\n⏱ {rental_days(start_at,end_at)} суток\n💰 <b>{money(row['total'])}</b>\n{status_label(row['status'])}\n\n👤 {row['name']}\n📞 {row['phone']}\n📝 {row['comment'] or '—'}")
+    await callback.message.edit_text(text,reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 
-                start_at = local_dt(
-                    row["start_date"],
-                    time(10, 0)
-                )
 
-            if end_at is None:
+async def user_cancel_booking(callback: CallbackQuery):
+    await safe_callback_answer(callback)
+    bid=int(callback.data.split(':',1)[1])
+    row=await asyncio.to_thread(user_cancel_booking_sync,callback.from_user.id,bid)
+    if not row:
+        await callback.message.answer("❌ Бронирование уже нельзя отменить."); return
+    await callback.message.edit_text(f"🚫 <b>Бронирование №{bid} отменено.</b>\n\nАвтомобиль снова доступен для бронирования.",reply_markup=main_keyboard())
+    if ADMIN_ID:
+        await callback.bot.send_message(ADMIN_ID,f"🚫 <b>Клиент отменил бронирование №{bid}</b>\n\n🚗 {CARS[row['car_id']]['name']}\n👤 {row['name']}\n📞 {row['phone']}")
 
-                end_at = local_dt(
-                    row["end_date"],
-                    time(17, 0)
-                )
 
-            start_at = ensure_tz(
-                start_at
-            )
+def create_review_sync(bid,user_id,rating,text):
+    con=db()
+    try:
+        with con.cursor() as cur:
+            row=cur.execute("SELECT * FROM bookings WHERE id=%s AND user_id=%s AND status='confirmed'",(bid,user_id)).fetchone()
+            if not row or not row['end_at'] or ensure_tz(row['end_at']) >= datetime.now(TZ): return False
+            cur.execute("""INSERT INTO reviews(booking_id,user_id,car_id,rating,review_text) VALUES(%s,%s,%s,%s,%s) ON CONFLICT(booking_id) DO NOTHING""",(bid,user_id,row['car_id'],rating,text))
+        con.commit(); return True
+    finally: con.close()
 
-            end_at = ensure_tz(
-                end_at
-            )
+async def review_start(callback: CallbackQuery,state:FSMContext):
+    await safe_callback_answer(callback)
+    bid=int(callback.data.split(':',1)[1])
+    await state.update_data(review_bid=bid)
+    await state.set_state(Booking.review)
+    await callback.message.answer("⭐ <b>Оцените аренду</b>",reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=f"{i} ⭐",callback_data=f"rating:{bid}:{i}") for i in range(1,6)]]))
 
-            out.append(
-                f"\n<b>№{row['id']} — "
-                f"{CARS[row['car_id']]['name']}</b>\n"
-                f"📅 {format_date_time(start_at)}\n"
-                f"↩️ {format_date_time(end_at)}\n"
-                f"⏱ {rental_days(start_at, end_at)} суток\n"
-                f"💰 {money(row['total'])}\n"
-                f"{status_label(row['status'])}"
-            )
+async def rating_handler(callback: CallbackQuery,state:FSMContext):
+    await safe_callback_answer(callback)
+    _,bid_s,rating_s=callback.data.split(':')
+    await state.update_data(review_bid=int(bid_s),rating=int(rating_s))
+    await callback.message.answer("✍️ Напишите короткий отзыв или отправьте «-», чтобы оставить только оценку:")
 
-        text = "\n".join(out)
-
-    await callback.message.answer(
-        text,
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="🚗 Забронировать автомобиль",
-                        callback_data="catalog"
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text="🏠 Главное меню",
-                        callback_data="home"
-                    )
-                ]
-            ]
-        )
-    )
+async def review_message(message:Message,state:FSMContext):
+    data=await state.get_data(); bid=data.get('review_bid'); rating=data.get('rating')
+    if not bid or not rating: await state.clear(); return
+    text=(message.text or '').strip(); text='' if text=='-' else text[:1000]
+    ok=await asyncio.to_thread(create_review_sync,bid,message.from_user.id,rating,text)
+    await state.clear()
+    await message.answer("⭐ <b>Спасибо за отзыв!</b>" if ok else "Отзыв уже оставлен или бронирование недоступно для оценки.",reply_markup=main_keyboard())
 
 
 # ============================================================
@@ -5670,6 +5593,14 @@ async def main():
         F.data == "contact"
     )
 
+    dp.callback_query.register(booking_confirm, F.data == "booking:confirm")
+    dp.callback_query.register(booking_edit, F.data == "booking:edit")
+    dp.callback_query.register(booking_abort, F.data == "booking:abort")
+    dp.callback_query.register(mybooking_detail, F.data.startswith("mybooking:"))
+    dp.callback_query.register(user_cancel_booking, F.data.startswith("usercancel:"))
+    dp.callback_query.register(review_start, F.data.startswith("review:"))
+    dp.callback_query.register(rating_handler, F.data.startswith("rating:"))
+
     # ========================================================
     # ADMIN
     # ========================================================
@@ -5811,6 +5742,8 @@ async def main():
     dp.message.register(car_rates_message, AdminFeature.car_rates)
     dp.message.register(car_name_message, AdminFeature.car_name)
     dp.message.register(maintenance_message, AdminFeature.maintenance)
+
+    dp.message.register(review_message, Booking.review)
 
     dp.message.register(
         name_handler,
