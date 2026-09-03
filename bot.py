@@ -17,6 +17,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from aiogram.types import (
     CallbackQuery,
     FSInputFile,
@@ -202,6 +203,13 @@ class Booking(StatesGroup):
     comment = State()
 
 
+class AdminFeature(StatesGroup):
+    search = State()
+    car_name = State()
+    car_rates = State()
+    maintenance = State()
+
+
 # ============================================================
 # DATABASE
 # ============================================================
@@ -306,11 +314,87 @@ def init_db():
                 """
             )
 
+            cur.execute(
+                """
+                ALTER TABLE bookings
+                ADD COLUMN IF NOT EXISTS reminder_24_sent BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+
+            cur.execute(
+                """
+                ALTER TABLE bookings
+                ADD COLUMN IF NOT EXISTS reminder_2_sent BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS car_settings (
+                    car_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    active BOOLEAN NOT NULL DEFAULT TRUE,
+                    rate_1_3 INTEGER NOT NULL,
+                    rate_4_6 INTEGER NOT NULL,
+                    rate_7_plus INTEGER NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS car_maintenance (
+                    id BIGSERIAL PRIMARY KEY,
+                    car_id TEXT NOT NULL,
+                    start_at TIMESTAMPTZ NOT NULL,
+                    end_at TIMESTAMPTZ NOT NULL,
+                    reason TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_maintenance_car_datetime
+                ON car_maintenance(car_id, start_at, end_at)
+                """
+            )
+
+            for cid, car in CARS.items():
+                cur.execute(
+                    """
+                    INSERT INTO car_settings (car_id, name, active, rate_1_3, rate_4_6, rate_7_plus)
+                    VALUES (%s,%s,TRUE,%s,%s,%s)
+                    ON CONFLICT (car_id) DO NOTHING
+                    """,
+                    (cid, car['name'], *car['rates'])
+                )
         con.commit()
 
     finally:
 
         con.close()
+
+
+def load_car_settings():
+    """Загружает сохранённые настройки автомобилей из PostgreSQL."""
+    con = db()
+    try:
+        with con.cursor() as cur:
+            rows = cur.execute("SELECT * FROM car_settings").fetchall()
+        for row in rows:
+            if row['car_id'] in CARS:
+                CARS[row['car_id']]['name'] = row['name']
+                CARS[row['car_id']]['rates'] = (row['rate_1_3'], row['rate_4_6'], row['rate_7_plus'])
+                CARS[row['car_id']]['active'] = row['active']
+    finally:
+        con.close()
+
+
+def active_cars():
+    return {cid: car for cid, car in CARS.items() if car.get('active', True)}
 
 
 def cleanup_pending():
@@ -441,6 +525,50 @@ def rental_days(
 
 
 # ============================================================
+# MAINTENANCE / CAR AVAILABILITY
+# ============================================================
+
+def maintenance_overlaps(car_id, start_at, end_at):
+    start_at = ensure_tz(start_at)
+    end_at = ensure_tz(end_at)
+    con = db()
+    try:
+        with con.cursor() as cur:
+            return cur.execute(
+                """
+                SELECT * FROM car_maintenance
+                WHERE car_id=%s AND start_at < %s AND end_at > %s
+                ORDER BY start_at LIMIT 1
+                """, (car_id, end_at, start_at)
+            ).fetchone()
+    finally:
+        con.close()
+
+
+def get_month_maintenance(car_id, year, month):
+    first = date(year, month, 1)
+    next_first = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    month_start = local_dt(first, time(0,0))
+    month_end = local_dt(next_first, time(0,0))
+    con = db()
+    try:
+        with con.cursor() as cur:
+            return cur.execute(
+                """
+                SELECT id, 'maintenance' AS status, start_at, end_at, reason
+                FROM car_maintenance
+                WHERE car_id=%s AND start_at < %s AND end_at > %s
+                ORDER BY start_at
+                """, (car_id, month_end, month_start)
+            ).fetchall()
+    finally:
+        con.close()
+
+
+def all_calendar_blocks(car_id, year, month):
+    return get_month_bookings(car_id, year, month) + get_month_maintenance(car_id, year, month)
+
+# ============================================================
 # OVERLAP
 # ============================================================
 
@@ -459,6 +587,9 @@ def booking_overlaps(
     cleanup_pending()
 
     start_at = ensure_tz(start_at)
+    if maintenance_overlaps(car_id, start_at, end_at):
+        return {"status": "maintenance"}
+
     end_at = ensure_tz(end_at)
 
     buffer_delta = timedelta(
@@ -539,6 +670,9 @@ def available(
 ):
 
     if end_at <= start_at:
+        return False
+
+    if maintenance_overlaps(car_id, start_at, end_at):
         return False
 
     return (
@@ -859,6 +993,8 @@ def day_status(
 
             elif row["status"] == "pending":
                 pending = True
+            elif row["status"] == "maintenance":
+                confirmed = True
 
     if confirmed:
         return "confirmed"
@@ -954,7 +1090,7 @@ def car_keyboard():
                 callback_data=f"car:{cid}"
             )
         ]
-        for cid, car in CARS.items()
+        for cid, car in active_cars().items()
     ]
 
     rows.append(
@@ -1246,7 +1382,7 @@ def calendar_keyboard_sync(
 
     today = datetime.now(TZ).date()
 
-    bookings = get_month_bookings(
+    bookings = all_calendar_blocks(
         car_id,
         year,
         month
@@ -1480,7 +1616,7 @@ def end_calendar_keyboard_sync(
         "Декабрь",
     ]
 
-    bookings = get_month_bookings(
+    bookings = all_calendar_blocks(
         car_id,
         year,
         month
@@ -1702,6 +1838,13 @@ def admin_panel_keyboard():
                     callback_data="admin:cars"
                 )
             ],
+            [
+                InlineKeyboardButton(text="🔎 Поиск / фильтр", callback_data="admin:filter"),
+                InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")
+            ],
+            [
+                InlineKeyboardButton(text="💰 Отчёт по доходам", callback_data="admin:report")
+            ],
         ]
     )
 
@@ -1774,7 +1917,7 @@ def admin_busy_calendar_keyboard_sync(
 
     today = datetime.now(TZ).date()
 
-    bookings = get_month_bookings(
+    bookings = all_calendar_blocks(
         car_id,
         year,
         month
@@ -2069,10 +2212,10 @@ async def car_selected(
         1
     )[1]
 
-    if cid not in CARS:
+    if cid not in CARS or not CARS[cid].get("active", True):
 
         await callback.message.answer(
-            "Автомобиль не найден."
+            "Автомобиль сейчас недоступен."
         )
 
         return
@@ -2944,6 +3087,9 @@ async def end_time_handler(
         )
         return
 
+    if cid not in CARS or not CARS[cid].get("active", True):
+        return {"ok": False, "reason": "inactive_car"}
+
     days = rental_days(
         start_at,
         end_at
@@ -3140,6 +3286,18 @@ def create_booking_sync(
             check_end = (
                 end_at + buffer_delta
             )
+
+            maintenance = cur.execute(
+                """
+                SELECT id FROM car_maintenance
+                WHERE car_id=%s AND start_at < %s AND end_at > %s
+                LIMIT 1
+                """, (cid, end_at, start_at)
+            ).fetchone()
+
+            if maintenance:
+                con.rollback()
+                return {"ok": False, "reason": "maintenance"}
 
             overlap = cur.execute(
                 """
@@ -4139,6 +4297,16 @@ def update_booking_dates_sync(bid, start_at, end_at, total=None):
             if end_at <= start_at:
                 con.rollback(); return {"ok":False,"message":"Возврат должен быть позже получения."}
 
+            maintenance = cur.execute(
+                """
+                SELECT id FROM car_maintenance
+                WHERE car_id=%s AND start_at < %s AND end_at > %s
+                LIMIT 1
+                """, (row["car_id"], end_at, start_at)
+            ).fetchone()
+            if maintenance:
+                con.rollback(); return {"ok":False,"message":"❌ Новый период попадает на обслуживание автомобиля."}
+
             buffer_delta=timedelta(hours=BUFFER_HOURS)
             other=cur.execute("""
                 SELECT id FROM bookings
@@ -4377,7 +4545,7 @@ async def admin_booking(
     )
 
     text = (
-        f"📋 <b>Заявка №{bid}</b>\n\n"
+        f"📋 <b>Бронирование №{bid}</b>\n" f"{status_label(row['status'])}\n\n"
         f"🚗 <b>{CARS[row['car_id']]['name']}</b>\n\n"
         f"📅 Получение:\n"
         f"<b>{format_date_time(start_at)}</b>\n\n"
@@ -4388,8 +4556,7 @@ async def admin_booking(
         f"👤 {row['name']}\n"
         f"📞 {row['phone']}\n"
         f"Telegram: {username}\n"
-        f"📝 {row['comment'] or '—'}\n\n"
-        f"Статус: {status_label(row['status'])}"
+        f"📝 {row['comment'] or '—'}"
     )
 
     if row["status"] in ("pending", "confirmed"):
@@ -4568,195 +4735,256 @@ async def delete_cancelled_booking(callback: CallbackQuery):
 
 
 # ============================================================
-# ADMIN ALL BOOKINGS
+# ADMIN ALL BOOKINGS / SEARCH / FILTER
 # ============================================================
 
-def get_all_bookings_sync():
+def booking_short_text(row):
+    car = CARS.get(row["car_id"], {"name": row["car_id"]})
+    start_at = ensure_tz(row["start_at"])
+    end_at = ensure_tz(row["end_at"])
+    return (
+        f"№{row['id']} • {car['name']}\n"
+        f"📅 {start_at.strftime('%d.%m %H:%M')} → {end_at.strftime('%d.%m %H:%M')}\n"
+        f"👤 {row['name']} • {money(row['total'])}\n"
+        f"{status_label(row['status'])}"
+    )
 
+
+def get_all_bookings_sync(status=None, car_id=None, query=None, limit=50):
     cleanup_pending()
-
     con = db()
-
     try:
-
         with con.cursor() as cur:
-
-            return cur.execute(
-                """
-                SELECT *
-                FROM bookings
-                ORDER BY id DESC
-                LIMIT 30
-                """
-            ).fetchall()
-
+            sql = "SELECT * FROM bookings WHERE 1=1"
+            params=[]
+            if status:
+                sql += " AND status=%s"; params.append(status)
+            if car_id:
+                sql += " AND car_id=%s"; params.append(car_id)
+            if query:
+                sql += " AND (name ILIKE %s OR phone ILIKE %s OR COALESCE(username,'') ILIKE %s)"
+                q=f"%{query}%"; params += [q,q,q]
+            sql += " ORDER BY start_at DESC, id DESC LIMIT %s"; params.append(limit)
+            return cur.execute(sql, params).fetchall()
     finally:
-
         con.close()
 
 
-async def admin_bookings(
-    callback: CallbackQuery
-):
-
-    await safe_callback_answer(callback)
-
-    if callback.from_user.id != ADMIN_ID:
-
-        await callback.message.answer(
-            "Нет доступа."
-        )
-
-        return
-
-    rows = await asyncio.to_thread(
-        get_all_bookings_sync
-    )
-
-    if not rows:
-
-        await callback.message.edit_text(
-            "📋 <b>Все бронирования</b>\n\n"
-            "Бронирований пока нет.",
-            reply_markup=admin_back_keyboard()
-        )
-
-        return
-
-    keyboard = []
-
+def admin_bookings_markup(rows, show_delete=True):
+    keyboard=[]
     for row in rows:
-        keyboard.append([
-            InlineKeyboardButton(
-                text=(
-                    f"№{row['id']} • "
-                    f"{status_label(row['status'])[:2]} • "
-                    f"{CARS[row['car_id']]['name'][:22]}"
-                ),
-                callback_data=f"adminbooking:{row['id']}"
-            )
-        ])
-
-        if row["status"] == "cancelled":
-            keyboard.append([
-                InlineKeyboardButton(
-                    text=f"🗑 Удалить бронь №{row['id']}",
-                    callback_data=f"deletecancel:{row['id']}"
-                )
-            ])
-
-    keyboard.append(
-        [
-            InlineKeyboardButton(
-                text="◀️ Назад",
-                callback_data="admin:back"
-            )
-        ]
-    )
-
-    await callback.message.edit_text(
-        "📋 <b>Все бронирования</b>\n\n"
-        f"Показаны последние {len(rows)} заявок.",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=keyboard
-        )
-    )
+        keyboard.append([InlineKeyboardButton(text=f"№{row['id']} • {CARS[row['car_id']]['name'][:18]} • {status_label(row['status'])[:2]}", callback_data=f"adminbooking:{row['id']}")])
+        if show_delete and row['status']=='cancelled':
+            keyboard.append([InlineKeyboardButton(text=f"🗑 Удалить №{row['id']}", callback_data=f"deletecancel:{row['id']}")])
+    return keyboard
 
 
-# ============================================================
-# ADMIN CARS
-# ============================================================
-
-async def admin_cars(
-    callback: CallbackQuery
-):
-
+async def admin_bookings(callback: CallbackQuery):
     await safe_callback_answer(callback)
-
     if callback.from_user.id != ADMIN_ID:
+        await callback.message.answer("Нет доступа."); return
+    rows=await asyncio.to_thread(get_all_bookings_sync)
+    if not rows:
+        await callback.message.edit_text("📋 <b>Все бронирования</b>\n\nБронирований пока нет.", reply_markup=admin_back_keyboard()); return
+    keyboard=admin_bookings_markup(rows)
+    keyboard.append([InlineKeyboardButton(text="🔎 Фильтр / поиск", callback_data="admin:filter")])
+    keyboard.append([InlineKeyboardButton(text="◀️ В админ-панель", callback_data="admin:back")])
+    await callback.message.edit_text("📋 <b>Все бронирования</b>\n\nПоказываю последние 50 заявок. Нажмите на бронь для подробностей.", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
 
-        await callback.message.answer(
-            "Нет доступа."
-        )
 
-        return
+async def admin_filter(callback: CallbackQuery):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID: return
+    rows=[[InlineKeyboardButton(text="📋 Все", callback_data="af:all")],
+          [InlineKeyboardButton(text="🟡 Новые", callback_data="af:pending"), InlineKeyboardButton(text="🟢 Подтверждённые", callback_data="af:confirmed")],
+          [InlineKeyboardButton(text="⚫ Отменённые", callback_data="af:cancelled"), InlineKeyboardButton(text="🔴 Отклонённые", callback_data="af:rejected")]]
+    for cid,car in CARS.items():
+        rows.append([InlineKeyboardButton(text=f"🚗 {car['name']}", callback_data=f"afcar:{cid}")])
+    rows.append([InlineKeyboardButton(text="🔍 Найти по имени/телефону", callback_data="af:search")])
+    rows.append([InlineKeyboardButton(text="◀️ К бронированиям", callback_data="admin:bookings")])
+    await callback.message.edit_text("🔎 <b>Поиск и фильтр броней</b>\n\nВыберите нужный фильтр:", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
-    rows = [
-        [
-            InlineKeyboardButton(
-                text=f"🚗 {car['name']}",
-                callback_data=f"admincarinfo:{cid}"
-            )
-        ]
-        for cid, car in CARS.items()
+
+async def admin_filter_result(callback: CallbackQuery):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID: return
+    parts=callback.data.split(":",1)
+    value=parts[1] if len(parts)>1 else "all"
+    status=value if value in {"pending","confirmed","cancelled","rejected"} else None
+    car_id=value if value in CARS else None
+    rows=await asyncio.to_thread(get_all_bookings_sync,status,car_id,None,50)
+    title="📋 Результат фильтра"
+    keyboard=admin_bookings_markup(rows)
+    keyboard.append([InlineKeyboardButton(text="🔎 Другой фильтр", callback_data="admin:filter")])
+    keyboard.append([InlineKeyboardButton(text="◀️ К бронированиям", callback_data="admin:bookings")])
+    await callback.message.edit_text(f"{title}\n\nНайдено: <b>{len(rows)}</b>",reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+
+
+async def admin_search_start(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID: return
+    await state.set_state(AdminFeature.search)
+    await callback.message.edit_text("🔍 <b>Поиск брони</b>\n\nВведите имя клиента, телефон или username:")
+
+
+async def admin_search_message(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    q=(message.text or "").strip()
+    if not q: return
+    await state.clear()
+    rows=await asyncio.to_thread(get_all_bookings_sync,None,None,q,50)
+    keyboard=admin_bookings_markup(rows)
+    keyboard.append([InlineKeyboardButton(text="🔎 Другой поиск", callback_data="admin:filter")])
+    keyboard.append([InlineKeyboardButton(text="◀️ К бронированиям", callback_data="admin:bookings")])
+    await message.answer(f"🔍 <b>Поиск: {q}</b>\n\nНайдено: <b>{len(rows)}</b>",reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+
+# ============================================================
+# ADMIN CARS / SETTINGS / MAINTENANCE
+# ============================================================
+
+async def admin_cars(callback: CallbackQuery):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID: return
+    rows=[]
+    for cid,car in CARS.items():
+        state="🟢 включён" if car.get('active',True) else "⚪ выключен"
+        rows.append([InlineKeyboardButton(text=f"🚗 {car['name']} — {state}", callback_data=f"admincarinfo:{cid}")])
+    rows.append([InlineKeyboardButton(text="◀️ В админ-панель", callback_data="admin:back")])
+    await callback.message.edit_text("🚗 <b>Управление автомобилями</b>\n\nВыберите автомобиль:",reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+
+def car_settings_sync(cid, **kwargs):
+    con=db()
+    try:
+        with con.cursor() as cur:
+            sets=[]; vals=[]
+            for k,v in kwargs.items(): sets.append(f"{k}=%s"); vals.append(v)
+            vals.append(cid)
+            cur.execute(f"UPDATE car_settings SET {', '.join(sets)}, updated_at=NOW() WHERE car_id=%s",vals)
+        con.commit()
+    finally: con.close()
+    load_car_settings()
+
+
+def add_maintenance_sync(cid,start_at,end_at,reason):
+    con=db()
+    try:
+        with con.cursor() as cur:
+            row=cur.execute("INSERT INTO car_maintenance(car_id,start_at,end_at,reason) VALUES(%s,%s,%s,%s) RETURNING *",(cid,start_at,end_at,reason)).fetchone()
+        con.commit(); return row
+    finally: con.close()
+
+
+def get_maintenance_sync(cid=None):
+    con=db()
+    try:
+        with con.cursor() as cur:
+            if cid:
+                return cur.execute("SELECT * FROM car_maintenance WHERE car_id=%s ORDER BY start_at",(cid,)).fetchall()
+            return cur.execute("SELECT * FROM car_maintenance ORDER BY start_at").fetchall()
+    finally: con.close()
+
+
+def delete_maintenance_sync(mid):
+    con=db()
+    try:
+        with con.cursor() as cur: cur.execute("DELETE FROM car_maintenance WHERE id=%s",(mid,))
+        con.commit()
+    finally: con.close()
+
+
+async def admin_car_info(callback: CallbackQuery):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID: return
+    cid=callback.data.split(":",1)[1]
+    if cid not in CARS: return
+    car=CARS[cid]; active=car.get('active',True)
+    maint=await asyncio.to_thread(get_maintenance_sync,cid)
+    mt="\n".join(f"• {format_date_time(x['start_at'])} → {format_date_time(x['end_at'])} — {x['reason'] or 'обслуживание'}" for x in maint[:10]) or "нет"
+    text=(f"🚗 <b>{car['name']}</b>\n\n{car_text(cid)}\n\n"
+          f"Статус: {'🟢 доступен' if active else '⚪ отключён'}\n\n"
+          f"🔧 <b>Обслуживание</b>\n{mt}")
+    buttons=[
+        [InlineKeyboardButton(text="⛔ Отключить" if active else "🟢 Включить",callback_data=f"cartoggle:{cid}")],
+        [InlineKeyboardButton(text="💰 Изменить тарифы",callback_data=f"carrates:{cid}")],
+        [InlineKeyboardButton(text="✏️ Изменить название",callback_data=f"carname:{cid}")],
+        [InlineKeyboardButton(text="🔧 Добавить обслуживание",callback_data=f"maintadd:{cid}")],
     ]
-
-    rows.append(
-        [
-            InlineKeyboardButton(
-                text="◀️ Назад",
-                callback_data="admin:back"
-            )
-        ]
-    )
-
-    await callback.message.edit_text(
-        "🚗 <b>Автомобили</b>\n\n"
-        "Выберите автомобиль:",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=rows
-        )
-    )
+    for x in maint[:5]: buttons.append([InlineKeyboardButton(text=f"🗑 Удалить ТО №{x['id']}",callback_data=f"maintdel:{x['id']}:{cid}")])
+    buttons += [[InlineKeyboardButton(text="◀️ К автомобилям",callback_data="admin:cars")]]
+    await callback.message.edit_text(text,reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 
 
-async def admin_car_info(
-    callback: CallbackQuery
-):
-
+async def car_toggle(callback: CallbackQuery):
     await safe_callback_answer(callback)
+    cid=callback.data.split(":",1)[1]
+    if callback.from_user.id != ADMIN_ID or cid not in CARS:return
+    new=not CARS[cid].get('active',True)
+    await asyncio.to_thread(car_settings_sync,cid,active=new)
+    await admin_car_info(callback)
 
-    if callback.from_user.id != ADMIN_ID:
 
-        await callback.message.answer(
-            "Нет доступа."
-        )
+async def car_rates_start(callback: CallbackQuery,state:FSMContext):
+    await safe_callback_answer(callback)
+    cid=callback.data.split(":",1)[1]
+    if callback.from_user.id != ADMIN_ID:return
+    await state.update_data(car_id=cid); await state.set_state(AdminFeature.car_rates)
+    await callback.message.edit_text(f"💰 <b>Тарифы: {CARS[cid]['name']}</b>\n\nВведите три числа через пробел:\n<b>1–3 / 4–6 / 7+ суток</b>\nНапример: 2700 2600 2500")
 
-        return
 
-    cid = callback.data.split(
-        ":",
-        1
-    )[1]
+async def car_rates_message(message:Message,state:FSMContext):
+    if message.from_user.id != ADMIN_ID:return
+    data=await state.get_data(); cid=data['car_id']
+    try: vals=tuple(int(x) for x in (message.text or '').split())
+    except ValueError: vals=()
+    if len(vals)!=3 or any(x<=0 for x in vals):
+        await message.answer("Нужно ровно три положительных числа, например: 2700 2600 2500"); return
+    await asyncio.to_thread(car_settings_sync,cid,rate_1_3=vals[0],rate_4_6=vals[1],rate_7_plus=vals[2])
+    await state.clear(); await message.answer("✅ Тарифы сохранены.",reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🚗 К автомобилю",callback_data=f"admincarinfo:{cid}")]]))
 
-    if cid not in CARS:
 
-        await callback.message.answer(
-            "Автомобиль не найден."
-        )
+async def car_name_start(callback:CallbackQuery,state:FSMContext):
+    await safe_callback_answer(callback); cid=callback.data.split(":",1)[1]
+    if callback.from_user.id != ADMIN_ID:return
+    await state.update_data(car_id=cid); await state.set_state(AdminFeature.car_name)
+    await callback.message.edit_text("✏️ Введите новое название автомобиля:")
 
-        return
 
-    await callback.message.edit_text(
-        "🚗 <b>Автомобиль</b>\n\n"
-        + car_text(cid),
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="📅 Календарь занятости",
-                        callback_data=f"admincar:{cid}"
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text="◀️ К автомобилям",
-                        callback_data="admin:cars"
-                    )
-                ]
-            ]
-        )
-    )
+async def car_name_message(message:Message,state:FSMContext):
+    if message.from_user.id != ADMIN_ID:return
+    data=await state.get_data(); cid=data['car_id']; name=(message.text or '').strip()
+    if not name: await message.answer("Название не должно быть пустым."); return
+    await asyncio.to_thread(car_settings_sync,cid,name=name); await state.clear()
+    await message.answer("✅ Название сохранено.",reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🚗 К автомобилю",callback_data=f"admincarinfo:{cid}")]]))
 
+
+async def maintenance_start(callback:CallbackQuery,state:FSMContext):
+    await safe_callback_answer(callback); cid=callback.data.split(":",1)[1]
+    if callback.from_user.id != ADMIN_ID:return
+    await state.update_data(car_id=cid); await state.set_state(AdminFeature.maintenance)
+    await callback.message.edit_text("🔧 <b>Обслуживание</b>\n\nВведите период в формате:\n<b>ДД.ММ.ГГГГ ЧЧ:ММ — ДД.ММ.ГГГГ ЧЧ:ММ | причина</b>\n\nНапример:\n03.09.2026 09:00 — 04.09.2026 18:00 | ТО и замена масла")
+
+
+async def maintenance_message(message:Message,state:FSMContext):
+    if message.from_user.id != ADMIN_ID:return
+    data=await state.get_data(); cid=data['car_id']; raw=(message.text or '').strip()
+    try:
+        period,reason=(raw.split('|',1)+[''])[:2]
+        a,b=period.split('—')
+        fmt='%d.%m.%Y %H:%M'
+        start_at=datetime.strptime(a.strip(),fmt).replace(tzinfo=TZ); end_at=datetime.strptime(b.strip(),fmt).replace(tzinfo=TZ)
+        if end_at<=start_at: raise ValueError
+    except Exception:
+        await message.answer("Не удалось распознать период. Пример: 03.09.2026 09:00 — 04.09.2026 18:00 | ТО"); return
+    await asyncio.to_thread(add_maintenance_sync,cid,start_at,end_at,reason.strip() or 'обслуживание')
+    await state.clear(); await message.answer("✅ Автомобиль заблокирован на обслуживание.",reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🚗 К автомобилю",callback_data=f"admincarinfo:{cid}")]]))
+
+
+async def maintenance_delete(callback:CallbackQuery):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID:return
+    _,mid,cid=callback.data.split(":")
+    await asyncio.to_thread(delete_maintenance_sync,int(mid)); await admin_car_info(callback)
 
 # ============================================================
 # CONFIRM / REJECT
@@ -4879,6 +5107,18 @@ def admin_action_sync(
                 }
 
             if action == "confirm":
+
+                maintenance = cur.execute(
+                    """
+                    SELECT id FROM car_maintenance
+                    WHERE car_id=%s AND start_at < %s AND end_at > %s
+                    LIMIT 1
+                    """, (row["car_id"], end_at, start_at)
+                ).fetchone()
+                if maintenance:
+                    cur.execute("UPDATE bookings SET status='rejected' WHERE id=%s", (bid,))
+                    con.commit()
+                    return {"ok":False,"reason":"maintenance","row":row,"start_at":start_at,"end_at":end_at}
 
                 buffer_delta = timedelta(
                     hours=BUFFER_HOURS
@@ -5025,6 +5265,17 @@ async def admin_action(
 
             return
 
+        if result["reason"] == "maintenance":
+            await callback.message.edit_reply_markup(reply_markup=None)
+            row=result["row"]
+            await callback.bot.send_message(row["user_id"], f"❌ <b>Заявка №{bid} отклонена</b>\n\nАвтомобиль назначен на техническое обслуживание в выбранный период.", reply_markup=main_keyboard())
+            await callback.message.answer("Бронь попала на период обслуживания автомобиля и отклонена.")
+            return
+
+        if result["reason"] == "inactive_car":
+            await callback.message.answer("Автомобиль сейчас отключён в настройках.")
+            return
+
         if result["reason"] == "overlap":
 
             await callback.message.edit_reply_markup(
@@ -5111,6 +5362,123 @@ async def admin_action(
 
 
 # ============================================================
+# STATISTICS / INCOME REPORTS
+# ============================================================
+
+def stats_sync():
+    con=db()
+    try:
+        with con.cursor() as cur:
+            rows=cur.execute("""
+                SELECT car_id,
+                       COUNT(*) FILTER (WHERE status='confirmed') AS confirmed_count,
+                       COALESCE(SUM(total) FILTER (WHERE status='confirmed'),0) AS revenue,
+                       COALESCE(SUM(GREATEST(0, EXTRACT(EPOCH FROM (end_at-start_at))/86400.0)) FILTER (WHERE status='confirmed'),0) AS rental_days_raw
+                FROM bookings GROUP BY car_id ORDER BY car_id
+            """).fetchall()
+            return rows
+    finally: con.close()
+
+
+def income_sync(period):
+    con=db()
+    try:
+        with con.cursor() as cur:
+            if period=='month':
+                where="status='confirmed' AND date_trunc('month', start_at)=date_trunc('month', NOW())"
+            elif period=='prev':
+                where="status='confirmed' AND date_trunc('month', start_at)=date_trunc('month', NOW() - interval '1 month')"
+            else:
+                where="status='confirmed'"
+            return cur.execute(f"""
+                SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS revenue,
+                       COUNT(DISTINCT car_id) AS cars
+                FROM bookings WHERE {where}
+            """).fetchone()
+    finally: con.close()
+
+
+async def admin_stats(callback:CallbackQuery):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID:return
+    rows=await asyncio.to_thread(stats_sync)
+    lines=["📊 <b>Статистика по автомобилям</b>",""]
+    total_rev=0; total_cnt=0
+    for r in rows:
+        car=CARS.get(r['car_id'],{'name':r['car_id']}); rev=int(r['revenue'] or 0); cnt=int(r['confirmed_count'] or 0)
+        total_rev+=rev; total_cnt+=cnt
+        lines.append(f"🚗 <b>{car['name']}</b>\n   Броней: {cnt} • Доход: {money(rev)}")
+    lines += ["",f"📌 Всего подтверждено: <b>{total_cnt}</b>",f"💰 Общий доход: <b>{money(total_rev)}</b>"]
+    await callback.message.edit_text("\n".join(lines),reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ В админ-панель",callback_data="admin:back")]]))
+
+
+async def admin_report(callback:CallbackQuery):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID:return
+    rows=[[InlineKeyboardButton(text="📅 Текущий месяц",callback_data="report:month")],[InlineKeyboardButton(text="◀️ Предыдущий месяц",callback_data="report:prev")],[InlineKeyboardButton(text="📚 За всё время",callback_data="report:all")],[InlineKeyboardButton(text="◀️ В админ-панель",callback_data="admin:back")]]
+    await callback.message.edit_text("💰 <b>Отчёт по доходам</b>\n\nВыберите период:",reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+
+async def report_result(callback:CallbackQuery):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID:return
+    period=callback.data.split(":",1)[1]; row=await asyncio.to_thread(income_sync,period)
+    label={'month':'текущий месяц','prev':'предыдущий месяц','all':'всё время'}[period]
+    await callback.message.edit_text(f"💰 <b>Доход — {label}</b>\n\n🚗 Автомобилей в аренде: <b>{row['cars']}</b>\n📋 Подтверждённых броней: <b>{row['cnt']}</b>\n💵 Выручка: <b>{money(int(row['revenue'] or 0))}</b>",reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ К отчётам",callback_data="admin:report")]]))
+
+
+# ============================================================
+# REMINDERS
+# ============================================================
+
+def reminder_candidates_sync():
+    cleanup_pending()
+    con=db()
+    try:
+        with con.cursor() as cur:
+            rows=cur.execute("""
+                SELECT * FROM bookings
+                WHERE status='confirmed'
+                  AND ((start_at > NOW() AND start_at <= NOW()+interval '2 hours' AND reminder_2_sent=FALSE)
+                    OR (start_at > NOW()+interval '2 hours' AND start_at <= NOW()+interval '24 hours' AND reminder_24_sent=FALSE))
+                ORDER BY start_at
+            """).fetchall()
+            return rows
+    finally: con.close()
+
+
+def mark_reminder_sync(bid,kind):
+    con=db()
+    try:
+        with con.cursor() as cur:
+            cur.execute(f"UPDATE bookings SET reminder_{kind}_sent=TRUE WHERE id=%s",(bid,))
+        con.commit()
+    finally: con.close()
+
+
+async def reminder_loop(bot):
+    while True:
+        try:
+            rows=await asyncio.to_thread(reminder_candidates_sync)
+            now=datetime.now(TZ)
+            for row in rows:
+                start_at=ensure_tz(row['start_at'])
+                delta=start_at-now
+                if delta <= timedelta(hours=2):
+                    kind='2'; text=(f"⏰ <b>Напоминание о бронировании №{row['id']}</b>\n\n🚗 {CARS[row['car_id']]['name']}\n📅 Получение: <b>{format_date_time(start_at)}</b>\n↩️ Возврат: <b>{format_date_time(row['end_at'])}</b>\n\nДо начала аренды осталось около 2 часов.")
+                elif delta <= timedelta(hours=24):
+                    kind='24'; text=(f"🔔 <b>Напоминание о бронировании №{row['id']}</b>\n\n🚗 {CARS[row['car_id']]['name']}\n📅 Получение: <b>{format_date_time(start_at)}</b>\n↩️ Возврат: <b>{format_date_time(row['end_at'])}</b>\n💰 {money(row['total'])}\n\nДо начала аренды менее 24 часов.")
+                else: continue
+                try:
+                    await bot.send_message(row['user_id'],text,reply_markup=main_keyboard())
+                    await asyncio.to_thread(mark_reminder_sync,row['id'],kind)
+                except Exception as exc:
+                    print(f"[REMINDER] booking={row['id']} ERROR={type(exc).__name__}: {exc}")
+        except Exception as exc:
+            print(f"[REMINDER LOOP] ERROR={type(exc).__name__}: {exc}")
+        await asyncio.sleep(300)
+
+# ============================================================
 # PUBLISH
 # ============================================================
 
@@ -5173,6 +5541,7 @@ async def main():
     await asyncio.to_thread(
         init_db
     )
+    await asyncio.to_thread(load_car_settings)
 
     print(
         "Neon PostgreSQL connected successfully."
@@ -5190,6 +5559,8 @@ async def main():
     )
 
     dp = Dispatcher()
+
+    asyncio.create_task(reminder_loop(bot))
 
     # ========================================================
     # COMMANDS
@@ -5402,6 +5773,18 @@ async def main():
         admin_action,
         F.data.startswith("cancel:")
     )
+    dp.callback_query.register(admin_filter, F.data == "admin:filter")
+    dp.callback_query.register(admin_stats, F.data == "admin:stats")
+    dp.callback_query.register(admin_report, F.data == "admin:report")
+    dp.callback_query.register(admin_search_start, F.data == "af:search")
+    dp.callback_query.register(admin_filter_result, F.data.startswith("af:"))
+    dp.callback_query.register(admin_filter_result, F.data.startswith("afcar:"))
+    dp.callback_query.register(report_result, F.data.startswith("report:"))
+    dp.callback_query.register(car_toggle, F.data.startswith("cartoggle:"))
+    dp.callback_query.register(car_rates_start, F.data.startswith("carrates:"))
+    dp.callback_query.register(car_name_start, F.data.startswith("carname:"))
+    dp.callback_query.register(maintenance_start, F.data.startswith("maintadd:"))
+    dp.callback_query.register(maintenance_delete, F.data.startswith("maintdel:"))
 
     async def noop_handler(
         callback: CallbackQuery
@@ -5423,6 +5806,11 @@ async def main():
     # ========================================================
     # FSM
     # ========================================================
+
+    dp.message.register(admin_search_message, AdminFeature.search)
+    dp.message.register(car_rates_message, AdminFeature.car_rates)
+    dp.message.register(car_name_message, AdminFeature.car_name)
+    dp.message.register(maintenance_message, AdminFeature.maintenance)
 
     dp.message.register(
         name_handler,
