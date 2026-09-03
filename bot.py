@@ -2593,6 +2593,28 @@ async def end_day(
 
         return
 
+    # Перед показом времени возврата обязательно проверяем ВЕСЬ
+    # интервал от выбранного получения до выбранной даты.
+    # Это не позволяет построить период вида 08.10-21.10,
+    # если внутри него уже есть бронь 09.10-20.10.
+    has_free_return_time = False
+    for hour in range(PICKUP_START_HOUR, PICKUP_END_HOUR + 1):
+        candidate_end = local_dt(end_d, time(hour, 0))
+        if candidate_end <= start_at:
+            continue
+        if await async_available(cid, start_at, candidate_end):
+            has_free_return_time = True
+            break
+
+    if not has_free_return_time:
+        await callback.message.answer(
+            "❌ На выбранную дату возврат невозможен.\n\n"
+            "Выбранный период пересекается с другой арендой "
+            "или техническим интервалом.\n\n"
+            "Выберите другую дату."
+        )
+        return
+
     title, keyboard = time_keyboard(
         cid,
         end_d,
