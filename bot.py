@@ -518,7 +518,13 @@ def booking_overlaps(
                 params
             )
 
-            return cur.fetchone()
+            row = cur.fetchone()
+            print(
+                f"[OVERLAP] car={car_id} start={start_at.isoformat()} "
+                f"end={end_at.isoformat()} check_start={check_start.isoformat()} "
+                f"check_end={check_end.isoformat()} result={bool(row)} row={row!r}"
+            )
+            return row
 
     finally:
 
@@ -668,9 +674,15 @@ async def async_get_month_bookings(
 
 
 def interval_overlaps_bookings(start_at, end_at, bookings, exclude_booking_id=None):
-    """Проверка пересечения с уже загруженными бронями, включая буфер."""
+    """True when requested interval intersects a booking plus buffer.
+
+    Boundary is open: existing end 09:00 + 2h buffer permits new start 11:00.
+    """
     start_at = ensure_tz(start_at)
     end_at = ensure_tz(end_at)
+    if end_at <= start_at:
+        return True
+
     check_start = start_at - timedelta(hours=BUFFER_HOURS)
     check_end = end_at + timedelta(hours=BUFFER_HOURS)
 
@@ -684,29 +696,125 @@ def interval_overlaps_bookings(start_at, end_at, bookings, exclude_booking_id=No
     return False
 
 
-def day_has_available_pickup(current, bookings, exclude_booking_id=None):
-    """Есть ли хотя бы одно доступное время получения в этот день."""
+def day_has_available_pickup(
+    current,
+    bookings,
+    exclude_booking_id=None,
+    allow_past=False
+):
+    """
+    День зелёный, если существует хотя бы один допустимый час получения.
+
+    Для клиента прошедшие часы отбрасываются.
+    Для администратора allow_past=True позволяет исправлять бронь задним
+    числом (например 02.09 -> 01.09).
+    """
+    now = datetime.now(TZ)
+
     for hour in range(PICKUP_START_HOUR, PICKUP_END_HOUR + 1):
         start_at = local_dt(current, time(hour, 0))
+
+        if not allow_past and start_at <= now:
+            continue
+
+        # Проверяем реальный час получения с буфером.
+        # Поэтому день, в котором предыдущая аренда заканчивается в 09:00,
+        # остаётся зелёным, если доступно получение в 11:00 и позже.
         end_at = start_at + timedelta(hours=1)
+
         if not interval_overlaps_bookings(
-            start_at, end_at, bookings, exclude_booking_id
+            start_at,
+            end_at,
+            bookings,
+            exclude_booking_id
         ):
             return True
+
     return False
 
 
-def day_has_available_return(current, start_at, bookings, exclude_booking_id=None):
-    """Есть ли хотя бы одно доступное время возврата в этот день."""
-    start_at = ensure_tz(start_at)
+def day_has_available_return_date(
+    current,
+    bookings,
+    exclude_booking_id=None
+):
+    """
+    Показывает, есть ли на КОНКРЕТНОЙ дате хотя бы одно доступное
+    время возврата автомобиля.
+
+    ВАЖНО: это только визуальная проверка даты календаря.
+    Она НЕ проверяет весь будущий интервал от даты получения.
+
+    Например, если уже существует бронь 09.10 -> 20.10, то после
+    выбора получения 08.10 календарь возврата должен показывать:
+
+        09-20 -> 🔴
+        21 и далее -> 🟢
+
+    При этом попытка реально создать бронь 08.10 -> 21.10
+    всё равно будет отклонена финальной проверкой полного интервала
+    в end_day()/create_booking_sync().
+
+    Учитывается BUFFER_HOURS: дата считается доступной, если на ней
+    существует хотя бы один час, не попадающий в занятый интервал
+    с техническим буфером.
+    """
+    day_start = local_dt(current, time(PICKUP_START_HOUR, 0))
+    day_end = local_dt(current, time(PICKUP_END_HOUR, 0))
+
     for hour in range(PICKUP_START_HOUR, PICKUP_END_HOUR + 1):
         end_at = local_dt(current, time(hour, 0))
-        if end_at <= start_at:
+
+        # Для возврата проверяем момент времени небольшим интервалом,
+        # чтобы корректно учитывать буфер и границы существующей брони.
+        if hour == PICKUP_END_HOUR:
+            probe_end = end_at + timedelta(minutes=1)
+        else:
+            probe_end = end_at + timedelta(minutes=1)
+
+        if end_at < day_start or end_at > day_end:
             continue
+
         if not interval_overlaps_bookings(
-            start_at, end_at, bookings, exclude_booking_id
+            end_at,
+            probe_end,
+            bookings,
+            exclude_booking_id
         ):
             return True
+
+    return False
+
+
+def day_has_available_return(
+    current,
+    start_at,
+    bookings,
+    exclude_booking_id=None
+):
+    """
+    Полная проверка даты возврата относительно выбранного получения.
+
+    Используется только там, где нужно определить, можно ли реально
+    построить интервал start_at -> candidate_end. Для отображения
+    календаря используется day_has_available_return_date().
+    """
+    start_at = ensure_tz(start_at)
+
+    for hour in range(PICKUP_START_HOUR, PICKUP_END_HOUR + 1):
+        end_at = local_dt(current, time(hour, 0))
+
+        if end_at <= start_at:
+            continue
+
+        if not interval_overlaps_bookings(
+            start_at,
+            end_at,
+            bookings,
+            exclude_booking_id
+        ):
+            return True
+
     return False
 
 def day_status(
@@ -1432,7 +1540,11 @@ def end_calendar_keyboard_sync(
                 + timedelta(days=1)
             )
 
-            if day_has_available_return(current, start_at, bookings):
+            # ВАЖНО: цвет даты показывает занятость САМОЙ даты,
+            # а не возможность построить весь интервал от выбранного
+            # получения до этой даты. Полный интервал проверяется
+            # непосредственно при выборе даты/времени возврата.
+            if day_has_available_return_date(current, bookings):
                 text = f"🟢{n}"
                 callback_data = f"end:{car_id}:{current.isoformat()}"
             else:
@@ -2254,6 +2366,21 @@ async def pick_time(
         return
 
     # ========================================================
+    # Финальная DB-проверка выбранного времени получения.
+    # ========================================================
+
+    if not await async_available(
+        cid,
+        start_at,
+        start_at + timedelta(hours=1)
+    ):
+        await callback.message.answer(
+            "❌ Это время уже занято с учётом технического интервала.\n\n"
+            "Выберите другое время."
+        )
+        return
+
+    # ========================================================
     # Сохраняем выбранное время.
     # ========================================================
 
@@ -3031,6 +3158,12 @@ def create_booking_sync(
                 )
             ).fetchone()
 
+            print(
+                f"[CREATE_OVERLAP] car={cid} start={start_at.isoformat()} "
+                f"end={end_at.isoformat()} check_start={check_start.isoformat()} "
+                f"check_end={check_end.isoformat()} overlap={overlap!r}"
+            )
+
             if overlap:
 
                 con.rollback()
@@ -3733,7 +3866,14 @@ class AdminEdit(StatesGroup):
     end_time = State()
 
 
-def admin_edit_calendar_sync(bid, car_id, year, month, mode):
+def admin_edit_calendar_sync(
+    bid,
+    car_id,
+    year,
+    month,
+    mode,
+    start_at=None
+):
     first = date(year, month, 1)
     next_first = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
     prev_first = date(year - 1, 12, 1) if month == 1 else date(year, month - 1, 1)
@@ -3751,15 +3891,25 @@ def admin_edit_calendar_sync(bid, car_id, year, month, mode):
         # Это нужно, например, для исправления брони 02.09–07.09 -> 01.09–05.09.
         if mode == "start":
             available_day = day_has_available_pickup(
-                current, bookings, exclude_booking_id=bid
+                current,
+                bookings,
+                exclude_booking_id=bid,
+                allow_past=True
             )
         else:
-            data_start = None
-            # На этапе выбора даты возврата дата допустима, если
-            # на ней есть хотя бы одно время возврата после выбранного старта.
-            # Точный start_at берём из FSM в обработчике даты, поэтому
-            # здесь не блокируем дату целиком из-за чужой брони.
-            available_day = True
+            # Для календаря возврата нужен уже выбранный момент получения.
+            # Проверяем весь интервал start_at -> candidate_end.
+            if start_at is None:
+                available_day = False
+            else:
+                # В календаре возврата показываем фактическую занятость
+                # самой даты. Возможность полного интервала start_at -> end_at
+                # проверяется уже при выборе времени возврата.
+                available_day = day_has_available_return_date(
+                    current,
+                    bookings,
+                    exclude_booking_id=bid
+                )
 
         if available_day:
             text = f"🟢{n}"
@@ -3783,8 +3933,22 @@ def admin_edit_calendar_sync(bid, car_id, year, month, mode):
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def admin_edit_calendar(bid, car_id, mode, d):
-    return await asyncio.to_thread(admin_edit_calendar_sync, bid, car_id, d.year, d.month, mode)
+async def admin_edit_calendar(
+    bid,
+    car_id,
+    mode,
+    d,
+    start_at=None
+):
+    return await asyncio.to_thread(
+        admin_edit_calendar_sync,
+        bid,
+        car_id,
+        d.year,
+        d.month,
+        mode,
+        start_at
+    )
 
 
 def admin_edit_time_keyboard_sync(bid, car_id, selected_date, mode, start_at=None):
@@ -3838,7 +4002,19 @@ async def admin_edit_month(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID: return
     _, bid_s, car_id, mode, iso = callback.data.split(":")
     d = date.fromisoformat(iso)
-    kb = await admin_edit_calendar(int(bid_s), car_id, mode, d)
+    start_at = None
+    if mode == "end":
+        data = await state.get_data()
+        start_iso = data.get("edit_start_at")
+        if start_iso:
+            start_at = ensure_tz(datetime.fromisoformat(start_iso))
+    kb = await admin_edit_calendar(
+        int(bid_s),
+        car_id,
+        mode,
+        d,
+        start_at=start_at
+    )
     await callback.message.edit_reply_markup(reply_markup=kb)
 
 
@@ -3881,7 +4057,13 @@ async def admin_edit_start_time(callback: CallbackQuery, state: FSMContext):
     await state.update_data(edit_start_at=start_at.isoformat(), admin_edit_car_id=row["car_id"])
     await state.set_state(AdminEdit.end)
     d0=start_at.date()
-    kb=await admin_edit_calendar(bid,row["car_id"],"end",d0)
+    kb=await admin_edit_calendar(
+        bid,
+        row["car_id"],
+        "end",
+        d0,
+        start_at=start_at
+    )
     await callback.message.edit_text(f"✏️ <b>Заявка №{bid}</b>\n\n📅 Получение: <b>{format_date_time(start_at)}</b>\n\nВыберите новую <b>дату возврата</b>.",reply_markup=kb)
 
 
@@ -3971,7 +4153,19 @@ async def admin_edit_backdate(callback: CallbackQuery, state: FSMContext):
     if not row: return
     target="start" if mode=="start" else "end"
     await state.set_state(AdminEdit.start if target=="start" else AdminEdit.end)
-    kb=await admin_edit_calendar(bid,row["car_id"],target,d)
+    start_at = None
+    if target == "end":
+        data = await state.get_data()
+        start_iso = data.get("edit_start_at")
+        if start_iso:
+            start_at = ensure_tz(datetime.fromisoformat(start_iso))
+    kb=await admin_edit_calendar(
+        bid,
+        row["car_id"],
+        target,
+        d,
+        start_at=start_at
+    )
     await callback.message.edit_text(f"✏️ <b>Заявка №{bid}</b>\n\nВыберите дату:",reply_markup=kb)
 
 
