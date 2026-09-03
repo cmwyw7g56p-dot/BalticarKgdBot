@@ -4382,13 +4382,166 @@ async def admin_booking(
             InlineKeyboardButton(text="🚫 Отменить бронь", callback_data=f"cancel:{bid}")
         ])
         buttons.append([
-            InlineKeyboardButton(text="◀️ Назад", callback_data=f"admincar:{row['car_id']}")
+            InlineKeyboardButton(text="◀️ К бронированиям", callback_data="admin:bookings")
         ])
         reply_markup = InlineKeyboardMarkup(inline_keyboard=buttons)
     else:
-        reply_markup = admin_back_keyboard()
+        buttons = []
+        if row["status"] == "cancelled":
+            buttons.append([
+                InlineKeyboardButton(
+                    text="🗑 Удалить отменённую бронь",
+                    callback_data=f"deletecancel:{bid}"
+                )
+            ])
+        buttons.append([
+            InlineKeyboardButton(
+                text="◀️ К бронированиям",
+                callback_data="admin:bookings"
+            )
+        ])
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=buttons)
 
     await callback.message.edit_text(text, reply_markup=reply_markup)
+
+
+# ============================================================
+# DELETE CANCELLED BOOKING
+# ============================================================
+
+def delete_cancelled_booking_sync(bid):
+
+    con = db()
+
+    try:
+
+        with con.cursor() as cur:
+
+            row = cur.execute(
+                """
+                SELECT *
+                FROM bookings
+                WHERE id=%s
+                FOR UPDATE
+                """,
+                (bid,)
+            ).fetchone()
+
+            if not row:
+                con.rollback()
+                return {"ok": False, "reason": "not_found"}
+
+            if row["status"] != "cancelled":
+                con.rollback()
+                return {
+                    "ok": False,
+                    "reason": "not_cancelled",
+                    "status": row["status"]
+                }
+
+            cur.execute(
+                """
+                DELETE FROM bookings
+                WHERE id=%s
+                  AND status='cancelled'
+                """,
+                (bid,)
+            )
+
+            con.commit()
+
+            return {"ok": True, "row": row}
+
+    except Exception:
+        con.rollback()
+        raise
+
+    finally:
+        con.close()
+
+
+async def delete_cancelled_booking(callback: CallbackQuery):
+
+    await safe_callback_answer(callback)
+
+    if callback.from_user.id != ADMIN_ID:
+
+        await callback.message.answer(
+            "Нет доступа."
+        )
+        return
+
+    try:
+        bid = int(callback.data.split(":", 1)[1])
+    except (ValueError, IndexError):
+        await callback.message.answer(
+            "Некорректный номер брони."
+        )
+        return
+
+    result = await asyncio.to_thread(
+        delete_cancelled_booking_sync,
+        bid
+    )
+
+    if not result["ok"]:
+
+        if result["reason"] == "not_found":
+            await callback.message.answer(
+                "Бронь не найдена или уже удалена."
+            )
+            return
+
+        await callback.message.answer(
+            "Удалять можно только отменённые брони."
+        )
+        return
+
+    # После удаления сразу возвращаемся в обновлённый список.
+    rows = await asyncio.to_thread(get_all_bookings_sync)
+
+    if not rows:
+        await callback.message.edit_text(
+            "📋 <b>Все бронирования</b>\n\n"
+            "Бронирований пока нет.",
+            reply_markup=admin_back_keyboard()
+        )
+        return
+
+    keyboard = []
+    for row in rows:
+        keyboard.append([
+            InlineKeyboardButton(
+                text=(
+                    f"№{row['id']} • "
+                    f"{status_label(row['status'])[:2]} • "
+                    f"{CARS[row['car_id']]['name'][:22]}"
+                ),
+                callback_data=f"adminbooking:{row['id']}"
+            )
+        ])
+        if row["status"] == "cancelled":
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=f"🗑 Удалить бронь №{row['id']}",
+                    callback_data=f"deletecancel:{row['id']}"
+                )
+            ])
+
+    keyboard.append([
+        InlineKeyboardButton(
+            text="◀️ Назад",
+            callback_data="admin:back"
+        )
+    ])
+
+    await callback.message.edit_text(
+        "📋 <b>Все бронирования</b>\n\n"
+        f"Показаны последние {len(rows)} заявок.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=keyboard
+        )
+    )
 
 
 # ============================================================
@@ -4447,21 +4600,27 @@ async def admin_bookings(
 
         return
 
-    keyboard = [
-        [
+    keyboard = []
+
+    for row in rows:
+        keyboard.append([
             InlineKeyboardButton(
                 text=(
                     f"№{row['id']} • "
                     f"{status_label(row['status'])[:2]} • "
                     f"{CARS[row['car_id']]['name'][:22]}"
                 ),
-                callback_data=(
-                    f"adminbooking:{row['id']}"
-                )
+                callback_data=f"adminbooking:{row['id']}"
             )
-        ]
-        for row in rows
-    ]
+        ])
+
+        if row["status"] == "cancelled":
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=f"🗑 Удалить бронь №{row['id']}",
+                    callback_data=f"deletecancel:{row['id']}"
+                )
+            ])
 
     keyboard.append(
         [
@@ -5209,6 +5368,11 @@ async def main():
     dp.callback_query.register(
         admin_action,
         F.data.startswith("reject:")
+    )
+
+    dp.callback_query.register(
+        delete_cancelled_booking,
+        F.data.startswith("deletecancel:")
     )
 
     dp.callback_query.register(
