@@ -4086,6 +4086,11 @@ async def admin_edit_end_time(callback: CallbackQuery, state: FSMContext):
     result=await asyncio.to_thread(update_booking_dates_sync,bid,start_at,end_at,total)
     if not result["ok"]:
         await callback.message.answer(result.get("message","Не удалось изменить бронь.")); return
+
+    # Используем сумму и количество суток, подтверждённые самой БД.
+    days = result["days"]
+    total = result["total"]
+
     await state.clear()
 
     # После изменения сразу показываем свежий календарь из БД.
@@ -4113,7 +4118,15 @@ async def admin_edit_end_time(callback: CallbackQuery, state: FSMContext):
         print(f"[ADMIN_EDIT] notify error: {e}")
 
 
-def update_booking_dates_sync(bid, start_at, end_at, total):
+def update_booking_dates_sync(bid, start_at, end_at, total=None):
+    """
+    Атомарно изменяет период брони.
+
+    ВАЖНО: итоговая сумма всегда пересчитывается здесь, непосредственно
+    перед UPDATE, по НОВОМУ количеству оплачиваемых суток. Переданный
+    total намеренно не используется как источник истины — это защищает
+    от сохранения старого тарифа после сокращения/увеличения брони.
+    """
     con=db()
     try:
         with con.cursor() as cur:
@@ -4123,6 +4136,9 @@ def update_booking_dates_sync(bid, start_at, end_at, total):
                 con.rollback(); return {"ok":False,"message":"Заявка не найдена."}
             if row["status"] not in ("pending","confirmed"):
                 con.rollback(); return {"ok":False,"message":"Заявку нельзя изменить в текущем статусе."}
+            if end_at <= start_at:
+                con.rollback(); return {"ok":False,"message":"Возврат должен быть позже получения."}
+
             buffer_delta=timedelta(hours=BUFFER_HOURS)
             other=cur.execute("""
                 SELECT id FROM bookings
@@ -4133,12 +4149,19 @@ def update_booking_dates_sync(bid, start_at, end_at, total):
             """,(row["car_id"],bid,end_at+buffer_delta,start_at-buffer_delta)).fetchone()
             if other:
                 con.rollback(); return {"ok":False,"message":"❌ Новый период пересекается с другой арендой или техническим интервалом."}
+
+            # Пересчитываем тариф исключительно по новому периоду.
+            new_days = rental_days(start_at, end_at)
+            new_rate = rate_for_days(row["car_id"], new_days)
+            new_total = new_days * new_rate
+
             cur.execute("""
                 UPDATE bookings
                 SET start_date=%s,end_date=%s,start_at=%s,end_at=%s,total=%s
                 WHERE id=%s
-            """,(start_at.date(),end_at.date(),start_at,end_at,total,bid))
-        con.commit(); return {"ok":True}
+            """,(start_at.date(),end_at.date(),start_at,end_at,new_total,bid))
+        con.commit()
+        return {"ok":True,"days":new_days,"rate":new_rate,"total":new_total}
     except Exception:
         con.rollback(); raise
     finally: con.close()
