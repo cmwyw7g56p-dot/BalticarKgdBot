@@ -1122,11 +1122,10 @@ def car_keyboard():
     rows = []
     for cid, car in active_cars().items():
         rows.append([InlineKeyboardButton(
-            text=f"🚗 {car['name']}",
-            callback_data=f"car:{cid}"
-        )])
-        rows.append([InlineKeyboardButton(
-            text=f"💰 от {money(car['rates'][2])}/сутки   •   {car['gear']}   •   {car['seats']} мест",
+            text=(
+                f"🚗 {car['name']}  •  от {money(car['rates'][2])}/сутки  •  "
+                f"{car['gear']}  •  {car['seats']} мест"
+            ),
             callback_data=f"car:{cid}"
         )])
     rows.append([InlineKeyboardButton(text="⭐ Отзывы", callback_data="reviews")])
@@ -2200,6 +2199,10 @@ async def catalog(
 
     await safe_callback_answer(callback)
 
+    # Всегда перечитываем тарифы из БД перед показом каталога,
+    # чтобы клиент сразу видел изменения, сделанные администратором.
+    await asyncio.to_thread(load_car_settings)
+
     await callback.message.edit_text(
         "🚗 <b>Автомобили BALTICAR</b>\n\n"
         "Выберите модель — откроется её фотокарточка, характеристики и актуальные тарифы.\n\n"
@@ -2213,6 +2216,10 @@ async def car_selected(
 ):
 
     await safe_callback_answer(callback)
+
+    # Обновляем настройки перед открытием карточки автомобиля,
+    # чтобы тарифы в уже существующих кнопках тоже не устаревали.
+    await asyncio.to_thread(load_car_settings)
 
     cid = callback.data.split(
         ":",
