@@ -130,8 +130,7 @@ CARS = {
         "gear": "АКПП",
         "rates": (2700, 2600, 2500),
         "photos": [
-            "photos/solaris_2021_1.png",
-            "photos/solaris_2021_2.jpeg",
+            "photos/solaris21_hero.jpg",
         ],
         "fuel": "Бензин",
         "seats": 5,
@@ -146,7 +145,7 @@ CARS = {
         "gear": "АКПП",
         "rates": (2700, 2600, 2500),
         "photos": [
-            "photos/solaris_2020.jpeg"
+            "photos/solaris20_hero.jpg",
         ],
         "fuel": "Бензин",
         "seats": 5,
@@ -161,8 +160,7 @@ CARS = {
         "gear": "АКПП",
         "rates": (2400, 2300, 2200),
         "photos": [
-            "photos/solaris_2017_1.webp",
-            "photos/solaris_2017_2.jpeg",
+            "photos/solaris17_hero.jpg",
         ],
         "fuel": "Бензин",
         "seats": 5,
@@ -177,7 +175,7 @@ CARS = {
         "gear": "МКПП",
         "rates": (2300, 2200, 2100),
         "photos": [
-            "photos/i30_2014.png"
+            "photos/i30_hero.jpg",
         ],
         "fuel": "Бензин",
         "seats": 5,
@@ -1070,13 +1068,53 @@ def status_label(status):
 def main_keyboard():
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🚗 Выбрать автомобиль", callback_data="catalog")],
-            [InlineKeyboardButton(text="📋 Мои бронирования", callback_data="mybookings")],
+            [
+                InlineKeyboardButton(text="🚗 Автомобили", callback_data="catalog"),
+                InlineKeyboardButton(text="📋 Мои бронирования", callback_data="mybookings"),
+            ],
+            [
+                InlineKeyboardButton(text="⭐ Отзывы", callback_data="reviews"),
+                InlineKeyboardButton(text="✨ Почему мы", callback_data="why"),
+            ],
             [
                 InlineKeyboardButton(text="ℹ️ Условия аренды", callback_data="terms"),
-                InlineKeyboardButton(text="📞 Связаться", callback_data="contact")
+                InlineKeyboardButton(text="📞 Связаться", callback_data="contact"),
             ],
         ]
+    )
+
+
+def welcome_text():
+    return (
+        "🚗 <b>BALTICAR</b> <i>• аренда автомобилей</i>\n\n"
+        "📍 <b>Калининград</b>\n"
+        "Подберём автомобиль, покажем свободные даты и сразу рассчитаем стоимость.\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🛡 Автомобили в отличном состоянии\n"
+        "💰 Понятные тарифы без сюрпризов\n"
+        "📅 Онлайн-бронирование в Telegram\n"
+        "⚡ Быстрое подтверждение заявки\n"
+        "☎️ Поддержка 24/7\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        "<b>Выберите нужный раздел ниже 👇</b>"
+    )
+
+
+def why_text():
+    return (
+        "✨ <b>Почему выбирают BALTICAR?</b>\n\n"
+        "🚗 <b>Автомобили в отличном состоянии</b>\n"
+        "Следим за обслуживанием и чистотой автомобилей.\n\n"
+        "💰 <b>Понятные тарифы</b>\n"
+        "Стоимость зависит от срока аренды и показывается до отправки заявки.\n\n"
+        "📅 <b>Удобное бронирование</b>\n"
+        "Даты и время выбираются прямо в Telegram.\n\n"
+        "⚡ <b>Быстрая обработка</b>\n"
+        "После заявки менеджер получает уведомление и связывается с вами.\n\n"
+        "🔔 <b>Напоминания</b>\n"
+        "Бот заранее напомнит о предстоящей аренде.\n\n"
+        "⭐ <b>Отзывы клиентов</b>\n"
+        "После завершённой аренды можно оставить оценку и отзыв."
     )
 
 
@@ -1084,9 +1122,14 @@ def car_keyboard():
     rows = []
     for cid, car in active_cars().items():
         rows.append([InlineKeyboardButton(
-            text=f"🚗 {car['name']} · от {money(car['rates'][2])}",
+            text=f"🚗 {car['name']}",
             callback_data=f"car:{cid}"
         )])
+        rows.append([InlineKeyboardButton(
+            text=f"💰 от {money(car['rates'][2])}/сутки   •   {car['gear']}   •   {car['seats']} мест",
+            callback_data=f"car:{cid}"
+        )])
+    rows.append([InlineKeyboardButton(text="⭐ Отзывы", callback_data="reviews")])
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -2064,18 +2107,16 @@ async def admin_busy_calendar_keyboard(
 def car_text(cid):
     car = CARS[cid]
     return (
-        f"🚗 <b>{car['name']}</b>\n\n"
-        f"⚙️ Коробка: <b>{car['gear']}</b>\n"
-        f"⛽ Топливо: <b>{car['fuel']}</b>\n"
-        f"👥 Мест: <b>{car['seats']}</b>\n\n"
+        f"🚗 <b>{car['name']}</b>\n"
+        f"⚙️ {car['gear']}  •  ⛽ {car['fuel']}  •  👥 {car['seats']} мест\n\n"
         f"{car['description']}\n\n"
-        f"💰 <b>Тарифы:</b>\n"
-        f"• 1–3 суток — {money(car['rates'][0])}/сутки\n"
-        f"• 4–6 суток — {money(car['rates'][1])}/сутки\n"
-        f"• 7+ суток — {money(car['rates'][2])}/сутки\n\n"
-        f"🕐 Выдача/возврат: <b>{PICKUP_START_HOUR:02d}:00–{PICKUP_END_HOUR:02d}:00</b>\n"
-        f"🔧 Между арендами: <b>{BUFFER_HOURS} ч.</b>\n\n"
-        "📅 Стоимость за выбранный период бот покажет до подтверждения заявки."
+        f"💰 <b>Стоимость аренды</b>\n"
+        f"1–3 суток — <b>{money(car['rates'][0])}</b>/сутки\n"
+        f"4–6 суток — <b>{money(car['rates'][1])}</b>/сутки\n"
+        f"7+ суток — <b>{money(car['rates'][2])}</b>/сутки\n\n"
+        f"🕐 Выдача и возврат: <b>{PICKUP_START_HOUR:02d}:00–{PICKUP_END_HOUR:02d}:00</b>\n"
+        f"🔧 Технический интервал между арендами: <b>{BUFFER_HOURS} ч.</b>\n\n"
+        "📅 <i>После выбора периода итоговая сумма будет показана до отправки заявки.</i>"
     )
 
 
@@ -2084,23 +2125,30 @@ async def send_car(
     chat_id,
     cid
 ):
-
     car = CARS[cid]
+    existing_photos = [
+        photo for photo in car["photos"]
+        if os.path.exists(photo)
+    ]
 
-    for photo in car["photos"]:
-
-        if os.path.exists(photo):
-
+    if existing_photos:
+        await bot.send_photo(
+            chat_id,
+            FSInputFile(existing_photos[0]),
+            caption=car_text(cid),
+            reply_markup=car_actions_keyboard(cid)
+        )
+        for photo in existing_photos[1:]:
             await bot.send_photo(
                 chat_id,
                 FSInputFile(photo)
             )
-
-    await bot.send_message(
-        chat_id,
-        car_text(cid),
-        reply_markup=car_actions_keyboard(cid)
-    )
+    else:
+        await bot.send_message(
+            chat_id,
+            car_text(cid),
+            reply_markup=car_actions_keyboard(cid)
+        )
 
 
 # ============================================================
@@ -2115,10 +2163,7 @@ async def start_handler(
     await state.clear()
 
     await message.answer(
-        "🚗 <b>Balticar</b>\n\n"
-        "Аренда автомобилей в Калининграде.\n"
-        "Выберите автомобиль, даты и время — итоговую стоимость увидите до отправки заявки.\n\n"
-        "Бронирование проходит прямо в Telegram.",
+        welcome_text(),
         reply_markup=main_keyboard()
     )
 
@@ -2134,10 +2179,7 @@ async def home(
     await state.clear()
 
     await callback.message.edit_text(
-        "🚗 <b>Balticar</b>\n\n"
-        "Аренда автомобилей в Калининграде.\n"
-        "Выберите автомобиль, даты и время — итоговую стоимость увидите до отправки заявки.\n\n"
-        "Бронирование проходит прямо в Telegram.",
+        welcome_text(),
         reply_markup=main_keyboard()
     )
 
@@ -2159,9 +2201,9 @@ async def catalog(
     await safe_callback_answer(callback)
 
     await callback.message.edit_text(
-        "🚗 <b>Автомобили Balticar</b>\n\n"
-        "Выберите автомобиль, чтобы посмотреть "
-        "фото, характеристики и стоимость:",
+        "🚗 <b>Автомобили BALTICAR</b>\n\n"
+        "Выберите модель — откроется её фотокарточка, характеристики и актуальные тарифы.\n\n"
+        "💡 <b>Цена за выбранный период рассчитывается автоматически.</b>",
         reply_markup=car_keyboard()
     )
 
@@ -3088,7 +3130,8 @@ async def end_time_handler(
         f"📅 Возврат:\n"
         f"<b>{format_date_time(end_at)}</b>\n\n"
         f"⏱ Продолжительность: <b>{days} суток</b>\n"
-        f"💰 Стоимость: <b>{money(total)}</b>\n\n"
+        f"💰 <b>Предварительная стоимость: {money(total)}</b>\n\n"
+        "Теперь заполните данные — перед отправкой заявки ещё раз покажем полный итог.\n\n"
         "Введите ваше имя:"
     )
 
@@ -3395,14 +3438,16 @@ async def comment_handler(message: Message, state: FSMContext):
     await message.answer(
         f"🧾 <b>Проверьте бронирование</b>\n\n"
         f"🚗 <b>{CARS[cid]['name']}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
         f"📅 Получение: <b>{format_date_time(start_at)}</b>\n"
         f"↩️ Возврат: <b>{format_date_time(end_at)}</b>\n"
-        f"⏱ {days} суток\n"
+        f"⏱ Период: <b>{days} суток</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
         f"👤 {data['name']}\n"
         f"📞 {data['phone']}\n"
-        f"📝 {comment or '—'}\n\n"
-        f"💰 <b>Итого: {money(total)}</b>\n\n"
-        "Всё верно?",
+        f"📝 Пожелания: {comment or '—'}\n\n"
+        f"💰 <b>ИТОГО: {money(total)}</b>\n\n"
+        "Проверьте данные перед отправкой заявки.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Подтвердить заявку", callback_data="booking:confirm")],
             [InlineKeyboardButton(text="✏️ Изменить данные", callback_data="booking:edit")],
@@ -3507,7 +3552,12 @@ async def mybookings(callback: CallbackQuery):
         buttons.append([InlineKeyboardButton(text=f"№{row['id']} · {car_name} · {status_label(row['status'])[:2]}", callback_data=f"mybooking:{row['id']}")])
     buttons.append([InlineKeyboardButton(text="🚗 Новое бронирование", callback_data="catalog")])
     buttons.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")])
-    await callback.message.edit_text("📋 <b>Мои бронирования</b>\n\nВыберите заявку:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await callback.message.edit_text(
+        "📋 <b>Мои бронирования</b>\n\n"
+        "Здесь хранятся ваши последние заявки.\n"
+        "Нажмите на заявку, чтобы открыть детали.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
 
 
 def get_user_booking_sync(user_id, bid):
@@ -3544,7 +3594,18 @@ async def mybooking_detail(callback: CallbackQuery):
     if end_at < datetime.now(TZ) and row['status']=='confirmed':
         buttons.append([InlineKeyboardButton(text="⭐ Оставить отзыв", callback_data=f"review:{bid}")])
     buttons.append([InlineKeyboardButton(text="◀️ Мои бронирования", callback_data="mybookings")])
-    text=(f"🧾 <b>Бронирование №{bid}</b>\n\n🚗 <b>{CARS[row['car_id']]['name']}</b>\n📅 Получение: <b>{format_date_time(start_at)}</b>\n↩️ Возврат: <b>{format_date_time(end_at)}</b>\n⏱ {rental_days(start_at,end_at)} суток\n💰 <b>{money(row['total'])}</b>\n{status_label(row['status'])}\n\n👤 {row['name']}\n📞 {row['phone']}\n📝 {row['comment'] or '—'}")
+    text=(f"🧾 <b>Бронирование №{bid}</b>\n\n"
+          f"🚗 <b>{CARS[row['car_id']]['name']}</b>\n"
+          f"━━━━━━━━━━━━━━━━━━\n"
+          f"📅 Получение: <b>{format_date_time(start_at)}</b>\n"
+          f"↩️ Возврат: <b>{format_date_time(end_at)}</b>\n"
+          f"⏱ Период: <b>{rental_days(start_at,end_at)} суток</b>\n"
+          f"💰 <b>{money(row['total'])}</b>\n"
+          f"{status_label(row['status'])}\n"
+          f"━━━━━━━━━━━━━━━━━━\n"
+          f"👤 {row['name']}\n"
+          f"📞 {row['phone']}\n"
+          f"📝 Пожелания: {row['comment'] or '—'}")
     await callback.message.edit_text(text,reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 
 
@@ -3589,6 +3650,68 @@ async def review_message(message:Message,state:FSMContext):
     ok=await asyncio.to_thread(create_review_sync,bid,message.from_user.id,rating,text)
     await state.clear()
     await message.answer("⭐ <b>Спасибо за отзыв!</b>" if ok else "Отзыв уже оставлен или бронирование недоступно для оценки.",reply_markup=main_keyboard())
+
+
+def get_reviews_sync(limit=12):
+    con = db()
+    try:
+        with con.cursor() as cur:
+            return cur.execute(
+                """
+                SELECT r.*, b.name
+                FROM reviews r
+                LEFT JOIN bookings b ON b.id=r.booking_id
+                ORDER BY r.created_at DESC
+                LIMIT %s
+                """,
+                (limit,)
+            ).fetchall()
+    finally:
+        con.close()
+
+
+async def reviews(callback: CallbackQuery):
+    await safe_callback_answer(callback)
+    rows = await asyncio.to_thread(get_reviews_sync, 12)
+
+    if not rows:
+        text = (
+            "⭐ <b>Отзывы клиентов</b>\n\n"
+            "Пока отзывов ещё нет.\n"
+            "После завершённой аренды вы сможете оставить свою оценку."
+        )
+    else:
+        parts = ["⭐ <b>Отзывы клиентов</b>", ""]
+        for row in rows:
+            stars = "⭐" * int(row["rating"])
+            name = row["name"] or "Клиент"
+            review = (row["review_text"] or "Без текста").strip()
+            if len(review) > 240:
+                review = review[:237] + "..."
+            parts.append(f"<b>{name}</b>  {stars}")
+            parts.append(review)
+            parts.append("")
+        text = "\n".join(parts)
+
+    await callback.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🚗 Выбрать автомобиль", callback_data="catalog")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")],
+        ])
+    )
+
+
+async def why(callback: CallbackQuery):
+    await safe_callback_answer(callback)
+    await callback.message.edit_text(
+        why_text(),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🚗 Выбрать автомобиль", callback_data="catalog")],
+            [InlineKeyboardButton(text="⭐ Отзывы", callback_data="reviews")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")],
+        ])
+    )
 
 
 # ============================================================
@@ -5581,6 +5704,16 @@ async def main():
     dp.callback_query.register(
         mybookings,
         F.data == "mybookings"
+    )
+
+    dp.callback_query.register(
+        reviews,
+        F.data == "reviews"
+    )
+
+    dp.callback_query.register(
+        why,
+        F.data == "why"
     )
 
     dp.callback_query.register(
