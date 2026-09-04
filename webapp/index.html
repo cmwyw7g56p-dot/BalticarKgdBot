@@ -17,7 +17,7 @@
 </head>
 <body>
 <div id="app">
-<header class="top"><button class="topbtn" id="backBtn" onclick="goBack()">‹</button><div class="brand">BALTIC<span>CAR</span></div><button class="topbtn" onclick="goHome()">⌂</button></header>
+<header class="top"><button class="topbtn" id="backBtn" onclick="goBack()">‹</button><div class="brand">BALTICAR</div><button class="topbtn" onclick="goHome()">⌂</button></header>
 <section id="home" class="screen active"></section>
 <section id="cars" class="screen"></section>
 <section id="car" class="screen"></section>
@@ -32,7 +32,7 @@
 </div>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script>
-const tg=window.Telegram?.WebApp; tg?.ready(); tg?.expand();
+const tg=window.Telegram?.WebApp; try{tg?.ready();tg?.expand();tg?.setHeaderColor?.('#06101a');tg?.setBackgroundColor?.('#06101a')}catch(e){}
 const $=id=>document.getElementById(id); let current='home', history=[]; let cars=[],selectedCar=null,startDate=null,startTime=null,endDate=null,endTime=null,month=new Date();
 const headers=()=>({'Content-Type':'application/json','X-Telegram-Init-Data':tg?.initData||''});
 async function api(url,opt={}){const r=await fetch(url,{...opt,headers:{...headers(),...(opt.headers||{})}});let d={};try{d=await r.json()}catch{} if(!r.ok)throw new Error(d.message||'Ошибка сервера');return d}
@@ -40,7 +40,7 @@ function money(n){return new Intl.NumberFormat('ru-RU').format(n)+' ₽'}
 function toast(s){$('toast').textContent=s;$('toast').classList.add('show');setTimeout(()=>$('toast').classList.remove('show'),2800)}
 function show(id,push=true){document.querySelectorAll('.screen').forEach(x=>x.classList.remove('active'));$(id).classList.add('active');if(push&&current!==id)history.push(current);current=id;window.scrollTo({top:0,behavior:'smooth'});$('backBtn').style.visibility=id==='home'?'hidden':'visible'}
 function goBack(){const x=history.pop()||'home';show(x,false)} function goHome(){history=[];show('home',false);renderHome()}
-function img(path){return path?'/'+path:'https://dummyimage.com/1200x700/102535/ffffff&text=BALTICAR'}
+function img(path){return path ? '/' + path.replace(/^\/+/, '') : '/photos/balticar_hero.jpg'}
 function renderHome(){ $('home').innerHTML=`<div class="hero"><img src="/photos/balticar_hero.jpg"><div class="heroShade"></div><div class="heroCopy"><div class="eyebrow">BALTICAR • RENT A CAR</div><h1>Аренда автомобилей</h1><p>Калининград и область</p></div></div><div class="sectionTitle">Выберите автомобиль</div><div class="sub">Чистые автомобили, прозрачные тарифы и онлайн-бронирование без лишних звонков.</div><div class="grid" style="margin-top:14px"><button class="navcard" onclick="openCars()"><span class="ico">🚗</span><strong>Автомобили</strong><small>Каталог и цены</small></button><button class="navcard" onclick="openBookings()"><span class="ico">📋</span><strong>Мои брони</strong><small>Статус и детали</small></button><button class="navcard" onclick="openReviews()"><span class="ico">⭐</span><strong>Отзывы</strong><small>Что говорят клиенты</small></button><button class="navcard" onclick="openWhy()"><span class="ico">✨</span><strong>Почему BALTICAR</strong><small>Наши преимущества</small></button></div><div class="row" style="margin-top:12px"><button class="secondary" onclick="openTerms()">ℹ️ Условия</button><button class="secondary" onclick="openContact()">📞 Связаться</button></div>`}
 async function openCars(){show('cars');$('cars').innerHTML='<div class="sectionTitle">Автомобили</div><div class="sub">Выберите автомобиль — далее покажем свободные даты и точную стоимость.</div><div id="carlist">Загрузка…</div>';try{cars=(await api('/api/cars')).cars;renderCars()}catch(e){$('carlist').innerHTML='<div class="empty">Не удалось загрузить автомобили.<br>'+e.message+'</div>'}}
 function renderCars(){ $('carlist').innerHTML=cars.map(c=>`<article class="car"><img src="${img(c.photos[0])}"><div class="carbody"><div class="carline"><div class="carname">${c.name}</div><div class="from">от<b>${money(c.rates[2])}</b><span>в сутки</span></div></div><div class="chips"><span class="chip">⚙️ ${c.gear}</span><span class="chip">⛽ ${c.fuel}</span><span class="chip">👥 ${c.seats} мест</span></div><button class="primary" onclick="openCar('${c.id}')">Подробнее и забронировать →</button></div></article>`).join('')}
@@ -51,7 +51,23 @@ async function getAvail(){return api(`/api/availability?car_id=${encodeURICompon
 function fmtDate(d){return d.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric'})}
 function localIso(d,h){const z=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}T${z(h)}:00`}
 function overlaps(a,b,blocks){return blocks.some(x=>new Date(a)<new Date(x.end_at)&&new Date(b)>new Date(x.start_at))}
-async function renderCalendar(mode){$('calendar').innerHTML='<div class="sectionTitle">'+(mode==='start'?'Дата и время получения':'Дата и время возврата')+'</div><div class="sub">'+(mode==='start'?'Выберите дату и время получения автомобиля.':'Выберите дату и время возврата автомобиля.')+'</div><div class="calendar" style="margin-top:14px"><div class="calhead"><button onclick="shiftMonth(-1,'${mode}')">‹</button><b>'+month.toLocaleDateString('ru-RU',{month:'long',year:'numeric'})+'</b><button onclick="shiftMonth(1,'${mode}')">›</button></div><div class="week">${['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(x=>`<div>${x}</div>`).join('')}</div><div id="days" class="days"></div><div id="times"></div></div><div id="calSummary"></div>`;try{const av=await getAvail();drawDays(av,mode)}catch(e){toast(e.message)}}
+async function renderCalendar(mode){
+  $('calendar').innerHTML=`
+    <div class="sectionTitle">${mode==='start'?'Дата и время получения':'Дата и время возврата'}</div>
+    <div class="sub">${mode==='start'?'Выберите дату и время получения автомобиля.':'Выберите дату и время возврата автомобиля.'}</div>
+    <div class="calendar" style="margin-top:14px">
+      <div class="calhead">
+        <button onclick="shiftMonth(-1,'${mode}')">‹</button>
+        <b>${month.toLocaleDateString('ru-RU',{month:'long',year:'numeric'})}</b>
+        <button onclick="shiftMonth(1,'${mode}')">›</button>
+      </div>
+      <div class="week">${['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(x=>`<div>${x}</div>`).join('')}</div>
+      <div id="days" class="days"></div>
+      <div id="times"></div>
+    </div>
+    <div id="calSummary"></div>`;
+  try{const av=await getAvail();drawDays(av,mode)}catch(e){toast(e.message)}
+}
 async function shiftMonth(delta,mode){month.setMonth(month.getMonth()+delta);await renderCalendar(mode)}
 function drawDays(av,mode){const y=month.getFullYear(),m=month.getMonth(),first=new Date(y,m,1),last=new Date(y,m+1,0),today=new Date();today.setHours(0,0,0,0);let html='';for(let i=0;i<first.getDay()-1+(first.getDay()===0?7:0);i++)html+='<div></div>';for(let n=1;n<=last.getDate();n++){const d=new Date(y,m,n);let busy=false;for(const b of [...av.bookings,...av.maintenance]){const bs=new Date(b.start_at),be=new Date(b.end_at);if(d<new Date(be.getFullYear(),be.getMonth(),be.getDate())&&new Date(d.getFullYear(),d.getMonth(),d.getDate()+1)>bs)busy=true}let dis=d<today||(mode==='end'&&startDate&&d<=startDate);let sel=(mode==='start'&&startDate&&d.toDateString()===startDate.toDateString())||(mode==='end'&&endDate&&d.toDateString()===endDate.toDateString());html+=`<button class="day ${busy?'busy':'free'} ${dis?'disabled':''} ${sel?'selected':''}" ${dis?'disabled':''} onclick="chooseDay(${n},'${mode}')">${n}</button>`}$('days').innerHTML=html;if(mode==='start'&&startDate)drawTimes('start');if(mode==='end'&&endDate)drawTimes('end')}
 async function chooseDay(n,mode){const d=new Date(month.getFullYear(),month.getMonth(),n);if(mode==='end'&&startDate&&d<=startDate)return;if(mode==='start')startDate=d;else endDate=d;drawTimes(mode)}
