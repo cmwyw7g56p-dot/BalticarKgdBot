@@ -6127,14 +6127,17 @@ async def main():
         try:
             with con.cursor() as cur:
                 rows=cur.execute("""
-                    SELECT id,car_id,start_at,end_at,total,status,created_at,comment
-                    FROM bookings WHERE user_id=%s ORDER BY id DESC LIMIT 20
+                    SELECT b.id,b.car_id,b.start_at,b.end_at,b.total,b.status,b.created_at,b.comment,
+                           EXISTS(SELECT 1 FROM reviews rv WHERE rv.booking_id=b.id) AS reviewed
+                    FROM bookings b WHERE b.user_id=%s ORDER BY b.id DESC LIMIT 20
                 """, (user_id,)).fetchall()
+                now=datetime.now(TZ)
                 return [{
                     "id":r["id"],"car_id":r["car_id"],"car_name":CARS.get(r["car_id"],{}).get("name",r["car_id"]),
                     "start_at":format_date_time(r["start_at"]),"end_at":format_date_time(r["end_at"]),
                     "start_iso":ensure_tz(r["start_at"]).isoformat(),"end_iso":ensure_tz(r["end_at"]).isoformat(),
                     "total":r["total"],"status":r["status"],"comment":r["comment"] or "",
+                    "past":ensure_tz(r["end_at"]) < now,"reviewed":bool(r["reviewed"]),
                 } for r in rows]
         finally:
             con.close()
