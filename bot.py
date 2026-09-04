@@ -21,6 +21,7 @@ from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemo
 from aiogram.types import (
     CallbackQuery,
     FSInputFile,
+    InputMediaPhoto,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
@@ -521,27 +522,20 @@ def rental_days(
     start_at,
     end_at
 ):
+    """Количество оплачиваемых суток по точному времени.
+
+    Ровно 24 часа = 1 сутки.
+    Любая неполная часть следующих 24 часов = ещё одни сутки.
+
+    Примеры:
+        10.09 10:00 → 14.09 10:00 = 4 суток
+        10.09 10:00 → 14.09 10:01 = 5 суток
+        10.09 10:00 → 14.09 17:00 = 5 суток
     """
-    Оплачиваемые сутки считаются вверх.
-
-    02.09 10:00 → 06.09 10:00 = 4 суток
-
-    02.09 10:00 → 06.09 17:00 = 5 суток
-    """
-
-    hours = rental_hours(
-        start_at,
-        end_at
-    )
-
-    days = int(
-        (hours + 23.999999) // 24
-    )
-
-    return max(
-        1,
-        days
-    )
+    seconds = (end_at - start_at).total_seconds()
+    if seconds <= 0:
+        return 0
+    return max(1, (int(seconds) + 86399) // 86400)
 
 
 # ============================================================
@@ -1123,12 +1117,20 @@ def why_text():
 
 def car_keyboard():
     rows = []
-    for cid, car in active_cars().items():
-        rows.append([InlineKeyboardButton(
-            text=f"🚗 {car['name']}  •  от {money(car['rates'][2])}/сутки",
-            callback_data=f"car:{cid}"
-        )])
-    rows.append([InlineKeyboardButton(text="⭐ Отзывы", callback_data="reviews")])
+    items = list(active_cars().items())
+    for i in range(0, len(items), 2):
+        row = []
+        for cid, car in items[i:i+2]:
+            short_name = car["name"].replace("Hyundai ", "")
+            row.append(InlineKeyboardButton(
+                text=f"🚗 {short_name}\nот {money(car['rates'][2])}/сутки",
+                callback_data=f"car:{cid}"
+            ))
+        rows.append(row)
+    rows.append([
+        InlineKeyboardButton(text="⭐ Отзывы", callback_data="reviews"),
+        InlineKeyboardButton(text="✨ Почему BALTICAR", callback_data="why"),
+    ])
     rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -1137,9 +1139,11 @@ def car_actions_keyboard(cid):
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📅 Забронировать", callback_data=f"pick:{cid}")],
-            [InlineKeyboardButton(text="📋 Мои брони", callback_data="mybookings")],
-            [InlineKeyboardButton(text="◀️ К автомобилям", callback_data="catalog"),
-             InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")],
+            [
+                InlineKeyboardButton(text="📋 Мои брони", callback_data="mybookings"),
+                InlineKeyboardButton(text="◀️ Каталог", callback_data="catalog"),
+            ],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")],
         ]
     )
 
@@ -1225,8 +1229,18 @@ def time_keyboard(
         title = (
             f"🕐 <b>Время возврата</b>\n\n"
             f"📅 {selected_date.strftime('%d.%m.%Y')}\n\n"
-            "Выберите время:"
         )
+        if start_at is not None:
+            exact_return = start_at + timedelta(days=
+                (selected_date - start_at.date()).days
+            )
+            title += (
+                f"⏱ <b>Ровно {(selected_date - start_at.date()).days} суток</b> "
+                f"— до {exact_return.strftime('%H:%M')}.\n"
+                f"⚠️ Возврат позже {exact_return.strftime('%H:%M')} "
+                "увеличит срок ещё на 1 сутки.\n\n"
+            )
+        title += "Выберите время:"
 
     times = []
 
@@ -2134,7 +2148,7 @@ def car_text(cid):
         f"{car['description']}\n\n"
         "✨ <b>В стоимость входит</b>\n"
         "✓ Подготовленный автомобиль\n"
-        "✓ Понятная стоимость без скрытых доплат\n"
+        "✓ Прозрачная стоимость\n"
         "✓ Поддержка менеджера\n\n"
         f"💰 <b>Тарифы</b>\n"
         f"1–3 суток  —  <b>{money(car['rates'][0])}</b>/сутки\n"
@@ -2142,23 +2156,67 @@ def car_text(cid):
         f"7+ суток   —  <b>{money(car['rates'][2])}</b>/сутки\n\n"
         f"🕐 Выдача и возврат: <b>{PICKUP_START_HOUR:02d}:00–{PICKUP_END_HOUR:02d}:00</b>\n"
         f"🔧 Технический интервал: <b>{BUFFER_HOURS} ч.</b>\n\n"
-        "📅 <i>Итоговая стоимость появится после выбора периода.</i>"
+        "👇 <i>Нажмите «Забронировать», чтобы выбрать даты и сразу увидеть итоговую стоимость.</i>"
     )
 
 
 async def send_car(bot, chat_id, cid):
+    """Отправляет одну цельную premium-карточку автомобиля."""
     car = CARS[cid]
-    existing_photos = [p for p in car["photos"] if os.path.exists(p)]
-    if existing_photos:
+    photo = next((p for p in car["photos"] if os.path.exists(p)), None)
+    if photo:
         await bot.send_photo(
             chat_id,
-            FSInputFile(existing_photos[0]),
+            FSInputFile(photo),
             caption=car_text(cid),
-            reply_markup=car_actions_keyboard(cid)
+            reply_markup=car_actions_keyboard(cid),
+            show_caption_above_media=True,
         )
     else:
-        await bot.send_message(chat_id, car_text(cid), reply_markup=car_actions_keyboard(cid))
+        await bot.send_message(
+            chat_id,
+            car_text(cid),
+            reply_markup=car_actions_keyboard(cid),
+        )
 
+
+# ============================================================
+# CLIENT UI HELPERS — v18
+# ============================================================
+
+async def edit_client_screen(callback: CallbackQuery, text: str, reply_markup=None):
+    """Единый переход между экранами без лишних сообщений в чате."""
+    message = callback.message
+    if getattr(message, "photo", None):
+        try:
+            await message.edit_caption(caption=text, reply_markup=reply_markup)
+            return
+        except TelegramBadRequest:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            await message.answer(text, reply_markup=reply_markup)
+            return
+    await message.edit_text(text, reply_markup=reply_markup)
+
+
+async def show_photo_screen(callback: CallbackQuery, photo_path: str, caption: str, reply_markup):
+    """Меняет фотографию и подпись внутри одного Telegram-сообщения."""
+    message = callback.message
+    if getattr(message, "photo", None) and os.path.exists(photo_path):
+        try:
+            media = InputMediaPhoto(
+                media=FSInputFile(photo_path),
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+                show_caption_above_media=True,
+            )
+            await message.edit_media(media=media, reply_markup=reply_markup)
+            return True
+        except Exception as exc:
+            print(f"[CLIENT UI] edit_media failed: {type(exc).__name__}: {exc}")
+    return False
 
 
 # ============================================================
@@ -2193,7 +2251,8 @@ async def start_handler(message: Message, state: FSMContext):
         await message.answer_photo(
             FSInputFile(hero),
             caption=welcome_text(),
-            reply_markup=main_keyboard()
+            reply_markup=main_keyboard(),
+            show_caption_above_media=True,
         )
     else:
         await message.answer(welcome_text(), reply_markup=main_keyboard())
@@ -2203,67 +2262,51 @@ async def home(callback: CallbackQuery, state: FSMContext):
     await safe_callback_answer(callback)
     await state.clear()
     hero = "photos/balticar_hero.jpg"
-    if getattr(callback.message, "photo", None):
+    if await show_photo_screen(callback, hero, welcome_text(), main_keyboard()):
+        return
+    if os.path.exists(hero):
         try:
             await callback.message.delete()
         except Exception:
             pass
-        if os.path.exists(hero):
-            await callback.bot.send_photo(callback.message.chat.id, FSInputFile(hero), caption=welcome_text(), reply_markup=main_keyboard())
-        else:
-            await callback.bot.send_message(callback.message.chat.id, welcome_text(), reply_markup=main_keyboard())
+        await callback.bot.send_photo(
+            callback.message.chat.id, FSInputFile(hero),
+            caption=welcome_text(), reply_markup=main_keyboard(),
+            show_caption_above_media=True,
+        )
     else:
         await callback.message.edit_text(welcome_text(), reply_markup=main_keyboard())
 
 
-async def id_handler(
-    message: Message
-):
-
-    await message.answer(
-        f"Ваш Telegram ID: "
-        f"<code>{message.from_user.id}</code>"
-    )
+async def id_handler(message: Message):
+    await message.answer(f"Ваш Telegram ID: <code>{message.from_user.id}</code>")
 
 
 async def catalog(callback: CallbackQuery):
     await safe_callback_answer(callback)
     await asyncio.to_thread(load_car_settings)
+    hero = "photos/balticar_hero.jpg"
+    catalog_caption = (
+        "🚗 <b>Автомобили BALTICAR</b>\n"
+        "<i>Выберите автомобиль — откроется его персональная карточка.</i>\n\n"
+        "💎 Фото • характеристики • актуальные тарифы • онлайн-бронирование\n"
+        "💰 Итоговая стоимость рассчитывается автоматически после выбора периода."
+    )
+    markup = car_keyboard()
+    if await show_photo_screen(callback, hero, catalog_caption, markup):
+        return
     try:
         await callback.message.delete()
     except Exception:
         pass
-
-    chat_id = callback.message.chat.id
-    await callback.bot.send_message(
-        chat_id,
-        "🚗 <b>Автомобили BALTICAR</b>\n\n"
-        "Выберите автомобиль — откроется подробная карточка с фото, характеристиками и актуальными тарифами.\n\n"
-        "💡 <i>Цена за выбранный период рассчитывается автоматически.</i>"
-    )
-
-    for cid, car in active_cars().items():
-        photo = next((p for p in car["photos"] if os.path.exists(p)), None)
-        caption = (
-            f"🚗 <b>{car['name']}</b>\n"
-            f"{car['gear']}  •  {car['fuel']}  •  {car['seats']} мест\n"
-            f"💰 <b>от {money(car['rates'][2])}/сутки</b>"
+    if os.path.exists(hero):
+        await callback.bot.send_photo(
+            callback.message.chat.id, FSInputFile(hero),
+            caption=catalog_caption, reply_markup=markup,
+            show_caption_above_media=True,
         )
-        markup = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="Подробнее и забронировать →", callback_data=f"car:{cid}")
-        ]])
-        if photo:
-            await callback.bot.send_photo(chat_id, FSInputFile(photo), caption=caption, reply_markup=markup)
-        else:
-            await callback.bot.send_message(chat_id, caption, reply_markup=markup)
-
-    await callback.bot.send_message(
-        chat_id,
-        "✨ <b>BALTICAR</b>\nПрозрачные тарифы • онлайн-бронирование • поддержка менеджера",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⭐ Отзывы", callback_data="reviews"), InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")]
-        ])
-    )
+    else:
+        await callback.bot.send_message(callback.message.chat.id, catalog_caption, reply_markup=markup)
 
 
 async def car_selected(callback: CallbackQuery):
@@ -2271,8 +2314,13 @@ async def car_selected(callback: CallbackQuery):
     await asyncio.to_thread(load_car_settings)
     cid = callback.data.split(":", 1)[1]
     if cid not in CARS or not CARS[cid].get("active", True):
-        await callback.message.answer("Автомобиль сейчас недоступен.")
+        await callback.answer("Автомобиль сейчас недоступен.", show_alert=True)
         return
+
+    photo = next((p for p in CARS[cid]["photos"] if os.path.exists(p)), None)
+    if photo and await show_photo_screen(callback, photo, car_text(cid), car_actions_keyboard(cid)):
+        return
+
     try:
         await callback.message.delete()
     except Exception:
