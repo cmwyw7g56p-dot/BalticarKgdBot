@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#07111c">
+<meta name="theme-color" content="#f5f7fa">
 <title>BALTICAR — аренда автомобилей</title>
 <style>
 :root{--bg:#06101a;--panel:#0b1b29;--panel2:#102537;--line:rgba(255,255,255,.09);--text:#f5f8fb;--muted:#91a3b5;--blue:#1683ff;--blue2:#0b63d9;--green:#2bd576;--amber:#ffb62b;--danger:#ff5f6d;--radius:22px}
@@ -13,6 +13,42 @@
 .car{overflow:hidden;background:linear-gradient(145deg,#0d2232,#091824);border:1px solid var(--line);border-radius:24px;margin:14px 0;box-shadow:0 15px 40px rgba(0,0,0,.22)}.car img{width:100%;display:block;aspect-ratio:16/9;object-fit:cover}.carbody{padding:15px}.carline{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.carname{font-size:19px;font-weight:800}.from{font-size:14px;color:#9bcfff;text-align:right;white-space:nowrap}.from b{display:block;font-size:18px;color:#fff}.chips{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0}.chip{padding:7px 9px;border-radius:10px;background:rgba(255,255,255,.06);color:#c9d5df;font-size:12px}.primary{width:100%;padding:14px 16px;border-radius:15px;background:linear-gradient(135deg,var(--blue),#0561d2);font-weight:800;box-shadow:0 10px 24px rgba(22,131,255,.24)}.secondary{width:100%;padding:13px 16px;border-radius:15px;background:rgba(255,255,255,.055);border:1px solid var(--line);font-weight:700}.row{display:flex;gap:10px}.row>*{flex:1}.back{margin:6px 0 14px;color:#9bcfff;background:none;font-weight:700;padding:6px 0}.detailImg{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:24px;border:1px solid var(--line);display:block}.detailTitle{font-size:27px;margin:15px 0 5px}.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:14px 0}.fact{padding:12px;border-radius:15px;background:rgba(255,255,255,.045);border:1px solid var(--line);font-size:12px;color:var(--muted)}.fact b{display:block;color:#fff;font-size:14px;margin-top:5px}.block{padding:16px;border-radius:20px;background:rgba(255,255,255,.035);border:1px solid var(--line);margin:12px 0}.block h3{margin:0 0 9px;font-size:16px}.tariffs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.tariff{padding:12px;border-radius:14px;background:#0c2030;border:1px solid var(--line)}.tariff span{display:block;color:var(--muted);font-size:11px}.tariff b{display:block;margin-top:6px;font-size:15px}
 .calendar{background:#0b1b29;border:1px solid var(--line);border-radius:22px;padding:13px}.calhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.calhead button{background:rgba(255,255,255,.06);width:40px;height:40px;border-radius:12px}.week,.days{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}.week div{text-align:center;color:var(--muted);font-size:11px;padding:5px 0}.day{min-height:42px;border-radius:12px;background:rgba(255,255,255,.035);display:flex;align-items:center;justify-content:center;border:1px solid transparent;font-size:13px}.day.free{background:#0e2435}.day.busy{color:#66798b;background:#101a22}.day.selected{background:var(--blue);font-weight:800}.day.disabled{opacity:.25}.times{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.time{padding:12px 4px;border-radius:12px;background:rgba(255,255,255,.05);border:1px solid var(--line);font-size:13px}.time.selected{background:var(--blue);font-weight:800}.summary{margin-top:14px;padding:17px;border-radius:20px;background:linear-gradient(145deg,#102b40,#0b1b29);border:1px solid rgba(62,159,255,.25)}.summary .big{font-size:28px;font-weight:900;margin-top:4px}.hint{color:var(--amber);font-size:12px;line-height:1.4;margin-top:7px}.field{margin:10px 0}.field label{display:block;color:var(--muted);font-size:12px;margin:0 0 6px}.field input,.field textarea{width:100%;border:1px solid var(--line);background:#091824;color:#fff;border-radius:14px;padding:13px;font:inherit;outline:none}.field textarea{min-height:88px;resize:vertical}.bookingCard{padding:17px;border-radius:20px;background:linear-gradient(145deg,#102638,#0a1926);border:1px solid var(--line);margin:12px 0}.status{display:inline-flex;padding:6px 9px;border-radius:999px;background:rgba(255,255,255,.07);font-size:11px}.ok{color:#74f0aa}.warn{color:#ffd278}.danger{color:#ff8d98}.toast{position:fixed;left:16px;right:16px;bottom:calc(18px + env(safe-area-inset-bottom));z-index:20;padding:13px 15px;border-radius:16px;background:#122637;border:1px solid var(--line);box-shadow:0 16px 40px #0008;display:none}.toast.show{display:block;animation:in .2s ease}.empty{text-align:center;padding:40px 20px;color:var(--muted)}
 @media(min-width:650px){.hero h1{font-size:38px}.car{display:grid;grid-template-columns:1.2fr 1fr}.car img{height:100%;aspect-ratio:auto}.carbody{display:flex;flex-direction:column;justify-content:center}}
+
+/* LIGHT UI */
+:root{--bg:#f5f7fa;--panel:#ffffff;--panel2:#eef2f6;--line:#dfe5eb;--text:#17212b;--muted:#718096;--blue:#1683ff;--blue2:#0b63d9;--green:#1aa968;--amber:#c98500;--danger:#d94352}
+html,body{background:var(--bg)!important;color:var(--text)!important}
+body{background:#f5f7fa!important}
+.top{background:linear-gradient(#f5f7fa 72%,rgba(245,247,250,0))!important}
+.topbtn{background:#fff!important;border-color:#dfe5eb!important;color:#17212b!important;box-shadow:0 4px 14px rgba(20,40,60,.06)}
+.hero{background:#fff!important;border-color:#dfe5eb!important;box-shadow:0 14px 35px rgba(20,40,60,.10)!important}
+.heroShade{background:linear-gradient(180deg,rgba(0,0,0,.01) 25%,rgba(10,20,30,.72) 100%)!important}
+.navcard{background:#fff!important;border-color:#dfe5eb!important;box-shadow:0 8px 22px rgba(20,40,60,.07)!important}
+.navcard small,.sub,.field label,.fact,.tariff span{color:#718096!important}
+.car{background:#fff!important;border-color:#dfe5eb!important;box-shadow:0 10px 28px rgba(20,40,60,.08)!important}
+.from b,.fact b{color:#17212b!important}
+.chip{background:#eef2f6!important;color:#4a5563!important}
+.secondary{background:#fff!important;border-color:#dfe5eb!important;color:#17212b!important}
+.back{color:#1769aa!important}
+.detailImg{border-color:#dfe5eb!important}
+.block{background:#fff!important;border-color:#dfe5eb!important}
+.tariff{background:#f3f6f9!important;border-color:#dfe5eb!important}
+.calendar{background:#fff!important;border-color:#dfe5eb!important;box-shadow:0 8px 24px rgba(20,40,60,.06)}
+.calhead button{background:#f1f4f7!important;color:#17212b!important}
+.week div{color:#7a8794!important}
+.day{background:#f3f5f7!important;color:#33404d!important}
+.day.free{background:#eaf7f0!important;color:#17764a!important}
+.day.busy{background:#dfe3e8!important;color:#8a949e!important}
+.day.selected{background:var(--blue)!important;color:#fff!important}
+.day.disabled{opacity:.32!important}
+.time{background:#edf1f5!important;border-color:#d8dfe6!important;color:#34404c!important}
+.time.available{background:#eef9f3!important;border-color:#c9ead8!important;color:#176b46!important}
+.time.unavailable,.time:disabled{background:#d7dce2!important;border-color:#c5cbd2!important;color:#8a949e!important;cursor:not-allowed!important;opacity:1!important}
+.time.selected{background:var(--blue)!important;border-color:var(--blue)!important;color:#fff!important}
+.summary{background:#fff!important;border-color:#cfe2f5!important;box-shadow:0 8px 24px rgba(20,40,60,.06)}
+.field input,.field textarea{background:#fff!important;color:#17212b!important;border-color:#dfe5eb!important}
+.bookingCard{background:#fff!important;border-color:#dfe5eb!important;box-shadow:0 8px 22px rgba(20,40,60,.06)}
+.status{background:#eef2f6!important}
+
 </style>
 </head>
 <body>
@@ -108,9 +144,9 @@ function drawTimes(mode){
   let html='<div class="sub" style="margin:14px 0 8px">'+fmtDate(d)+'</div><div class="times">';
   for(let h=8;h<=20;h++){
     const ok=hasHour(d,h),selected=(mode==='start'?startTime:endTime)===h;
-    html+=`<button class="time ${selected?'selected':''}" ${ok?'':'disabled'} onclick="chooseTime(${h},'${mode}')">${String(h).padStart(2,'0')}:00</button>`;
+    html+=`<button class="time ${ok?'available':'unavailable'} ${selected?'selected':''}" ${ok?'':'disabled'} onclick="chooseTime(${h},'${mode}')">${String(h).padStart(2,'0')}:00</button>`;
   }
-  html+='</div>';
+  html+='</div><div class="sub" style="margin-top:9px;font-size:12px">Светлые — доступно &nbsp; • &nbsp; Затемнённые — занято</div>';
   box.innerHTML=html;
   renderCalSummary();
 }
