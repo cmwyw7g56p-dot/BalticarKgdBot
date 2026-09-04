@@ -1144,6 +1144,29 @@ def car_actions_keyboard(cid):
     )
 
 
+async def replace_client_message(
+    callback: CallbackQuery,
+    text: str,
+    reply_markup=None,
+):
+    """Показывает новый клиентский экран независимо от типа текущего сообщения.
+
+    Карточка автомобиля отправляется как photo-message, поэтому Telegram
+    не позволяет использовать edit_text() для её навигационных кнопок.
+    Для photo-message удаляем карточку и отправляем новый текстовый экран.
+    """
+    message = callback.message
+    if getattr(message, "photo", None):
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        await message.answer(text, reply_markup=reply_markup)
+        return
+
+    await message.edit_text(text, reply_markup=reply_markup)
+
+
 def back_home_keyboard():
 
     return InlineKeyboardMarkup(
@@ -2177,9 +2200,10 @@ async def home(
 
     await state.clear()
 
-    await callback.message.edit_text(
+    await replace_client_message(
+        callback,
         welcome_text(),
-        reply_markup=main_keyboard()
+        main_keyboard()
     )
 
 
@@ -2203,11 +2227,12 @@ async def catalog(
     # чтобы клиент сразу видел изменения, сделанные администратором.
     await asyncio.to_thread(load_car_settings)
 
-    await callback.message.edit_text(
+    await replace_client_message(
+        callback,
         "🚗 <b>Автомобили BALTICAR</b>\n\n"
         "Выберите модель — откроется её фотокарточка, характеристики и актуальные тарифы.\n\n"
         "💡 <b>Цена за выбранный период рассчитывается автоматически.</b>",
-        reply_markup=car_keyboard()
+        car_keyboard()
     )
 
 
@@ -3559,11 +3584,12 @@ async def mybookings(callback: CallbackQuery):
         buttons.append([InlineKeyboardButton(text=f"№{row['id']} · {car_name} · {status_label(row['status'])[:2]}", callback_data=f"mybooking:{row['id']}")])
     buttons.append([InlineKeyboardButton(text="🚗 Новое бронирование", callback_data="catalog")])
     buttons.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")])
-    await callback.message.edit_text(
+    await replace_client_message(
+        callback,
         "📋 <b>Мои бронирования</b>\n\n"
         "Здесь хранятся ваши последние заявки.\n"
         "Нажмите на заявку, чтобы открыть детали.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+        InlineKeyboardMarkup(inline_keyboard=buttons)
     )
 
 
