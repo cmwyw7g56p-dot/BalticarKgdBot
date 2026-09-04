@@ -50,7 +50,32 @@ function startBooking(){startDate=startTime=endDate=endTime=null;month=new Date(
 async function getAvail(){return api(`/api/availability?car_id=${encodeURIComponent(selectedCar.id)}&year=${month.getFullYear()}&month=${month.getMonth()+1}`)}
 function fmtDate(d){return d.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric'})}
 function localIso(d,h){const z=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}T${z(h)}:00`}
-function overlaps(a,b,blocks){return blocks.some(x=>new Date(a)<new Date(x.end_at)&&new Date(b)>new Date(x.start_at))}
+let currentAvail={bookings:[],maintenance:[]};
+const BUFFER_MS=2*60*60*1000;
+function blocks(){return [...(currentAvail.bookings||[]),...(currentAvail.maintenance||[])]}
+function intervalFree(a,b){
+  if(!(a instanceof Date)||!(b instanceof Date)||b<=a)return false;
+  return !blocks().some(x=>{
+    const bs=new Date(x.start_at).getTime()-BUFFER_MS;
+    const be=new Date(x.end_at).getTime()+BUFFER_MS;
+    return a.getTime()<be && b.getTime()>bs;
+  });
+}
+function candidateStartFree(d,h){
+  const a=new Date(d); a.setHours(h,0,0,0);
+  const b=new Date(a); b.setDate(b.getDate()+1);
+  return intervalFree(a,b);
+}
+function candidateEndFree(d,h){
+  if(!startDate||startTime==null)return false;
+  const a=new Date(startDate); a.setHours(startTime,0,0,0);
+  const b=new Date(d); b.setHours(h,0,0,0);
+  return b>a && intervalFree(a,b);
+}
+function dayHasAvailableTime(d,mode){
+  for(let h=8;h<=20;h++) if(mode==='start'?candidateStartFree(d,h):candidateEndFree(d,h)) return true;
+  return false;
+}
 async function renderCalendar(mode){
   $('calendar').innerHTML=`
     <div class="sectionTitle">${mode==='start'?'Дата и время получения':'Дата и время возврата'}</div>
@@ -66,19 +91,58 @@ async function renderCalendar(mode){
       <div id="times"></div>
     </div>
     <div id="calSummary"></div>`;
-  try{const av=await getAvail();drawDays(av,mode)}catch(e){toast(e.message)}
+  try{currentAvail=await getAvail();drawDays(currentAvail,mode)}catch(e){toast(e.message)}
 }
 async function shiftMonth(delta,mode){month.setMonth(month.getMonth()+delta);await renderCalendar(mode)}
-function blockList(av){return [...(av.bookings||[]),...(av.maintenance||[])].map(b=>({start:new Date(b.start_at).getTime()-2*3600000,end:new Date(b.end_at).getTime()+2*3600000}));}
-function slotFree(a,b,blocks){return !blocks.some(x=>a<x.end&&b>x.start)}
-function startHourFree(d,h,blocks){const a=new Date(d);a.setHours(h,0,0,0);const t=a.getTime();return !blocks.some(x=>t>=x.start&&t<x.end)}
-function endHourFree(d,h,blocks){if(!startDate||startTime==null)return false;const a=new Date(startDate);a.setHours(startTime,0,0,0);const b=new Date(d);b.setHours(h,0,0,0);return b>a&&slotFree(a.getTime(),b.getTime(),blocks)}
-function dayHasStart(d,blocks){for(let h=8;h<=20;h++)if(startHourFree(d,h,blocks))return true;return false}
-function dayHasEnd(d,blocks){for(let h=8;h<=20;h++)if(endHourFree(d,h,blocks))return true;return false}
-function drawDays(av,mode){const y=month.getFullYear(),m=month.getMonth(),first=new Date(y,m,1),last=new Date(y,m+1,0),today=new Date();today.setHours(0,0,0,0);const blocks=blockList(av);let html='';for(let i=0;i<first.getDay()-1+(first.getDay()===0?7:0);i++)html+='<div></div>';for(let n=1;n<=last.getDate();n++){const d=new Date(y,m,n);const free=mode==='start'?dayHasStart(d,blocks):dayHasEnd(d,blocks);const dis=d<today||(mode==='end'&&startDate&&d<=startDate)||!free;const sel=(mode==='start'&&startDate&&d.toDateString()===startDate.toDateString())||(mode==='end'&&endDate&&d.toDateString()===endDate.toDateString());html+=`<button class="day ${free?'free':'busy'} ${dis?'disabled':''} ${sel?'selected':''}" ${dis?'disabled':''} onclick="chooseDay(${n},'${mode}')">${n}</button>`}$('days').innerHTML=html;if(mode==='start'&&startDate)drawTimes('start',av);if(mode==='end'&&endDate)drawTimes('end',av)}
-async function chooseDay(n,mode){const d=new Date(month.getFullYear(),month.getMonth(),n);if(mode==='end'&&startDate&&d<=startDate)return;if(mode==='start'){startDate=d;startTime=null;endDate=null;endTime=null}else{endDate=d;endTime=null}const av=await getAvail();drawDays(av,mode);drawTimes(mode,av)}
-function drawTimes(mode,av){const box=$('times');const d=mode==='start'?startDate:endDate;if(!d||!av)return;const blocks=blockList(av);let html='<div class="sub" style="margin:14px 0 8px">'+fmtDate(d)+'</div><div class="times">';for(let h=8;h<=20;h++){const ok=mode==='start'?startHourFree(d,h,blocks):endHourFree(d,h,blocks);const selected=(mode==='start'?startTime:endTime)===h;html+=`<button class="time ${selected?'selected':''} ${ok?'':'disabled'}" ${ok?'':'disabled'} onclick="chooseTime(${h},'${mode}')">${String(h).padStart(2,'0')}:00</button>`}html+='</div>';box.innerHTML=html;renderCalSummary()}
-async function chooseTime(h,mode){const av=await getAvail(),blocks=blockList(av),d=mode==='start'?startDate:endDate;if(mode==='start'&&!startHourFree(d,h,blocks)){toast('Это время недоступно из-за другой брони или технического интервала.');return}if(mode==='end'&&!endHourFree(d,h,blocks)){toast('Этот период пересекается с другой бронью или техническим интервалом.');return}if(mode==='start')startTime=h;else endTime=h;if(mode==='start'&&startDate&&startTime!=null){endDate=new Date(startDate);endDate.setDate(endDate.getDate()+1);endTime=null;month=new Date(endDate);await renderCalendar('end')}else{drawTimes(mode,av);renderCalSummary()}}
+function drawDays(av,mode){
+  currentAvail=av||{bookings:[],maintenance:[]};
+  const y=month.getFullYear(),m=month.getMonth(),first=new Date(y,m,1),last=new Date(y,m+1,0),today=new Date();
+  today.setHours(0,0,0,0);
+  let html='';
+  const offset=first.getDay()===0?6:first.getDay()-1;
+  for(let i=0;i<offset;i++)html+='<div></div>';
+  for(let n=1;n<=last.getDate();n++){
+    const d=new Date(y,m,n);
+    const hasTime=dayHasAvailableTime(d,mode);
+    const dis=d<today || (mode==='end'&&startDate&&d<=startDate) || !hasTime;
+    const sel=(mode==='start'&&startDate&&d.toDateString()===startDate.toDateString())||(mode==='end'&&endDate&&d.toDateString()===endDate.toDateString());
+    html+=`<button class="day ${hasTime?'free':'busy'} ${dis?'disabled':''} ${sel?'selected':''}" ${dis?'disabled':''} onclick="chooseDay(${n},'${mode}')">${n}</button>`;
+  }
+  $('days').innerHTML=html;
+  if(mode==='start'&&startDate)drawTimes('start');
+  if(mode==='end'&&endDate)drawTimes('end');
+}
+async function chooseDay(n,mode){
+  const d=new Date(month.getFullYear(),month.getMonth(),n);
+  if(mode==='end'&&startDate&&d<=startDate)return;
+  if(!dayHasAvailableTime(d,mode))return;
+  if(mode==='start')startDate=d;else endDate=d;
+  drawTimes(mode);
+}
+function drawTimes(mode){
+  const box=$('times');
+  const d=mode==='start'?startDate:endDate;
+  let html='<div class="sub" style="margin:14px 0 8px">'+fmtDate(d)+'</div><div class="times">';
+  for(let h=8;h<=20;h++){
+    const ok=mode==='start'?candidateStartFree(d,h):candidateEndFree(d,h);
+    const selected=(mode==='start'?startTime:endTime)===h;
+    html+=`<button class="time ${selected?'selected':''}" ${ok?'':'disabled'} onclick="chooseTime(${h},'${mode}')">${String(h).padStart(2,'0')}:00</button>`;
+  }
+  html+='</div>';
+  box.innerHTML=html;
+  renderCalSummary();
+}
+function chooseTime(h,mode){
+  const d=mode==='start'?startDate:endDate;
+  const ok=mode==='start'?candidateStartFree(d,h):candidateEndFree(d,h);
+  if(!ok){toast('Это время недоступно для выбранного периода');return}
+  if(mode==='start')startTime=h;else endTime=h;
+  drawTimes(mode);
+  if(mode==='start'&&startDate&&startTime!=null){
+    endDate=new Date(startDate);endDate.setDate(endDate.getDate()+1);endTime=startTime;
+    renderCalendar('end');
+  } else renderCalSummary();
+}
 function rentalDays(){if(!startDate||startTime==null||!endDate||endTime==null)return null;const a=new Date(startDate);a.setHours(startTime);const b=new Date(endDate);b.setHours(endTime);return Math.max(1,Math.ceil((b-a)/86400000))}
 function rate(){const d=rentalDays();return d<=3?selectedCar.rates[0]:d<=6?selectedCar.rates[1]:selectedCar.rates[2]}
 function renderCalSummary(){const d=rentalDays();if(!d)return;$('calSummary').innerHTML=`<div class="summary"><div class="sub">${fmtDate(startDate)} ${String(startTime).padStart(2,'0')}:00 → ${fmtDate(endDate)} ${String(endTime).padStart(2,'0')}:00</div><div class="big">${d} ${d===1?'сутки':d<5?'суток':'суток'} · ${money(d*rate())}</div>${endTime>startTime&&fmtDate(startDate)!==fmtDate(endDate)?'<div class="hint">⚠️ Возврат позже времени получения — оплачивается дополнительное сутки.</div>':''}<button class="primary" style="margin-top:12px" onclick="goForm()">Продолжить →</button></div>`}
