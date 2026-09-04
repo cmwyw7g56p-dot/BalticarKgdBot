@@ -5937,8 +5937,8 @@ async def main():
     import json
     from urllib.parse import parse_qsl
 
-    def mini_json(payload, status=200):
-        return web.json_response(payload, status=status)
+    def mini_json(payload, status=200, headers=None):
+        return web.json_response(payload, status=status, headers=headers or {})
 
     def mini_init_user(request):
         """Проверяет Telegram WebApp initData и возвращает пользователя."""
@@ -6024,6 +6024,103 @@ async def main():
         finally:
             con.close()
 
+    def mini_calendar_slots_sync(cid, year, month_num, start_at=None):
+        """Server-side availability for every selectable hour.
+
+        This is deliberately calculated on the server in Europe/Kaliningrad,
+        using exactly the same overlap/buffer rules as booking creation.
+        If start_at is omitted, returns valid pickup hours for each date.
+        If start_at is supplied, returns valid return hours for each date.
+        """
+        first = date(year, month_num, 1)
+        next_first = date(year + 1, 1, 1) if month_num == 12 else date(year, month_num + 1, 1)
+        month_start = local_dt(first, time(0, 0))
+        month_end = local_dt(next_first, time(0, 0))
+
+        # We need a little context before/after the visible month because
+        # a booking immediately before/after the month can affect a slot.
+        query_start = month_start - timedelta(hours=BUFFER_HOURS)
+        query_end = month_end + timedelta(hours=24 + BUFFER_HOURS)
+
+        con = db()
+        try:
+            with con.cursor() as cur:
+                bookings = cur.execute("""
+                    SELECT id,start_at,end_at,status
+                    FROM bookings
+                    WHERE car_id=%s
+                      AND status IN ('pending','confirmed')
+                      AND start_at < %s AND end_at > %s
+                    ORDER BY start_at
+                """, (cid, query_end, query_start)).fetchall()
+
+                maintenance = cur.execute("""
+                    SELECT id,start_at,end_at,reason
+                    FROM car_maintenance
+                    WHERE car_id=%s
+                      AND start_at < %s AND end_at > %s
+                    ORDER BY start_at
+                """, (cid, query_end, query_start)).fetchall()
+        finally:
+            con.close()
+
+        bookings = [
+            {"id": r["id"], "start_at": ensure_tz(r["start_at"]), "end_at": ensure_tz(r["end_at"])}
+            for r in bookings
+        ]
+        maintenance = [
+            {"id": r["id"], "start_at": ensure_tz(r["start_at"]), "end_at": ensure_tz(r["end_at"])}
+            for r in maintenance
+        ]
+
+        def free_interval(a, b):
+            if b <= a:
+                return False
+            for row in bookings:
+                rs = row["start_at"]
+                re = row["end_at"]
+                if rs < b + timedelta(hours=BUFFER_HOURS) and re > a - timedelta(hours=BUFFER_HOURS):
+                    return False
+            for row in maintenance:
+                if row["start_at"] < b and row["end_at"] > a:
+                    return False
+            return True
+
+        now = datetime.now(TZ)
+        z = lambda n: str(n).zfill(2)
+
+        if start_at is None:
+            result = {}
+            current = first
+            while current < next_first:
+                hours = []
+                for hour in range(PICKUP_START_HOUR, PICKUP_END_HOUR + 1):
+                    candidate = local_dt(current, time(hour, 0))
+                    if candidate <= now:
+                        continue
+                    # A valid pickup must allow the minimum one-day rental.
+                    candidate_end = candidate + timedelta(days=1)
+                    if free_interval(candidate, candidate_end):
+                        hours.append(hour)
+                result[current.isoformat()] = hours
+                current += timedelta(days=1)
+            return {"mode": "start", "slots": result}
+
+        start_at = ensure_tz(start_at)
+        result = {}
+        current = first
+        while current < next_first:
+            hours = []
+            for hour in range(PICKUP_START_HOUR, PICKUP_END_HOUR + 1):
+                candidate_end = local_dt(current, time(hour, 0))
+                if candidate_end <= start_at:
+                    continue
+                if free_interval(start_at, candidate_end):
+                    hours.append(hour)
+            result[current.isoformat()] = hours
+            current += timedelta(days=1)
+        return {"mode": "end", "slots": result}
+
     def mini_mybookings_sync(user_id):
         cleanup_pending()
         con=db()
@@ -6063,7 +6160,7 @@ async def main():
         if not index.exists():
             print(f"[MINIAPP] index missing: {index}")
             raise web.HTTPNotFound(text="Mini App files are missing")
-        return web.FileResponse(index)
+        return web.FileResponse(index, headers={"Cache-Control": "no-store, max-age=0"})
 
     async def mini_api_cars(request):
         mini_init_user(request)
@@ -6082,6 +6179,32 @@ async def main():
         month_end=local_dt(next_first,time(0,0))
         data=await asyncio.to_thread(mini_availability_sync,cid,month_start,month_end)
         return mini_json(data)
+
+    async def mini_api_slots(request):
+        mini_init_user(request)
+        cid = request.query.get("car_id", "")
+        try:
+            year = int(request.query.get("year", "0"))
+            month_num = int(request.query.get("month", "0"))
+        except ValueError:
+            return mini_json({"error": "invalid parameters"}, 400)
+        if cid not in CARS or year < 2020 or not 1 <= month_num <= 12:
+            return mini_json({"error": "invalid parameters"}, 400)
+
+        start_iso = request.query.get("start_at")
+        try:
+            start_at = mini_parse_dt(start_iso) if start_iso else None
+        except Exception:
+            return mini_json({"error": "invalid start_at"}, 400)
+
+        data = await asyncio.to_thread(
+            mini_calendar_slots_sync,
+            cid,
+            year,
+            month_num,
+            start_at,
+        )
+        return mini_json(data, headers={"Cache-Control": "no-store"})
 
     async def mini_api_mybookings(request):
         user=mini_init_user(request)
@@ -6300,6 +6423,10 @@ async def main():
     app.router.add_get(
         "/api/availability",
         mini_api_availability
+    )
+    app.router.add_get(
+        "/api/slots",
+        mini_api_slots
     )
     app.router.add_get(
         "/api/mybookings",
