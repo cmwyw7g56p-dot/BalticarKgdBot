@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#f5f7fa">
+<meta name="theme-color" content="#f5f7fa" id="themeColorMeta">
 <title>BALTICAR — аренда автомобилей</title>
 <style>
 :root{--bg:#06101a;--panel:#0b1b29;--panel2:#102537;--line:rgba(255,255,255,.09);--text:#f5f8fb;--muted:#91a3b5;--blue:#1683ff;--blue2:#0b63d9;--green:#2bd576;--amber:#ffb62b;--danger:#ff5f6d;--radius:22px}
@@ -12,6 +12,38 @@
 .hero{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:28px;background:#0b1a27;box-shadow:0 20px 60px rgba(0,0,0,.28);margin-bottom:18px}.hero img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover}.heroShade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.02) 25%,rgba(2,10,16,.88) 100%)}.heroCopy{position:absolute;left:20px;right:20px;bottom:18px}.eyebrow{font-size:12px;color:#9acaff;letter-spacing:.13em;text-transform:uppercase;font-weight:700}.hero h1{font-size:30px;line-height:1.05;margin:6px 0}.hero p{margin:0;color:#d1dde8}.sectionTitle{font-size:23px;font-weight:800;margin:20px 2px 10px}.sub{color:var(--muted);font-size:14px;line-height:1.5}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.navcard{padding:17px;border-radius:20px;background:linear-gradient(145deg,#112a3e,#0b1c2a);border:1px solid var(--line);min-height:98px;text-align:left;box-shadow:0 10px 30px rgba(0,0,0,.18)}.navcard .ico{font-size:25px}.navcard strong{display:block;margin-top:8px;font-size:16px}.navcard small{display:block;margin-top:4px;color:var(--muted)}
 .car{overflow:hidden;background:linear-gradient(145deg,#0d2232,#091824);border:1px solid var(--line);border-radius:24px;margin:14px 0;box-shadow:0 15px 40px rgba(0,0,0,.22)}.car img{width:100%;display:block;aspect-ratio:16/9;object-fit:cover}.carbody{padding:15px}.carline{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.carname{font-size:19px;font-weight:800}.from{font-size:14px;color:#9bcfff;text-align:right;white-space:nowrap}.from b{display:block;font-size:18px;color:#fff}.chips{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0}.chip{padding:7px 9px;border-radius:10px;background:rgba(255,255,255,.06);color:#c9d5df;font-size:12px}.primary{width:100%;padding:14px 16px;border-radius:15px;background:linear-gradient(135deg,var(--blue),#0561d2);font-weight:800;box-shadow:0 10px 24px rgba(22,131,255,.24)}.secondary{width:100%;padding:13px 16px;border-radius:15px;background:rgba(255,255,255,.055);border:1px solid var(--line);font-weight:700}.row{display:flex;gap:10px}.row>*{flex:1}.back{margin:6px 0 14px;color:#9bcfff;background:none;font-weight:700;padding:6px 0}.detailImg{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:24px;border:1px solid var(--line);display:block}.detailTitle{font-size:27px;margin:15px 0 5px}.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:14px 0}.fact{padding:12px;border-radius:15px;background:rgba(255,255,255,.045);border:1px solid var(--line);font-size:12px;color:var(--muted)}.fact b{display:block;color:#fff;font-size:14px;margin-top:5px}.block{padding:16px;border-radius:20px;background:rgba(255,255,255,.035);border:1px solid var(--line);margin:12px 0}.block h3{margin:0 0 9px;font-size:16px}.tariffs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.tariff{padding:12px;border-radius:14px;background:#0c2030;border:1px solid var(--line)}.tariff span{display:block;color:var(--muted);font-size:11px}.tariff b{display:block;margin-top:6px;font-size:15px}
 .calendar{background:#0b1b29;border:1px solid var(--line);border-radius:22px;padding:13px}.calhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.calhead button{background:rgba(255,255,255,.06);width:40px;height:40px;border-radius:12px}.week,.days{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}.week div{text-align:center;color:var(--muted);font-size:11px;padding:5px 0}.day{min-height:42px;border-radius:12px;background:rgba(255,255,255,.035);display:flex;align-items:center;justify-content:center;border:1px solid transparent;font-size:13px}.day.free{background:#0e2435}.day.busy{color:#66798b;background:#101a22}.day.selected{background:var(--blue);font-weight:800}.day.disabled{opacity:.25}.times{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.time{padding:12px 4px;border-radius:12px;background:rgba(255,255,255,.05);border:1px solid var(--line);font-size:13px}.time.selected{background:var(--blue);font-weight:800}.summary{margin-top:14px;padding:17px;border-radius:20px;background:linear-gradient(145deg,#102b40,#0b1b29);border:1px solid rgba(62,159,255,.25)}.summary .big{font-size:28px;font-weight:900;margin-top:4px}.hint{color:var(--amber);font-size:12px;line-height:1.4;margin-top:7px}.field{margin:10px 0}.field label{display:block;color:var(--muted);font-size:12px;margin:0 0 6px}.field input,.field textarea{width:100%;border:1px solid var(--line);background:#091824;color:#fff;border-radius:14px;padding:13px;font:inherit;outline:none}.field textarea{min-height:88px;resize:vertical}.bookingCard{padding:17px;border-radius:20px;background:linear-gradient(145deg,#102638,#0a1926);border:1px solid var(--line);margin:12px 0}.status{display:inline-flex;padding:6px 9px;border-radius:999px;background:rgba(255,255,255,.07);font-size:11px}.ok{color:#74f0aa}.warn{color:#ffd278}.danger{color:#ff8d98}.toast{position:fixed;left:16px;right:16px;bottom:calc(18px + env(safe-area-inset-bottom));z-index:20;padding:13px 15px;border-radius:16px;background:#122637;border:1px solid var(--line);box-shadow:0 16px 40px #0008;display:none}.toast.show{display:block;animation:in .2s ease}.empty{text-align:center;padding:40px 20px;color:var(--muted)}
+/* SYSTEM THEME */
+html.dark,html.dark body{background:#06101a!important;color:#f5f8fb!important}
+html.dark body{background:radial-gradient(900px 500px at 50% -10%,#123657 0,#07131f 55%,#06101a 100%)!important}
+html.dark .top{background:linear-gradient(#06101a 72%,rgba(6,16,26,0))!important}
+html.dark .topbtn{background:rgba(255,255,255,.06)!important;border-color:rgba(255,255,255,.09)!important;color:#f5f8fb!important;box-shadow:none}
+html.dark .hero{background:#0b1a27!important;border-color:rgba(255,255,255,.09)!important;box-shadow:0 20px 60px rgba(0,0,0,.28)!important}
+html.dark .navcard{background:linear-gradient(145deg,#112a3e,#0b1c2a)!important;border-color:rgba(255,255,255,.09)!important;box-shadow:0 10px 30px rgba(0,0,0,.18)!important}
+html.dark .sectionTitle,html.dark .detailTitle,html.dark .navcard strong,html.dark .carname,html.dark .block h3,html.dark .calhead strong{color:#f5f8fb!important}
+html.dark .sub,html.dark .navcard small,html.dark .field label,html.dark .fact,html.dark .tariff span{color:#91a3b5!important}
+html.dark .car{background:linear-gradient(145deg,#0d2232,#091824)!important;border-color:rgba(255,255,255,.09)!important;box-shadow:0 15px 40px rgba(0,0,0,.22)!important}
+html.dark .from,html.dark .back{color:#9bcfff!important}
+html.dark .from b,html.dark .fact b{color:#fff!important}
+html.dark .chip{background:rgba(255,255,255,.06)!important;color:#c9d5df!important}
+html.dark .secondary{background:rgba(255,255,255,.055)!important;border-color:rgba(255,255,255,.09)!important;color:#f5f8fb!important}
+html.dark .block{background:rgba(255,255,255,.035)!important;border-color:rgba(255,255,255,.09)!important}
+html.dark .tariff{background:#0c2030!important;border-color:rgba(255,255,255,.09)!important}
+html.dark .calendar{background:#0b1b29!important;border-color:rgba(255,255,255,.09)!important;box-shadow:none}
+html.dark .calhead button{background:rgba(255,255,255,.06)!important;color:#f5f8fb!important}
+html.dark .week div{color:#91a3b5!important}
+html.dark .day{background:rgba(255,255,255,.035)!important;color:#dce5ed!important}
+html.dark .day.free{background:#0e2435!important;color:#8de0b1!important}
+html.dark .day.busy{background:#101a22!important;color:#66798b!important}
+html.dark .time{background:rgba(255,255,255,.05)!important;border-color:rgba(255,255,255,.09)!important;color:#dce5ed!important}
+html.dark .time.available{background:rgba(43,213,118,.10)!important;border-color:rgba(43,213,118,.25)!important;color:#8de0b1!important}
+html.dark .time.unavailable,html.dark .time:disabled{background:#101a22!important;border-color:#26323d!important;color:#66798b!important}
+html.dark .summary{background:linear-gradient(145deg,#102b40,#0b1b29)!important;border-color:rgba(62,159,255,.25)!important;box-shadow:none}
+html.dark .field input,html.dark .field textarea{background:#091824!important;color:#fff!important;border-color:rgba(255,255,255,.09)!important}
+html.dark .bookingCard{background:linear-gradient(145deg,#102638,#0a1926)!important;border-color:rgba(255,255,255,.09)!important;box-shadow:none}
+html.dark .status{background:rgba(255,255,255,.07)!important}
+html.dark .toast{background:#122637!important;color:#fff!important}
+html.dark .empty{color:#91a3b5!important}
+
 @media(min-width:650px){.hero h1{font-size:38px}.car{display:grid;grid-template-columns:1.2fr 1fr}.car img{height:100%;aspect-ratio:auto}.carbody{display:flex;flex-direction:column;justify-content:center}}
 
 /* LIGHT UI — readability pass */
@@ -193,9 +225,18 @@ function status(s){return ({pending:'🟡 Ожидает',confirmed:'🟢 Под
 async function cancelBooking(id){if(!confirm('Отменить бронирование №'+id+'?'))return;try{await api('/api/bookings/cancel',{method:'POST',body:JSON.stringify({id})});toast('Бронирование отменено');openBookings()}catch(e){toast(e.message)}}
 async function openReviews(){show('reviews');$('reviews').innerHTML='<div class="sectionTitle">Отзывы клиентов</div><div class="sub">Реальные впечатления о BALTICAR.</div><div id="rlist">Загрузка…</div>';try{const d=await api('/api/reviews');$('rlist').innerHTML=d.reviews.length?d.reviews.map(r=>`<div class="bookingCard"><div style="font-size:20px">${'★'.repeat(r.rating)}${'☆'.repeat(5-r.rating)}</div><div style="margin-top:8px">${escapeHtml(r.text)||'Без текста'}</div><div class="sub" style="margin-top:8px">${escapeHtml(r.name)} · ${escapeHtml(r.car_name)} · ${r.created_at}</div></div>`).join(''):'<div class="empty">Пока нет отзывов.</div>'}catch(e){$('rlist').innerHTML='<div class="empty">'+e.message+'</div>'}}
 function openWhy(){show('why');$('why').innerHTML='<div class="sectionTitle">Почему BALTICAR</div><div class="sub">Сервис, который хочется рекомендовать.</div>'+[['🛡','Проверенные автомобили','Следим за состоянием, чистотой и обслуживанием.'],['💰','Прозрачные тарифы','Цена зависит от срока и видна до отправки заявки.'],['⚡','Быстрое подтверждение','Менеджер получает заявку сразу после отправки.'],['📅','Удобное бронирование','Весь путь от автомобиля до заявки — в одном окне.'],['🔔','Напоминания','Бот напомнит о предстоящей аренде заранее.']].map(x=>`<div class="block"><div style="font-size:25px">${x[0]}</div><h3>${x[1]}</h3><div class="sub">${x[2]}</div></div>`).join('')}
-function openTerms(){show('terms');$('terms').innerHTML='<div class="sectionTitle">Условия аренды</div><div class="block"><h3>🕐 Время</h3><div class="sub">Выдача и возврат: 08:00–20:00.</div></div><div class="block"><h3>🔧 Технический интервал</h3><div class="sub">Между бронированиями закладывается 2 часа.</div></div><div class="block"><h3>💰 Оплата</h3><div class="sub">Тариф определяется количеством оплачиваемых суток: 1–3, 4–6 или 7+.</div></div><div class="block"><h3>📌 Важно</h3><div class="sub">Если возврат происходит позже полного количества суток, добавляется ещё одни оплачиваемые сутки.</div></div>'}
+function openTerms(){show('terms');$('terms').innerHTML='<div class="sectionTitle">Условия аренды</div><div class="block"><h3>👤 Требования к водителю</h3><div class="sub">Возраст от 23 лет.<br>Стаж вождения от 3 лет.</div></div><div class="block"><h3>🕐 Время</h3><div class="sub">Выдача и возврат: 08:00–20:00.</div></div><div class="block"><h3>🔧 Технический интервал</h3><div class="sub">Между бронированиями закладывается 2 часа.</div></div><div class="block"><h3>💰 Оплата</h3><div class="sub">Тариф определяется количеством оплачиваемых суток: 1–3, 4–6 или 7+.<br>Форма оплаты — любая.</div></div><div class="block"><h3>🏢 Для юридических лиц</h3><div class="sub">Работаем с юридическими лицами.</div></div><div class="block"><h3>📌 Важно</h3><div class="sub">Если возврат происходит позже полного количества суток, добавляется ещё одни оплачиваемые сутки.</div></div>'}
 function openContact(){tg?.openTelegramLink?.('https://t.me/Balticar_kgd')||toast('Откройте канал BALTICAR для связи')}
 function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
+function applySystemTheme(){
+  const dark=(window.Telegram&&Telegram.WebApp&&Telegram.WebApp.colorScheme)?Telegram.WebApp.colorScheme==='dark':window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches;
+  document.documentElement.classList.toggle('dark',!!dark);
+  const meta=document.getElementById('themeColorMeta');
+  if(meta) meta.setAttribute('content',dark?'#06101a':'#f5f7fa');
+}
+applySystemTheme();
+if(window.Telegram?.WebApp){Telegram.WebApp.onEvent?.('themeChanged',applySystemTheme);Telegram.WebApp.ready?.();}
+if(window.matchMedia){const mq=window.matchMedia('(prefers-color-scheme: dark)');mq.addEventListener?.('change',applySystemTheme);}
 renderHome();$('backBtn').style.visibility='hidden';
 </script>
 </body></html>
