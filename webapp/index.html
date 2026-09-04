@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#07111c">
+<title>BALTICAR — аренда автомобилей</title>
+<style>
+:root{--bg:#06101a;--panel:#0b1b29;--panel2:#102537;--line:rgba(255,255,255,.09);--text:#f5f8fb;--muted:#91a3b5;--blue:#1683ff;--blue2:#0b63d9;--green:#2bd576;--amber:#ffb62b;--danger:#ff5f6d;--radius:22px}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;min-height:100%;-webkit-font-smoothing:antialiased}body{background:radial-gradient(900px 500px at 50% -10%,#123657 0,#07131f 55%,#06101a 100%)}button{font:inherit;color:inherit;border:0;cursor:pointer}#app{max-width:720px;margin:auto;padding:env(safe-area-inset-top) 16px calc(24px + env(safe-area-inset-bottom))}
+.top{display:flex;align-items:center;justify-content:space-between;padding:14px 2px 12px;position:sticky;top:0;z-index:5;background:linear-gradient(var(--bg) 70%,transparent)}.brand{font-weight:800;letter-spacing:.08em;font-size:18px}.brand span{color:#5db1ff}.topbtn{width:42px;height:42px;border-radius:14px;background:rgba(255,255,255,.06);border:1px solid var(--line);font-size:19px}.screen{display:none}.screen.active{display:block;animation:in .22s ease}@keyframes in{from{opacity:.2;transform:translateY(8px)}to{opacity:1;transform:none}}
+.hero{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:28px;background:#0b1a27;box-shadow:0 20px 60px rgba(0,0,0,.28);margin-bottom:18px}.hero img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover}.heroShade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.02) 25%,rgba(2,10,16,.88) 100%)}.heroCopy{position:absolute;left:20px;right:20px;bottom:18px}.eyebrow{font-size:12px;color:#9acaff;letter-spacing:.13em;text-transform:uppercase;font-weight:700}.hero h1{font-size:30px;line-height:1.05;margin:6px 0}.hero p{margin:0;color:#d1dde8}.sectionTitle{font-size:23px;font-weight:800;margin:20px 2px 10px}.sub{color:var(--muted);font-size:14px;line-height:1.5}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.navcard{padding:17px;border-radius:20px;background:linear-gradient(145deg,#112a3e,#0b1c2a);border:1px solid var(--line);min-height:98px;text-align:left;box-shadow:0 10px 30px rgba(0,0,0,.18)}.navcard .ico{font-size:25px}.navcard strong{display:block;margin-top:8px;font-size:16px}.navcard small{display:block;margin-top:4px;color:var(--muted)}
+.car{overflow:hidden;background:linear-gradient(145deg,#0d2232,#091824);border:1px solid var(--line);border-radius:24px;margin:14px 0;box-shadow:0 15px 40px rgba(0,0,0,.22)}.car img{width:100%;display:block;aspect-ratio:16/9;object-fit:cover}.carbody{padding:15px}.carline{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.carname{font-size:19px;font-weight:800}.from{font-size:14px;color:#9bcfff;text-align:right;white-space:nowrap}.from b{display:block;font-size:18px;color:#fff}.chips{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0}.chip{padding:7px 9px;border-radius:10px;background:rgba(255,255,255,.06);color:#c9d5df;font-size:12px}.primary{width:100%;padding:14px 16px;border-radius:15px;background:linear-gradient(135deg,var(--blue),#0561d2);font-weight:800;box-shadow:0 10px 24px rgba(22,131,255,.24)}.secondary{width:100%;padding:13px 16px;border-radius:15px;background:rgba(255,255,255,.055);border:1px solid var(--line);font-weight:700}.row{display:flex;gap:10px}.row>*{flex:1}.back{margin:6px 0 14px;color:#9bcfff;background:none;font-weight:700;padding:6px 0}.detailImg{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:24px;border:1px solid var(--line);display:block}.detailTitle{font-size:27px;margin:15px 0 5px}.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:14px 0}.fact{padding:12px;border-radius:15px;background:rgba(255,255,255,.045);border:1px solid var(--line);font-size:12px;color:var(--muted)}.fact b{display:block;color:#fff;font-size:14px;margin-top:5px}.block{padding:16px;border-radius:20px;background:rgba(255,255,255,.035);border:1px solid var(--line);margin:12px 0}.block h3{margin:0 0 9px;font-size:16px}.tariffs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.tariff{padding:12px;border-radius:14px;background:#0c2030;border:1px solid var(--line)}.tariff span{display:block;color:var(--muted);font-size:11px}.tariff b{display:block;margin-top:6px;font-size:15px}
+.calendar{background:#0b1b29;border:1px solid var(--line);border-radius:22px;padding:13px}.calhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.calhead button{background:rgba(255,255,255,.06);width:40px;height:40px;border-radius:12px}.week,.days{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}.week div{text-align:center;color:var(--muted);font-size:11px;padding:5px 0}.day{min-height:42px;border-radius:12px;background:rgba(255,255,255,.035);display:flex;align-items:center;justify-content:center;border:1px solid transparent;font-size:13px}.day.free{background:#0e2435}.day.busy{color:#66798b;background:#101a22}.day.selected{background:var(--blue);font-weight:800}.day.disabled{opacity:.25}.times{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.time{padding:12px 4px;border-radius:12px;background:rgba(255,255,255,.05);border:1px solid var(--line);font-size:13px}.time.selected{background:var(--blue);font-weight:800}.summary{margin-top:14px;padding:17px;border-radius:20px;background:linear-gradient(145deg,#102b40,#0b1b29);border:1px solid rgba(62,159,255,.25)}.summary .big{font-size:28px;font-weight:900;margin-top:4px}.hint{color:var(--amber);font-size:12px;line-height:1.4;margin-top:7px}.field{margin:10px 0}.field label{display:block;color:var(--muted);font-size:12px;margin:0 0 6px}.field input,.field textarea{width:100%;border:1px solid var(--line);background:#091824;color:#fff;border-radius:14px;padding:13px;font:inherit;outline:none}.field textarea{min-height:88px;resize:vertical}.bookingCard{padding:17px;border-radius:20px;background:linear-gradient(145deg,#102638,#0a1926);border:1px solid var(--line);margin:12px 0}.status{display:inline-flex;padding:6px 9px;border-radius:999px;background:rgba(255,255,255,.07);font-size:11px}.ok{color:#74f0aa}.warn{color:#ffd278}.danger{color:#ff8d98}.toast{position:fixed;left:16px;right:16px;bottom:calc(18px + env(safe-area-inset-bottom));z-index:20;padding:13px 15px;border-radius:16px;background:#122637;border:1px solid var(--line);box-shadow:0 16px 40px #0008;display:none}.toast.show{display:block;animation:in .2s ease}.empty{text-align:center;padding:40px 20px;color:var(--muted)}
+@media(min-width:650px){.hero h1{font-size:38px}.car{display:grid;grid-template-columns:1.2fr 1fr}.car img{height:100%;aspect-ratio:auto}.carbody{display:flex;flex-direction:column;justify-content:center}}
+</style>
+</head>
+<body>
+<div id="app">
+<header class="top"><button class="topbtn" id="backBtn" onclick="goBack()">‹</button><div class="brand">BALTICAR</div><button class="topbtn" onclick="goHome()">⌂</button></header>
+<section id="home" class="screen active"></section>
+<section id="cars" class="screen"></section>
+<section id="car" class="screen"></section>
+<section id="calendar" class="screen"></section>
+<section id="form" class="screen"></section>
+<section id="done" class="screen"></section>
+<section id="bookings" class="screen"></section>
+<section id="reviews" class="screen"></section>
+<section id="why" class="screen"></section>
+<section id="terms" class="screen"></section>
+<div class="toast" id="toast"></div>
+</div>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+const tg=window.Telegram?.WebApp; try{tg?.ready();tg?.expand();tg?.setHeaderColor?.('#06101a');tg?.setBackgroundColor?.('#06101a')}catch(e){}
+const $=id=>document.getElementById(id); let current='home', history=[]; let cars=[],selectedCar=null,startDate=null,startTime=null,endDate=null,endTime=null,month=new Date();
+const headers=()=>({'Content-Type':'application/json','X-Telegram-Init-Data':tg?.initData||''});
+async function api(url,opt={}){const r=await fetch(url,{...opt,headers:{...headers(),...(opt.headers||{})}});let d={};try{d=await r.json()}catch{} if(!r.ok)throw new Error(d.message||'Ошибка сервера');return d}
+function money(n){return new Intl.NumberFormat('ru-RU').format(n)+' ₽'}
+function toast(s){$('toast').textContent=s;$('toast').classList.add('show');setTimeout(()=>$('toast').classList.remove('show'),2800)}
+function show(id,push=true){document.querySelectorAll('.screen').forEach(x=>x.classList.remove('active'));$(id).classList.add('active');if(push&&current!==id)history.push(current);current=id;window.scrollTo({top:0,behavior:'smooth'});$('backBtn').style.visibility=id==='home'?'hidden':'visible'}
+function goBack(){const x=history.pop()||'home';show(x,false)} function goHome(){history=[];show('home',false);renderHome()}
+function img(path){return path ? '/' + path.replace(/^\/+/, '') : '/photos/balticar_hero.jpg'}
+function renderHome(){ $('home').innerHTML=`<div class="hero"><img src="/photos/balticar_hero.jpg"><div class="heroShade"></div><div class="heroCopy"><div class="eyebrow">BALTICAR • RENT A CAR</div><h1>Аренда автомобилей</h1><p>Калининград и область</p></div></div><div class="sectionTitle">Выберите автомобиль</div><div class="sub">Чистые автомобили, прозрачные тарифы и онлайн-бронирование без лишних звонков.</div><div class="grid" style="margin-top:14px"><button class="navcard" onclick="openCars()"><span class="ico">🚗</span><strong>Автомобили</strong><small>Каталог и цены</small></button><button class="navcard" onclick="openBookings()"><span class="ico">📋</span><strong>Мои брони</strong><small>Статус и детали</small></button><button class="navcard" onclick="openReviews()"><span class="ico">⭐</span><strong>Отзывы</strong><small>Что говорят клиенты</small></button><button class="navcard" onclick="openWhy()"><span class="ico">✨</span><strong>Почему BALTICAR</strong><small>Наши преимущества</small></button></div><div class="row" style="margin-top:12px"><button class="secondary" onclick="openTerms()">ℹ️ Условия</button><button class="secondary" onclick="openContact()">📞 Связаться</button></div>`}
+async function openCars(){show('cars');$('cars').innerHTML='<div class="sectionTitle">Автомобили</div><div class="sub">Выберите автомобиль — далее покажем свободные даты и точную стоимость.</div><div id="carlist">Загрузка…</div>';try{cars=(await api('/api/cars')).cars;renderCars()}catch(e){$('carlist').innerHTML='<div class="empty">Не удалось загрузить автомобили.<br>'+e.message+'</div>'}}
+function renderCars(){ $('carlist').innerHTML=cars.map(c=>`<article class="car"><img src="${img(c.photos[0])}"><div class="carbody"><div class="carline"><div class="carname">${c.name}</div><div class="from">от<b>${money(c.rates[2])}</b><span>в сутки</span></div></div><div class="chips"><span class="chip">⚙️ ${c.gear}</span><span class="chip">⛽ ${c.fuel}</span><span class="chip">👥 ${c.seats} мест</span></div><button class="primary" onclick="openCar('${c.id}')">Подробнее и забронировать →</button></div></article>`).join('')}
+function openCar(id){selectedCar=cars.find(x=>x.id===id);show('car');renderCar()}
+function renderCar(){const c=selectedCar;$('car').innerHTML=`<button class="back" onclick="openCars()">← К автомобилям</button><img class="detailImg" src="${img(c.photos[0])}"><h1 class="detailTitle">${c.name}</h1><div class="sub">${c.description}</div><div class="facts"><div class="fact">Коробка<b>${c.gear}</b></div><div class="fact">Топливо<b>${c.fuel}</b></div><div class="fact">Мест<b>${c.seats}</b></div></div><div class="block"><h3>✨ В стоимость входит</h3><div class="sub">✓ Подготовленный автомобиль<br>✓ Понятная стоимость без скрытых доплат<br>✓ Техническое обслуживание<br>✓ Поддержка менеджера</div></div><div class="block"><h3>💰 Тарифы</h3><div class="tariffs"><div class="tariff"><span>1–3 суток</span><b>${money(c.rates[0])}</b></div><div class="tariff"><span>4–6 суток</span><b>${money(c.rates[1])}</b></div><div class="tariff"><span>7+ суток</span><b>${money(c.rates[2])}</b></div></div></div><div class="block"><h3>🕐 Выдача и возврат</h3><div class="sub">08:00–20:00<br>Технический интервал между арендами — 2 часа.</div></div><button class="primary" onclick="startBooking()">📅 Забронировать</button><div class="row" style="margin-top:10px"><button class="secondary" onclick="openBookings()">📋 Мои брони</button><button class="secondary" onclick="goHome()">⌂ Главное</button></div>`}
+function startBooking(){startDate=startTime=endDate=endTime=null;month=new Date();show('calendar');renderCalendar('start')}
+async function getAvail(){return api(`/api/availability?car_id=${encodeURIComponent(selectedCar.id)}&year=${month.getFullYear()}&month=${month.getMonth()+1}`)}
+function fmtDate(d){return d.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric'})}
+function localIso(d,h){const z=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}T${z(h)}:00`}
+let currentAvail={bookings:[],maintenance:[]};
+const BUFFER_MS=2*60*60*1000;
+function blocks(){return [...(currentAvail.bookings||[]),...(currentAvail.maintenance||[])]}
+function intervalFree(a,b){
+  if(!(a instanceof Date)||!(b instanceof Date)||b<=a)return false;
+  return !blocks().some(x=>{
+    const bs=new Date(x.start_at).getTime()-BUFFER_MS;
+    const be=new Date(x.end_at).getTime()+BUFFER_MS;
+    return a.getTime()<be && b.getTime()>bs;
+  });
+}
+function candidateStartFree(d,h){
+  const a=new Date(d); a.setHours(h,0,0,0);
+  const b=new Date(a); b.setDate(b.getDate()+1);
+  return intervalFree(a,b);
+}
+function candidateEndFree(d,h){
+  if(!startDate||startTime==null)return false;
+  const a=new Date(startDate); a.setHours(startTime,0,0,0);
+  const b=new Date(d); b.setHours(h,0,0,0);
+  return b>a && intervalFree(a,b);
+}
+function dayHasAvailableTime(d,mode){
+  for(let h=8;h<=20;h++) if(mode==='start'?candidateStartFree(d,h):candidateEndFree(d,h)) return true;
+  return false;
+}
+async function renderCalendar(mode){
+  $('calendar').innerHTML=`
+    <div class="sectionTitle">${mode==='start'?'Дата и время получения':'Дата и время возврата'}</div>
+    <div class="sub">${mode==='start'?'Выберите дату и время получения автомобиля.':'Выберите дату и время возврата автомобиля.'}</div>
+    <div class="calendar" style="margin-top:14px">
+      <div class="calhead">
+        <button onclick="shiftMonth(-1,'${mode}')">‹</button>
+        <b>${month.toLocaleDateString('ru-RU',{month:'long',year:'numeric'})}</b>
+        <button onclick="shiftMonth(1,'${mode}')">›</button>
+      </div>
+      <div class="week">${['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(x=>`<div>${x}</div>`).join('')}</div>
+      <div id="days" class="days"></div>
+      <div id="times"></div>
+    </div>
+    <div id="calSummary"></div>`;
+  try{currentAvail=await getAvail();drawDays(currentAvail,mode)}catch(e){toast(e.message)}
+}
+async function shiftMonth(delta,mode){month.setMonth(month.getMonth()+delta);await renderCalendar(mode)}
+function drawDays(av,mode){
+  currentAvail=av||{bookings:[],maintenance:[]};
+  const y=month.getFullYear(),m=month.getMonth(),first=new Date(y,m,1),last=new Date(y,m+1,0),today=new Date();
+  today.setHours(0,0,0,0);
+  let html='';
+  const offset=first.getDay()===0?6:first.getDay()-1;
+  for(let i=0;i<offset;i++)html+='<div></div>';
+  for(let n=1;n<=last.getDate();n++){
+    const d=new Date(y,m,n);
+    const hasTime=dayHasAvailableTime(d,mode);
+    const dis=d<today || (mode==='end'&&startDate&&d<=startDate) || !hasTime;
+    const sel=(mode==='start'&&startDate&&d.toDateString()===startDate.toDateString())||(mode==='end'&&endDate&&d.toDateString()===endDate.toDateString());
+    html+=`<button class="day ${hasTime?'free':'busy'} ${dis?'disabled':''} ${sel?'selected':''}" ${dis?'disabled':''} onclick="chooseDay(${n},'${mode}')">${n}</button>`;
+  }
+  $('days').innerHTML=html;
+  if(mode==='start'&&startDate)drawTimes('start');
+  if(mode==='end'&&endDate)drawTimes('end');
+}
+async function chooseDay(n,mode){
+  const d=new Date(month.getFullYear(),month.getMonth(),n);
+  if(mode==='end'&&startDate&&d<=startDate)return;
+  if(!dayHasAvailableTime(d,mode))return;
+  if(mode==='start')startDate=d;else endDate=d;
+  drawTimes(mode);
+}
+function drawTimes(mode){
+  const box=$('times');
+  const d=mode==='start'?startDate:endDate;
+  let html='<div class="sub" style="margin:14px 0 8px">'+fmtDate(d)+'</div><div class="times">';
+  for(let h=8;h<=20;h++){
+    const ok=mode==='start'?candidateStartFree(d,h):candidateEndFree(d,h);
+    const selected=(mode==='start'?startTime:endTime)===h;
+    html+=`<button class="time ${selected?'selected':''}" ${ok?'':'disabled'} onclick="chooseTime(${h},'${mode}')">${String(h).padStart(2,'0')}:00</button>`;
+  }
+  html+='</div>';
+  box.innerHTML=html;
+  renderCalSummary();
+}
+function chooseTime(h,mode){
+  const d=mode==='start'?startDate:endDate;
+  const ok=mode==='start'?candidateStartFree(d,h):candidateEndFree(d,h);
+  if(!ok){toast('Это время недоступно для выбранного периода');return}
+  if(mode==='start')startTime=h;else endTime=h;
+  drawTimes(mode);
+  if(mode==='start'&&startDate&&startTime!=null){
+    endDate=new Date(startDate);endDate.setDate(endDate.getDate()+1);endTime=startTime;
+    renderCalendar('end');
+  } else renderCalSummary();
+}
+function rentalDays(){if(!startDate||startTime==null||!endDate||endTime==null)return null;const a=new Date(startDate);a.setHours(startTime);const b=new Date(endDate);b.setHours(endTime);return Math.max(1,Math.ceil((b-a)/86400000))}
+function rate(){const d=rentalDays();return d<=3?selectedCar.rates[0]:d<=6?selectedCar.rates[1]:selectedCar.rates[2]}
+function renderCalSummary(){const d=rentalDays();if(!d)return;$('calSummary').innerHTML=`<div class="summary"><div class="sub">${fmtDate(startDate)} ${String(startTime).padStart(2,'0')}:00 → ${fmtDate(endDate)} ${String(endTime).padStart(2,'0')}:00</div><div class="big">${d} ${d===1?'сутки':d<5?'суток':'суток'} · ${money(d*rate())}</div>${endTime>startTime&&fmtDate(startDate)!==fmtDate(endDate)?'<div class="hint">⚠️ Возврат позже времени получения — оплачивается дополнительное сутки.</div>':''}<button class="primary" style="margin-top:12px" onclick="goForm()">Продолжить →</button></div>`}
+function goForm(){if(!rentalDays()){toast('Выберите дату и время возврата');return}show('form');renderForm()}
+function renderForm(){$('form').innerHTML=`<button class="back" onclick="startBooking()">← Изменить период</button><div class="sectionTitle">Проверьте заявку</div><div class="block"><b>${selectedCar.name}</b><div class="sub" style="margin-top:7px">${fmtDate(startDate)} ${String(startTime).padStart(2,'0')}:00 → ${fmtDate(endDate)} ${String(endTime).padStart(2,'0')}:00<br>${rentalDays()} суток</div><div class="big" style="margin-top:8px">${money(rentalDays()*rate())}</div></div><div class="field"><label>Ваше имя</label><input id="name" placeholder="Имя"></div><div class="field"><label>Телефон</label><input id="phone" type="tel" placeholder="+7 ..."></div><div class="field"><label>Дополнительные пожелания</label><textarea id="comment" placeholder="Детское кресло, место встречи и т.п. (необязательно)"></textarea></div><button class="primary" onclick="submitBooking()">✓ Отправить заявку</button>`}
+async function submitBooking(){const name=$('name').value.trim(),phone=$('phone').value.trim(),comment=$('comment').value.trim();if(!name||phone.length<7){toast('Введите имя и корректный телефон');return}const a=localIso(startDate,startTime),b=localIso(endDate,endTime);try{const r=await api('/api/bookings',{method:'POST',body:JSON.stringify({car_id:selectedCar.id,start_at:a,end_at:b,name,phone,comment})});$('done').innerHTML=`<div class="hero" style="padding:24px"><div class="eyebrow">ЗАЯВКА ОТПРАВЛЕНА</div><h1>Спасибо, ${name}!</h1><p>Заявка №${r.id} принята менеджером.</p></div><div class="summary"><div class="sub">${selectedCar.name}</div><div style="margin-top:8px">${fmtDate(startDate)} ${String(startTime).padStart(2,'0')}:00 → ${fmtDate(endDate)} ${String(endTime).padStart(2,'0')}:00</div><div class="big">${money(r.total)}</div><div class="sub">${r.days} суток · удержание заявки до ${r.expires}</div></div><button class="primary" style="margin-top:12px" onclick="openBookings()">📋 Мои брони</button><button class="secondary" style="margin-top:10px" onclick="goHome()">⌂ Главное меню</button>`;show('done');tg?.HapticFeedback?.notificationOccurred('success')}catch(e){toast(e.message)}}
+async function openBookings(){show('bookings');$('bookings').innerHTML='<div class="sectionTitle">Мои брони</div><div class="sub">Все ваши заявки в одном месте.</div><div id="blist">Загрузка…</div>';try{const d=await api('/api/mybookings');if(!d.bookings.length){$('blist').innerHTML='<div class="empty">Пока нет бронирований.<br><button class="primary" style="margin-top:16px" onclick="openCars()">Выбрать автомобиль</button></div>';return}$('blist').innerHTML=d.bookings.map(b=>`<div class="bookingCard"><div style="display:flex;justify-content:space-between;gap:10px"><b>№${b.id} · ${b.car_name}</b><span class="status">${status(b.status)}</span></div><div class="sub" style="margin-top:10px">${b.start_at} → ${b.end_at}</div><div style="font-size:21px;font-weight:900;margin-top:8px">${money(b.total)}</div>${['pending','confirmed'].includes(b.status)?`<button class="secondary" style="margin-top:12px" onclick="cancelBooking(${b.id})">Отменить бронь</button>`:''}</div>`).join('')}catch(e){$('blist').innerHTML='<div class="empty">'+e.message+'</div>'}}
+function status(s){return ({pending:'🟡 Ожидает',confirmed:'🟢 Подтверждена',cancelled:'⚫ Отменена',rejected:'🔴 Отклонена',expired:'⚪ Истекла'})[s]||s}
+async function cancelBooking(id){if(!confirm('Отменить бронирование №'+id+'?'))return;try{await api('/api/bookings/cancel',{method:'POST',body:JSON.stringify({id})});toast('Бронирование отменено');openBookings()}catch(e){toast(e.message)}}
+async function openReviews(){show('reviews');$('reviews').innerHTML='<div class="sectionTitle">Отзывы клиентов</div><div class="sub">Реальные впечатления о BALTICAR.</div><div id="rlist">Загрузка…</div>';try{const d=await api('/api/reviews');$('rlist').innerHTML=d.reviews.length?d.reviews.map(r=>`<div class="bookingCard"><div style="font-size:20px">${'★'.repeat(r.rating)}${'☆'.repeat(5-r.rating)}</div><div style="margin-top:8px">${escapeHtml(r.text)||'Без текста'}</div><div class="sub" style="margin-top:8px">${escapeHtml(r.name)} · ${escapeHtml(r.car_name)} · ${r.created_at}</div></div>`).join(''):'<div class="empty">Пока нет отзывов.</div>'}catch(e){$('rlist').innerHTML='<div class="empty">'+e.message+'</div>'}}
+function openWhy(){show('why');$('why').innerHTML='<div class="sectionTitle">Почему BALTICAR</div><div class="sub">Сервис, который хочется рекомендовать.</div>'+[['🛡','Проверенные автомобили','Следим за состоянием, чистотой и обслуживанием.'],['💰','Прозрачные тарифы','Цена зависит от срока и видна до отправки заявки.'],['⚡','Быстрое подтверждение','Менеджер получает заявку сразу после отправки.'],['📅','Удобное бронирование','Весь путь от автомобиля до заявки — в одном окне.'],['🔔','Напоминания','Бот напомнит о предстоящей аренде заранее.']].map(x=>`<div class="block"><div style="font-size:25px">${x[0]}</div><h3>${x[1]}</h3><div class="sub">${x[2]}</div></div>`).join('')}
+function openTerms(){show('terms');$('terms').innerHTML='<div class="sectionTitle">Условия аренды</div><div class="block"><h3>🕐 Время</h3><div class="sub">Выдача и возврат: 08:00–20:00.</div></div><div class="block"><h3>🔧 Технический интервал</h3><div class="sub">Между бронированиями закладывается 2 часа.</div></div><div class="block"><h3>💰 Оплата</h3><div class="sub">Тариф определяется количеством оплачиваемых суток: 1–3, 4–6 или 7+.</div></div><div class="block"><h3>📌 Важно</h3><div class="sub">Если возврат происходит позже полного количества суток, добавляется ещё одни оплачиваемые сутки.</div></div>'}
+function openContact(){tg?.openTelegramLink?.('https://t.me/Balticar_kgd')||toast('Откройте канал BALTICAR для связи')}
+function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
+renderHome();$('backBtn').style.visibility='hidden';
+</script>
+</body></html>
