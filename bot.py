@@ -1077,45 +1077,32 @@ def mini_app_url():
 def main_keyboard():
     app_url = mini_app_url()
     if app_url:
-        car_button = InlineKeyboardButton(
-            text="🚗 Открыть BALTICAR",
-            web_app=WebAppInfo(url=app_url),
-        )
-    else:
-        car_button = InlineKeyboardButton(
-            text="🚗 Автомобили",
-            callback_data="catalog",
+        return InlineKeyboardMarkup(
+            inline_keyboard=[[
+                InlineKeyboardButton(
+                    text="🚗 Открыть BALTICAR Mini App",
+                    web_app=WebAppInfo(url=app_url),
+                )
+            ]]
         )
     return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [car_button],
-            [
-                InlineKeyboardButton(text="📋 Мои брони", callback_data="mybookings"),
-                InlineKeyboardButton(text="⭐ Отзывы", callback_data="reviews"),
-            ],
-            [
-                InlineKeyboardButton(text="✨ Почему BALTICAR", callback_data="why"),
-                InlineKeyboardButton(text="ℹ️ Условия", callback_data="terms"),
-            ],
-            [InlineKeyboardButton(text="📞 Связаться", callback_data="contact")],
-        ]
+        inline_keyboard=[[InlineKeyboardButton(text="🚗 Автомобили", callback_data="catalog")]]
     )
 
 
 def welcome_text():
     return (
-        "🚗 <b>BALTICAR</b> <i>• аренда автомобилей</i>\n\n"
-        "📍 <b>Калининград</b>\n"
-        "Подберём автомобиль, покажем свободные даты и сразу рассчитаем стоимость.\n\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "🛡 Автомобили в отличном состоянии\n"
-        "💰 Понятные тарифы без сюрпризов\n"
-        "📅 Онлайн-бронирование в Telegram\n"
-        "⚡ Быстрое подтверждение заявки\n"
-        "☎️ Поддержка 24/7\n"
-        "━━━━━━━━━━━━━━━━━━\n\n"
-        "<b>Выберите нужный раздел ниже 👇</b>"
+        "🚗 <b>BALTICAR</b>\n"
+        "<i>Аренда автомобилей в Калининграде</i>\n\n"
+        "Подбор автомобиля, свободные даты, точная стоимость и бронирование — всё внутри нашего Mini App.\n\n"
+        "✨ <b>Красиво • быстро • удобно</b>\n\n"
+        "Нажмите кнопку ниже, чтобы открыть BALTICAR."
     )
+
+
+def welcome_photo_path():
+    path = Path(__file__).resolve().parent / "photos" / "balticar_hero.jpg"
+    return path if path.exists() else None
 
 
 def why_text():
@@ -2178,11 +2165,18 @@ async def start_handler(
 ):
 
     await state.clear()
-
-    await message.answer(
-        welcome_text(),
-        reply_markup=main_keyboard()
-    )
+    photo = welcome_photo_path()
+    if photo:
+        await message.answer_photo(
+            FSInputFile(str(photo)),
+            caption=welcome_text(),
+            reply_markup=main_keyboard(),
+        )
+    else:
+        await message.answer(
+            welcome_text(),
+            reply_markup=main_keyboard(),
+        )
 
 
 async def home(
@@ -2190,15 +2184,29 @@ async def home(
     state: FSMContext
 ):
 
-    # Отвечаем Telegram сразу.
     await safe_callback_answer(callback)
-
     await state.clear()
-
-    await callback.message.edit_text(
-        welcome_text(),
-        reply_markup=main_keyboard()
-    )
+    photo = welcome_photo_path()
+    try:
+        if photo and callback.message.content_type != "photo":
+            await callback.message.delete()
+            await callback.message.answer_photo(
+                FSInputFile(str(photo)),
+                caption=welcome_text(),
+                reply_markup=main_keyboard(),
+            )
+        elif callback.message.content_type == "photo":
+            await callback.message.edit_caption(
+                caption=welcome_text(),
+                reply_markup=main_keyboard(),
+            )
+        else:
+            await callback.message.edit_text(
+                welcome_text(),
+                reply_markup=main_keyboard(),
+            )
+    except Exception as exc:
+        print(f"[HOME] render error: {type(exc).__name__}: {exc}")
 
 
 async def id_handler(
@@ -6046,8 +6054,15 @@ async def main():
         finally:
             con.close()
 
+    WEBAPP_DIR = Path(__file__).resolve().parent / "webapp"
+    PHOTOS_DIR = Path(__file__).resolve().parent / "photos"
+
     async def mini_app(request):
-        return web.FileResponse("webapp/index.html")
+        index = WEBAPP_DIR / "index.html"
+        if not index.exists():
+            print(f"[MINIAPP] index missing: {index}")
+            raise web.HTTPNotFound(text="Mini App files are missing")
+        return web.FileResponse(index)
 
     async def mini_api_cars(request):
         mini_init_user(request)
@@ -6273,7 +6288,7 @@ async def main():
     )
     app.router.add_static(
         "/photos",
-        "photos",
+        str(PHOTOS_DIR),
         show_index=False
     )
 
