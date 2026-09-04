@@ -188,6 +188,12 @@ CARS = {
 
 
 # ============================================================
+# V18 CLIENT UI
+# ============================================================
+# Main visual: photos/balticar_hero.jpg
+
+
+# ============================================================
 # FSM
 # ============================================================
 
@@ -1070,14 +1076,14 @@ def main_keyboard():
         inline_keyboard=[
             [
                 InlineKeyboardButton(text="🚗 Автомобили", callback_data="catalog"),
-                InlineKeyboardButton(text="📋 Мои бронирования", callback_data="mybookings"),
+                InlineKeyboardButton(text="📋 Мои брони", callback_data="mybookings"),
             ],
             [
                 InlineKeyboardButton(text="⭐ Отзывы", callback_data="reviews"),
-                InlineKeyboardButton(text="✨ Почему мы", callback_data="why"),
+                InlineKeyboardButton(text="✨ Почему BALTICAR", callback_data="why"),
             ],
             [
-                InlineKeyboardButton(text="ℹ️ Условия аренды", callback_data="terms"),
+                InlineKeyboardButton(text="ℹ️ Условия", callback_data="terms"),
                 InlineKeyboardButton(text="📞 Связаться", callback_data="contact"),
             ],
         ]
@@ -1086,17 +1092,14 @@ def main_keyboard():
 
 def welcome_text():
     return (
-        "🚗 <b>BALTICAR</b> <i>• аренда автомобилей</i>\n\n"
-        "📍 <b>Калининград</b>\n"
-        "Подберём автомобиль, покажем свободные даты и сразу рассчитаем стоимость.\n\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "🛡 Автомобили в отличном состоянии\n"
-        "💰 Понятные тарифы без сюрпризов\n"
-        "📅 Онлайн-бронирование в Telegram\n"
-        "⚡ Быстрое подтверждение заявки\n"
-        "☎️ Поддержка 24/7\n"
-        "━━━━━━━━━━━━━━━━━━\n\n"
-        "<b>Выберите нужный раздел ниже 👇</b>"
+        "🚗 <b>BALTICAR</b>  <i>аренда автомобилей</i>\n"
+        "📍 <b>Калининград и область</b>\n\n"
+        "Подберите автомобиль, выберите даты и сразу увидите итоговую стоимость.\n\n"
+        "🛡 Проверенные и ухоженные автомобили\n"
+        "💰 Прозрачные тарифы\n"
+        "📅 Онлайн-бронирование\n"
+        "⚡ Быстрое подтверждение\n\n"
+        "<b>Выберите действие 👇</b>"
     )
 
 
@@ -1122,10 +1125,7 @@ def car_keyboard():
     rows = []
     for cid, car in active_cars().items():
         rows.append([InlineKeyboardButton(
-            text=(
-                f"🚗 {car['name']}  •  от {money(car['rates'][2])}/сутки  •  "
-                f"{car['gear']}  •  {car['seats']} мест"
-            ),
+            text=f"🚗 {car['name']}  •  от {money(car['rates'][2])}/сутки",
             callback_data=f"car:{cid}"
         )])
     rows.append([InlineKeyboardButton(text="⭐ Отзывы", callback_data="reviews")])
@@ -1137,9 +1137,9 @@ def car_actions_keyboard(cid):
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📅 Забронировать", callback_data=f"pick:{cid}")],
-            [InlineKeyboardButton(text="📋 Мои бронирования", callback_data="mybookings")],
-            [InlineKeyboardButton(text="◀️ К автомобилям", callback_data="catalog")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")],
+            [InlineKeyboardButton(text="📋 Мои брони", callback_data="mybookings")],
+            [InlineKeyboardButton(text="◀️ К автомобилям", callback_data="catalog"),
+             InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")],
         ]
     )
 
@@ -2130,29 +2130,25 @@ def car_text(cid):
     car = CARS[cid]
     return (
         f"🚗 <b>{car['name']}</b>\n"
-        f"⚙️ {car['gear']}  •  ⛽ {car['fuel']}  •  👥 {car['seats']} мест\n\n"
+        f"⚙️ {car['gear']}   •   ⛽ {car['fuel']}   •   👥 {car['seats']} мест\n\n"
         f"{car['description']}\n\n"
-        f"💰 <b>Стоимость аренды</b>\n"
-        f"1–3 суток — <b>{money(car['rates'][0])}</b>/сутки\n"
-        f"4–6 суток — <b>{money(car['rates'][1])}</b>/сутки\n"
-        f"7+ суток — <b>{money(car['rates'][2])}</b>/сутки\n\n"
+        "✨ <b>В стоимость входит</b>\n"
+        "✓ Подготовленный автомобиль\n"
+        "✓ Понятная стоимость без скрытых доплат\n"
+        "✓ Поддержка менеджера\n\n"
+        f"💰 <b>Тарифы</b>\n"
+        f"1–3 суток  —  <b>{money(car['rates'][0])}</b>/сутки\n"
+        f"4–6 суток  —  <b>{money(car['rates'][1])}</b>/сутки\n"
+        f"7+ суток   —  <b>{money(car['rates'][2])}</b>/сутки\n\n"
         f"🕐 Выдача и возврат: <b>{PICKUP_START_HOUR:02d}:00–{PICKUP_END_HOUR:02d}:00</b>\n"
-        f"🔧 Технический интервал между арендами: <b>{BUFFER_HOURS} ч.</b>\n\n"
-        "📅 <i>После выбора периода итоговая сумма будет показана до отправки заявки.</i>"
+        f"🔧 Технический интервал: <b>{BUFFER_HOURS} ч.</b>\n\n"
+        "📅 <i>Итоговая стоимость появится после выбора периода.</i>"
     )
 
 
-async def send_car(
-    bot,
-    chat_id,
-    cid
-):
+async def send_car(bot, chat_id, cid):
     car = CARS[cid]
-    existing_photos = [
-        photo for photo in car["photos"]
-        if os.path.exists(photo)
-    ]
-
+    existing_photos = [p for p in car["photos"] if os.path.exists(p)]
     if existing_photos:
         await bot.send_photo(
             chat_id,
@@ -2160,51 +2156,64 @@ async def send_car(
             caption=car_text(cid),
             reply_markup=car_actions_keyboard(cid)
         )
-        for photo in existing_photos[1:]:
-            await bot.send_photo(
-                chat_id,
-                FSInputFile(photo)
-            )
     else:
-        await bot.send_message(
-            chat_id,
-            car_text(cid),
-            reply_markup=car_actions_keyboard(cid)
-        )
+        await bot.send_message(chat_id, car_text(cid), reply_markup=car_actions_keyboard(cid))
+
+
+
+# ============================================================
+# CLIENT UI HELPERS — v18
+# ============================================================
+
+async def edit_client_screen(callback: CallbackQuery, text: str, reply_markup=None):
+    """Редактирует и текстовые, и фотосообщения одинаково."""
+    message = callback.message
+    if getattr(message, "photo", None):
+        try:
+            await message.edit_caption(caption=text, reply_markup=reply_markup)
+            return
+        except TelegramBadRequest:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            await message.answer(text, reply_markup=reply_markup)
+            return
+    await message.edit_text(text, reply_markup=reply_markup)
 
 
 # ============================================================
 # CLIENT
 # ============================================================
 
-async def start_handler(
-    message: Message,
-    state: FSMContext
-):
-
+async def start_handler(message: Message, state: FSMContext):
     await state.clear()
+    hero = "photos/balticar_hero.jpg"
+    if os.path.exists(hero):
+        await message.answer_photo(
+            FSInputFile(hero),
+            caption=welcome_text(),
+            reply_markup=main_keyboard()
+        )
+    else:
+        await message.answer(welcome_text(), reply_markup=main_keyboard())
 
-    await message.answer(
-        welcome_text(),
-        reply_markup=main_keyboard()
-    )
 
-
-async def home(
-    callback: CallbackQuery,
-    state: FSMContext
-):
-
-    # Отвечаем Telegram сразу.
+async def home(callback: CallbackQuery, state: FSMContext):
     await safe_callback_answer(callback)
-
     await state.clear()
-
-    await replace_client_message(
-        callback,
-        welcome_text(),
-        main_keyboard()
-    )
+    hero = "photos/balticar_hero.jpg"
+    if getattr(callback.message, "photo", None):
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        if os.path.exists(hero):
+            await callback.bot.send_photo(callback.message.chat.id, FSInputFile(hero), caption=welcome_text(), reply_markup=main_keyboard())
+        else:
+            await callback.bot.send_message(callback.message.chat.id, welcome_text(), reply_markup=main_keyboard())
+    else:
+        await callback.message.edit_text(welcome_text(), reply_markup=main_keyboard())
 
 
 async def id_handler(
@@ -2217,91 +2226,78 @@ async def id_handler(
     )
 
 
-async def catalog(
-    callback: CallbackQuery
-):
-
+async def catalog(callback: CallbackQuery):
     await safe_callback_answer(callback)
-
-    # Всегда перечитываем тарифы из БД перед показом каталога,
-    # чтобы клиент сразу видел изменения, сделанные администратором.
     await asyncio.to_thread(load_car_settings)
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
 
-    await replace_client_message(
-        callback,
+    chat_id = callback.message.chat.id
+    await callback.bot.send_message(
+        chat_id,
         "🚗 <b>Автомобили BALTICAR</b>\n\n"
-        "Выберите модель — откроется её фотокарточка, характеристики и актуальные тарифы.\n\n"
-        "💡 <b>Цена за выбранный период рассчитывается автоматически.</b>",
-        car_keyboard()
+        "Выберите автомобиль — откроется подробная карточка с фото, характеристиками и актуальными тарифами.\n\n"
+        "💡 <i>Цена за выбранный период рассчитывается автоматически.</i>"
+    )
+
+    for cid, car in active_cars().items():
+        photo = next((p for p in car["photos"] if os.path.exists(p)), None)
+        caption = (
+            f"🚗 <b>{car['name']}</b>\n"
+            f"{car['gear']}  •  {car['fuel']}  •  {car['seats']} мест\n"
+            f"💰 <b>от {money(car['rates'][2])}/сутки</b>"
+        )
+        markup = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="Подробнее и забронировать →", callback_data=f"car:{cid}")
+        ]])
+        if photo:
+            await callback.bot.send_photo(chat_id, FSInputFile(photo), caption=caption, reply_markup=markup)
+        else:
+            await callback.bot.send_message(chat_id, caption, reply_markup=markup)
+
+    await callback.bot.send_message(
+        chat_id,
+        "✨ <b>BALTICAR</b>\nПрозрачные тарифы • онлайн-бронирование • поддержка менеджера",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⭐ Отзывы", callback_data="reviews"), InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")]
+        ])
     )
 
 
-async def car_selected(
-    callback: CallbackQuery
-):
-
+async def car_selected(callback: CallbackQuery):
     await safe_callback_answer(callback)
-
-    # Обновляем настройки перед открытием карточки автомобиля,
-    # чтобы тарифы в уже существующих кнопках тоже не устаревали.
     await asyncio.to_thread(load_car_settings)
-
-    cid = callback.data.split(
-        ":",
-        1
-    )[1]
-
+    cid = callback.data.split(":", 1)[1]
     if cid not in CARS or not CARS[cid].get("active", True):
-
-        await callback.message.answer(
-            "Автомобиль сейчас недоступен."
-        )
-
+        await callback.message.answer("Автомобиль сейчас недоступен.")
         return
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    await send_car(callback.bot, callback.message.chat.id, cid)
 
-    await send_car(
-        callback.bot,
-        callback.message.chat.id,
-        cid
-    )
 
-
-async def pick_dates(
-    callback: CallbackQuery
-):
-
+async def pick_dates(callback: CallbackQuery):
     await safe_callback_answer(callback)
-
-    cid = callback.data.split(
-        ":",
-        1
-    )[1]
-
+    cid = callback.data.split(":", 1)[1]
     if cid not in CARS:
-
-        await callback.message.answer(
-            "Автомобиль не найден."
-        )
-
+        await callback.message.answer("Автомобиль не найден.")
         return
-
     today = datetime.now(TZ).date()
-
-    keyboard = await calendar_keyboard(
-        cid,
-        today.year,
-        today.month
+    keyboard = await calendar_keyboard(cid, today.year, today.month)
+    text = (
+        f"📅 <b>Шаг 1 из 4 · Даты аренды</b>\n\n"
+        f"🚗 {CARS[cid]['name']}\n"
+        "🟢 свободно  •  🟡 есть заявка  •  🔴 занято\n\n"
+        "Выберите дату получения автомобиля."
     )
-
-    await callback.message.answer(
-        f"📅 <b>{CARS[cid]['name']}</b>\n\n"
-        "Выберите дату получения.\n\n"
-        "🟢 свободно\n"
-        "🟡 есть заявка\n"
-        "🔴 подтверждено\n"
-        "⚪ прошедшая дата",
-        reply_markup=keyboard
-    )
+    if getattr(callback.message, "photo", None):
+        await callback.message.edit_caption(caption=text, reply_markup=keyboard)
+    else:
+        await callback.message.edit_text(text, reply_markup=keyboard)
 
 
 async def month(
@@ -3172,68 +3168,31 @@ async def end_time_handler(
 # NAME
 # ============================================================
 
-async def name_handler(
-    message: Message,
-    state: FSMContext
-):
-
-    text = (
-        message.text or ""
-    ).strip()
-
+async def name_handler(message: Message, state: FSMContext):
+    text = (message.text or "").strip()
     if len(text) < 2:
-
-        await message.answer(
-            "Пожалуйста, введите имя."
-        )
-
+        await message.answer("Пожалуйста, введите имя.")
         return
-
-    await state.update_data(
-        name=text
-    )
-
-    await state.set_state(
-        Booking.phone
-    )
-
-    await message.answer(
-        "📞 Введите номер телефона:"
-    )
+    await state.update_data(name=text)
+    await state.set_state(Booking.phone)
+    await message.answer("👤 <b>Шаг 3 из 4 · Контакты</b>\n\nИмя сохранено.\n📞 Теперь введите номер телефона:")
 
 
 # ============================================================
 # PHONE
 # ============================================================
 
-async def phone_handler(
-    message: Message,
-    state: FSMContext
-):
-
-    phone = (
-        message.text or ""
-    ).strip()
-
+async def phone_handler(message: Message, state: FSMContext):
+    phone = (message.text or "").strip()
     if len(phone) < 7:
-
-        await message.answer(
-            "Похоже, номер слишком короткий. "
-            "Введите телефон ещё раз."
-        )
-
+        await message.answer("Похоже, номер слишком короткий. Введите телефон ещё раз.")
         return
-
-    await state.update_data(
-        phone=phone
-    )
-
+    await state.update_data(phone=phone)
     await state.set_state(Booking.comment)
     await message.answer(
-        "🧳 <b>Дополнительные пожелания</b>\n\n"
-        "Если нужны дополнительные услуги или особые условия, укажите их ниже. "
+        "🧳 <b>Шаг 4 из 4 · Пожелания</b>\n\n"
+        "Укажите дополнительные пожелания: детское кресло, подача автомобиля, место встречи и т. п.\n\n"
         "Стоимость дополнительных услуг, если она потребуется, менеджер согласует отдельно.\n\n"
-        "Например: детское кресло, подача автомобиля, пожелания по месту встречи.\n\n"
         "Если ничего не нужно — отправьте «-»."
     )
 
@@ -3448,7 +3407,6 @@ async def comment_handler(message: Message, state: FSMContext):
         await state.clear()
         await message.answer("Сессия бронирования устарела.\n\nНачните заново:", reply_markup=main_keyboard())
         return
-
     comment_text = (message.text or "").strip()
     comment = "" if comment_text == "-" else comment_text
     cid = data["car_id"]
@@ -3456,36 +3414,36 @@ async def comment_handler(message: Message, state: FSMContext):
     end_at = ensure_tz(datetime.fromisoformat(data["end_at"]))
     days = rental_days(start_at, end_at)
     total = days * rate_for_days(cid, days)
-
     if not await async_available(cid, start_at, end_at):
         await state.clear()
-        await message.answer(
-            "❌ <b>Период уже занят</b>\n\nПока вы заполняли данные, выбранное время стало недоступно. Выберите другой период.",
-            reply_markup=main_keyboard()
-        )
+        await message.answer("❌ <b>Период уже занят</b>\n\nПока вы заполняли данные, выбранное время стало недоступно. Выберите другой период.", reply_markup=main_keyboard())
         return
-
     await state.update_data(comment=comment, days=days, total=total)
     await state.set_state(Booking.confirm)
-    await message.answer(
-        f"🧾 <b>Проверьте бронирование</b>\n\n"
+    text = (
+        "🧾 <b>Проверьте бронирование</b>\n\n"
         f"🚗 <b>{CARS[cid]['name']}</b>\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
+        "━━━━━━━━━━━━━━━━━━\n"
         f"📅 Получение: <b>{format_date_time(start_at)}</b>\n"
         f"↩️ Возврат: <b>{format_date_time(end_at)}</b>\n"
-        f"⏱ Период: <b>{days} суток</b>\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
+        f"⏱ Продолжительность: <b>{days} суток</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
         f"👤 {data['name']}\n"
         f"📞 {data['phone']}\n"
         f"📝 Пожелания: {comment or '—'}\n\n"
         f"💰 <b>ИТОГО: {money(total)}</b>\n\n"
-        "Проверьте данные перед отправкой заявки.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Подтвердить заявку", callback_data="booking:confirm")],
-            [InlineKeyboardButton(text="✏️ Изменить данные", callback_data="booking:edit")],
-            [InlineKeyboardButton(text="❌ Отменить", callback_data="booking:abort")],
-        ])
+        "Проверьте данные перед отправкой заявки."
     )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Подтвердить заявку", callback_data="booking:confirm")],
+        [InlineKeyboardButton(text="✏️ Изменить данные", callback_data="booking:edit")],
+        [InlineKeyboardButton(text="❌ Отменить", callback_data="booking:abort")],
+    ])
+    photo = next((p for p in CARS[cid]["photos"] if os.path.exists(p)), None)
+    if photo:
+        await message.answer_photo(FSInputFile(photo), caption=text, reply_markup=markup)
+    else:
+        await message.answer(text, reply_markup=markup)
 
 
 async def booking_confirm(callback: CallbackQuery, state: FSMContext):
@@ -3494,7 +3452,7 @@ async def booking_confirm(callback: CallbackQuery, state: FSMContext):
     required = ("car_id", "start_at", "end_at", "name", "phone")
     if not all(data.get(k) for k in required):
         await state.clear()
-        await callback.message.answer("Сессия бронирования устарела. Начните заново.", reply_markup=main_keyboard())
+        await edit_client_screen(callback, "Сессия бронирования устарела. Начните заново.", main_keyboard())
         return
     cid = data["car_id"]
     start_at = ensure_tz(datetime.fromisoformat(data["start_at"]))
@@ -3504,25 +3462,24 @@ async def booking_confirm(callback: CallbackQuery, state: FSMContext):
         await state.clear()
         reason = result.get("reason")
         text = "❌ <b>Не удалось создать заявку.</b>\n\n" + ("Автомобиль уже занят или недостаточно технического интервала." if reason == "overlap" else "Автомобиль недоступен из-за технического обслуживания." if reason == "maintenance" else "Попробуйте выбрать другой период.")
-        await callback.message.edit_text(text, reply_markup=main_keyboard())
+        await edit_client_screen(callback, text, main_keyboard())
         return
     bid, days, total, expires = result["bid"], result["days"], result["total"], result["expires"]
     await state.clear()
-    await callback.message.edit_text(
-        f"📩 <b>Заявка №{bid} отправлена!</b>\n\n"
-        f"🚗 {CARS[cid]['name']}\n"
-        f"📅 {format_date_time(start_at)} → {format_date_time(end_at)}\n"
+    text = (
+        "🎉 <b>Заявка отправлена!</b>\n\n"
+        f"№ <b>{bid}</b>  •  {CARS[cid]['name']}\n\n"
+        f"📅 {format_date_time(start_at)}\n"
+        f"↩️ {format_date_time(end_at)}\n"
         f"⏱ {days} суток\n"
         f"💰 <b>{money(total)}</b>\n\n"
         f"⏳ Заявка удерживается до <b>{expires.strftime('%d.%m.%Y %H:%M')}</b>.\n\n"
-        "Мы отправим вам уведомление после решения менеджера.",
-        reply_markup=main_keyboard()
+        "Мы уведомим вас после решения менеджера."
     )
+    await edit_client_screen(callback, text, main_keyboard())
     if ADMIN_ID:
         uname = f"@{callback.from_user.username}" if callback.from_user.username else "без username"
-        await callback.bot.send_message(ADMIN_ID,
-            f"🔔 <b>Новая заявка №{bid}</b>\n\n🚗 {CARS[cid]['name']} ({CARS[cid]['gear']})\n📅 {format_date_time(start_at)} → {format_date_time(end_at)}\n⏱ {days} суток\n💰 <b>{money(total)}</b>\n👤 {data['name']}\n📞 {data['phone']}\nTelegram: {uname}\n📝 {data.get('comment') or '—'}\n\n⏳ Ожидает подтверждения до {expires.strftime('%d.%m.%Y %H:%M')}",
-            reply_markup=admin_buttons(bid))
+        await callback.bot.send_message(ADMIN_ID, f"🔔 <b>Новая заявка №{bid}</b>\n\n🚗 {CARS[cid]['name']} ({CARS[cid]['gear']})\n📅 {format_date_time(start_at)} → {format_date_time(end_at)}\n⏱ {days} суток\n💰 <b>{money(total)}</b>\n👤 {data['name']}\n📞 {data['phone']}\nTelegram: {uname}\n📝 {data.get('comment') or '—'}\n\n⏳ Ожидает подтверждения до {expires.strftime('%d.%m.%Y %H:%M')}", reply_markup=admin_buttons(bid))
 
 
 async def booking_edit(callback: CallbackQuery, state: FSMContext):
@@ -3535,7 +3492,7 @@ async def booking_edit(callback: CallbackQuery, state: FSMContext):
 async def booking_abort(callback: CallbackQuery, state: FSMContext):
     await safe_callback_answer(callback)
     await state.clear()
-    await callback.message.edit_text("Бронирование отменено. Вы можете начать заново.", reply_markup=main_keyboard())
+    await edit_client_screen(callback, "❌ <b>Бронирование отменено.</b>\n\nВы можете выбрать автомобиль и начать заново.", main_keyboard())
 
 
 # ============================================================
@@ -3576,19 +3533,17 @@ async def mybookings(callback: CallbackQuery):
     await safe_callback_answer(callback)
     rows = await asyncio.to_thread(get_user_bookings_sync, callback.from_user.id)
     if not rows:
-        await callback.message.edit_text("📋 <b>Мои бронирования</b>\n\nУ вас пока нет заявок.", reply_markup=main_keyboard())
+        await edit_client_screen(callback, "📋 <b>Мои брони</b>\n\nУ вас пока нет заявок.", main_keyboard())
         return
-    buttons=[]
+    buttons = []
     for row in rows:
-        car_name=CARS.get(row['car_id'],{}).get('name',row['car_id'])
+        car_name = CARS.get(row['car_id'], {}).get('name', row['car_id'])
         buttons.append([InlineKeyboardButton(text=f"№{row['id']} · {car_name} · {status_label(row['status'])[:2]}", callback_data=f"mybooking:{row['id']}")])
     buttons.append([InlineKeyboardButton(text="🚗 Новое бронирование", callback_data="catalog")])
     buttons.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")])
-    await replace_client_message(
+    await edit_client_screen(
         callback,
-        "📋 <b>Мои бронирования</b>\n\n"
-        "Здесь хранятся ваши последние заявки.\n"
-        "Нажмите на заявку, чтобы открыть детали.",
+        "📋 <b>Мои брони</b>\n\nВаши последние заявки.\nНажмите на бронь, чтобы открыть детали.",
         InlineKeyboardMarkup(inline_keyboard=buttons)
     )
 
@@ -3614,43 +3569,49 @@ def user_cancel_booking_sync(user_id,bid):
 
 async def mybooking_detail(callback: CallbackQuery):
     await safe_callback_answer(callback)
-    try: bid=int(callback.data.split(':',1)[1])
-    except ValueError: return
-    row=await asyncio.to_thread(get_user_booking_sync, callback.from_user.id,bid)
+    try:
+        bid = int(callback.data.split(':', 1)[1])
+    except ValueError:
+        return
+    row = await asyncio.to_thread(get_user_booking_sync, callback.from_user.id, bid)
     if not row:
-        await callback.message.answer("Бронирование не найдено."); return
-    start_at=ensure_tz(row['start_at'] or local_dt(row['start_date'],time(10)))
-    end_at=ensure_tz(row['end_at'] or local_dt(row['end_date'],time(17)))
-    buttons=[]
-    if row['status'] in ('pending','confirmed'):
+        await callback.message.answer("Бронирование не найдено.")
+        return
+    start_at = ensure_tz(row['start_at'] or local_dt(row['start_date'], time(10)))
+    end_at = ensure_tz(row['end_at'] or local_dt(row['end_date'], time(17)))
+    buttons = []
+    if row['status'] in ('pending', 'confirmed'):
         buttons.append([InlineKeyboardButton(text="🚫 Отменить бронирование", callback_data=f"usercancel:{bid}")])
-    if end_at < datetime.now(TZ) and row['status']=='confirmed':
+    if end_at < datetime.now(TZ) and row['status'] == 'confirmed':
         buttons.append([InlineKeyboardButton(text="⭐ Оставить отзыв", callback_data=f"review:{bid}")])
-    buttons.append([InlineKeyboardButton(text="◀️ Мои бронирования", callback_data="mybookings")])
-    text=(f"🧾 <b>Бронирование №{bid}</b>\n\n"
-          f"🚗 <b>{CARS[row['car_id']]['name']}</b>\n"
-          f"━━━━━━━━━━━━━━━━━━\n"
-          f"📅 Получение: <b>{format_date_time(start_at)}</b>\n"
-          f"↩️ Возврат: <b>{format_date_time(end_at)}</b>\n"
-          f"⏱ Период: <b>{rental_days(start_at,end_at)} суток</b>\n"
-          f"💰 <b>{money(row['total'])}</b>\n"
-          f"{status_label(row['status'])}\n"
-          f"━━━━━━━━━━━━━━━━━━\n"
-          f"👤 {row['name']}\n"
-          f"📞 {row['phone']}\n"
-          f"📝 Пожелания: {row['comment'] or '—'}")
-    await callback.message.edit_text(text,reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    buttons.append([InlineKeyboardButton(text="◀️ Мои брони", callback_data="mybookings")])
+    text = (
+        f"🧾 <b>Бронирование №{bid}</b>\n\n"
+        f"🚗 <b>{CARS[row['car_id']]['name']}</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"📅 Получение: <b>{format_date_time(start_at)}</b>\n"
+        f"↩️ Возврат: <b>{format_date_time(end_at)}</b>\n"
+        f"⏱ Период: <b>{rental_days(start_at, end_at)} суток</b>\n"
+        f"💰 <b>{money(row['total'])}</b>\n"
+        f"{status_label(row['status'])}\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"👤 {row['name']}\n"
+        f"📞 {row['phone']}\n"
+        f"📝 Пожелания: {row['comment'] or '—'}"
+    )
+    await edit_client_screen(callback, text, InlineKeyboardMarkup(inline_keyboard=buttons))
 
 
 async def user_cancel_booking(callback: CallbackQuery):
     await safe_callback_answer(callback)
-    bid=int(callback.data.split(':',1)[1])
-    row=await asyncio.to_thread(user_cancel_booking_sync,callback.from_user.id,bid)
+    bid = int(callback.data.split(':', 1)[1])
+    row = await asyncio.to_thread(user_cancel_booking_sync, callback.from_user.id, bid)
     if not row:
-        await callback.message.answer("❌ Бронирование уже нельзя отменить."); return
-    await callback.message.edit_text(f"🚫 <b>Бронирование №{bid} отменено.</b>\n\nАвтомобиль снова доступен для бронирования.",reply_markup=main_keyboard())
+        await callback.message.answer("❌ Бронирование уже нельзя отменить.")
+        return
+    await edit_client_screen(callback, f"🚫 <b>Бронирование №{bid} отменено.</b>\n\nАвтомобиль снова доступен для бронирования.", main_keyboard())
     if ADMIN_ID:
-        await callback.bot.send_message(ADMIN_ID,f"🚫 <b>Клиент отменил бронирование №{bid}</b>\n\n🚗 {CARS[row['car_id']]['name']}\n👤 {row['name']}\n📞 {row['phone']}")
+        await callback.bot.send_message(ADMIN_ID, f"🚫 <b>Клиент отменил бронирование №{bid}</b>\n\n🚗 {CARS[row['car_id']]['name']}\n👤 {row['name']}\n📞 {row['phone']}")
 
 
 def create_review_sync(bid,user_id,rating,text):
@@ -3706,13 +3667,8 @@ def get_reviews_sync(limit=12):
 async def reviews(callback: CallbackQuery):
     await safe_callback_answer(callback)
     rows = await asyncio.to_thread(get_reviews_sync, 12)
-
     if not rows:
-        text = (
-            "⭐ <b>Отзывы клиентов</b>\n\n"
-            "Пока отзывов ещё нет.\n"
-            "После завершённой аренды вы сможете оставить свою оценку."
-        )
+        text = "⭐ <b>Отзывы клиентов</b>\n\nПока отзывов ещё нет.\nПосле завершённой аренды вы сможете оставить свою оценку."
     else:
         parts = ["⭐ <b>Отзывы клиентов</b>", ""]
         for row in rows:
@@ -3721,93 +3677,68 @@ async def reviews(callback: CallbackQuery):
             review = (row["review_text"] or "Без текста").strip()
             if len(review) > 240:
                 review = review[:237] + "..."
-            parts.append(f"<b>{name}</b>  {stars}")
-            parts.append(review)
-            parts.append("")
+            parts.extend([f"<b>{name}</b>  {stars}", review, ""])
         text = "\n".join(parts)
-
-    await callback.message.edit_text(
-        text,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🚗 Выбрать автомобиль", callback_data="catalog")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")],
-        ])
-    )
+    await edit_client_screen(callback, text, InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🚗 Выбрать автомобиль", callback_data="catalog")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")],
+    ]))
 
 
 async def why(callback: CallbackQuery):
     await safe_callback_answer(callback)
-    await callback.message.edit_text(
-        why_text(),
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🚗 Выбрать автомобиль", callback_data="catalog")],
-            [InlineKeyboardButton(text="⭐ Отзывы", callback_data="reviews")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")],
-        ])
+    text = (
+        "✨ <b>Почему BALTICAR</b>\n\n"
+        "🚗 <b>Ухоженные автомобили</b>\nГотовим автомобиль к каждой аренде.\n\n"
+        "💰 <b>Понятные тарифы</b>\nЦена зависит от срока и показывается заранее.\n\n"
+        "📅 <b>Онлайн-бронирование</b>\nВыбираете автомобиль, даты и время прямо в Telegram.\n\n"
+        "⚡ <b>Быстрое подтверждение</b>\nЗаявка сразу приходит менеджеру.\n\n"
+        "🔔 <b>Напоминания</b>\nБот напомнит о предстоящей аренде.\n\n"
+        "📍 <b>Калининград и область</b>\nУточним удобное место выдачи и возврата."
     )
+    await edit_client_screen(callback, text, InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🚗 Автомобили", callback_data="catalog")],
+        [InlineKeyboardButton(text="⭐ Отзывы", callback_data="reviews")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")],
+    ]))
 
 
 # ============================================================
 # TERMS
 # ============================================================
 
-async def terms(
-    callback: CallbackQuery
-):
-
+async def terms(callback: CallbackQuery):
     await safe_callback_answer(callback)
-
-    await callback.message.answer(
+    text = (
         "ℹ️ <b>Условия аренды</b>\n\n"
-        "• Вы выбираете дату и время получения "
-        "автомобиля.\n"
-        "• Затем выбираете дату и время возврата.\n"
-        "• Цена рассчитывается автоматически "
-        "по продолжительности аренды.\n"
-        "• Выбранный период временно удерживается "
-        "до подтверждения заявки.\n"
-        f"• Между возвратом и следующей выдачей "
-        f"предусмотрен технический интервал "
-        f"<b>{BUFFER_HOURS} ч.</b>.\n"
-        "• Если заявка не подтверждена в установленный "
-        "срок, удержание автоматически снимается.",
-        reply_markup=back_home_keyboard()
+        f"🕐 Выдача и возврат: <b>{PICKUP_START_HOUR:02d}:00–{PICKUP_END_HOUR:02d}:00</b>\n"
+        f"🔧 Технический интервал между арендами: <b>{BUFFER_HOURS} ч.</b>\n\n"
+        "• Дата и время выбираются в боте.\n"
+        "• Стоимость рассчитывается автоматически по сроку аренды.\n"
+        "• Перед отправкой заявки вы увидите полный итог.\n"
+        "• После заявки менеджер получает уведомление и подтверждает аренду.\n"
+        "• Дополнительные услуги согласуются отдельно.\n"
+        "• Если заявка не подтверждена в установленный срок, удержание снимается."
     )
+    await edit_client_screen(callback, text, back_home_keyboard())
 
 
 # ============================================================
 # CONTACT
 # ============================================================
 
-async def contact(
-    callback: CallbackQuery
-):
-
+async def contact(callback: CallbackQuery):
     await safe_callback_answer(callback)
-
-    await callback.message.answer(
-        "📞 <b>Связаться с Balticar</b>\n\n"
-        "Если у вас есть вопрос по автомобилю, "
-        "датам или условиям аренды, "
-        "напишите менеджеру.\n\n"
-        "Также можно оформить заявку прямо здесь.",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="🚗 Забронировать автомобиль",
-                        callback_data="catalog"
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text="🏠 Главное меню",
-                        callback_data="home"
-                    )
-                ]
-            ]
-        )
+    text = (
+        "📞 <b>Связаться с BALTICAR</b>\n\n"
+        "Есть вопрос по автомобилю, датам или условиям?\n\n"
+        "Напишите менеджеру — поможем подобрать автомобиль и оформить аренду.\n\n"
+        "🚗 Или сразу переходите к выбору автомобиля."
     )
+    await edit_client_screen(callback, text, InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🚗 Выбрать автомобиль", callback_data="catalog")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")],
+    ]))
 
 
 # ============================================================
