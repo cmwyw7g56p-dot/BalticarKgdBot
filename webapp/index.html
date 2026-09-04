@@ -14,7 +14,7 @@
 .calendar{background:#0b1b29;border:1px solid var(--line);border-radius:22px;padding:13px}.calhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.calhead button{background:rgba(255,255,255,.06);width:40px;height:40px;border-radius:12px}.week,.days{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}.week div{text-align:center;color:var(--muted);font-size:11px;padding:5px 0}.day{min-height:42px;border-radius:12px;background:rgba(255,255,255,.035);display:flex;align-items:center;justify-content:center;border:1px solid transparent;font-size:13px}.day.free{background:#0e2435}.day.busy{color:#66798b;background:#101a22}.day.selected{background:var(--blue);font-weight:800}.day.disabled{opacity:.25}.times{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.time{padding:12px 4px;border-radius:12px;background:rgba(255,255,255,.05);border:1px solid var(--line);font-size:13px}.time.selected{background:var(--blue);font-weight:800}.summary{margin-top:14px;padding:17px;border-radius:20px;background:linear-gradient(145deg,#102b40,#0b1b29);border:1px solid rgba(62,159,255,.25)}.summary .big{font-size:28px;font-weight:900;margin-top:4px}.hint{color:var(--amber);font-size:12px;line-height:1.4;margin-top:7px}.field{margin:10px 0}.field label{display:block;color:var(--muted);font-size:12px;margin:0 0 6px}.field input,.field textarea{width:100%;border:1px solid var(--line);background:#091824;color:#fff;border-radius:14px;padding:13px;font:inherit;outline:none}.field textarea{min-height:88px;resize:vertical}.bookingCard{padding:17px;border-radius:20px;background:linear-gradient(145deg,#102638,#0a1926);border:1px solid var(--line);margin:12px 0}.status{display:inline-flex;padding:6px 9px;border-radius:999px;background:rgba(255,255,255,.07);font-size:11px}.ok{color:#74f0aa}.warn{color:#ffd278}.danger{color:#ff8d98}.toast{position:fixed;left:16px;right:16px;bottom:calc(18px + env(safe-area-inset-bottom));z-index:20;padding:13px 15px;border-radius:16px;background:#122637;border:1px solid var(--line);box-shadow:0 16px 40px #0008;display:none}.toast.show{display:block;animation:in .2s ease}.empty{text-align:center;padding:40px 20px;color:var(--muted)}
 @media(min-width:650px){.hero h1{font-size:38px}.car{display:grid;grid-template-columns:1.2fr 1fr}.car img{height:100%;aspect-ratio:auto}.carbody{display:flex;flex-direction:column;justify-content:center}}
 
-/* LIGHT UI */
+/* LIGHT UI — readability pass */
 :root{--bg:#f5f7fa;--panel:#ffffff;--panel2:#eef2f6;--line:#dfe5eb;--text:#17212b;--muted:#718096;--blue:#1683ff;--blue2:#0b63d9;--green:#1aa968;--amber:#c98500;--danger:#d94352}
 html,body{background:var(--bg)!important;color:var(--text)!important}
 body{background:#f5f7fa!important}
@@ -48,6 +48,25 @@ body{background:#f5f7fa!important}
 .field input,.field textarea{background:#fff!important;color:#17212b!important;border-color:#dfe5eb!important}
 .bookingCard{background:#fff!important;border-color:#dfe5eb!important;box-shadow:0 8px 22px rgba(20,40,60,.06)}
 .status{background:#eef2f6!important}
+
+/* READABILITY */
+.sectionTitle,.detailTitle,.navcard strong,.carname,.block h3,.calhead strong{color:#17212b!important}
+.sub,.navcard small,.field label,.fact,.tariff span{color:#536170!important}
+.car .from{color:#3f6f96!important}.from b{color:#17212b!important}
+.back{color:#125f9c!important}
+.chip{color:#344150!important;font-weight:600}
+.heroShade{background:linear-gradient(180deg,rgba(0,0,0,.03) 18%,rgba(7,18,29,.84) 100%)!important}
+.heroCopy{ text-shadow:0 2px 8px rgba(0,0,0,.55)}
+.hero h1{color:#fff!important}.hero p{color:#f2f6fa!important}.eyebrow{color:#d9efff!important}
+.navcard{color:#17212b!important}.navcard small{font-weight:500}
+.day{font-weight:600}.week div{color:#5f6b78!important;font-weight:600}
+.time{font-weight:600}.time.unavailable,.time:disabled{color:#7a838d!important;font-weight:500}
+.summary{color:#17212b!important}.summary .big{color:#17212b!important}.summary .sub{color:#536170!important}
+.field input,.field textarea{color:#17212b!important}.field input::placeholder,.field textarea::placeholder{color:#7b8793!important;opacity:1}
+.bookingCard{color:#17212b!important}.bookingCard .sub{color:#536170!important}
+.status{color:#3f4c59!important}
+.toast{background:#17212b!important;color:#fff!important;border-color:#243545!important}
+.empty{color:#536170!important}
 
 </style>
 </head>
