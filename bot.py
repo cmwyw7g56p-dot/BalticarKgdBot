@@ -3,6 +3,7 @@ import os
 import secrets
 import time as monotonic_time
 from datetime import date, datetime, timedelta, time
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
@@ -24,6 +25,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
+    WebAppInfo,
 )
 
 
@@ -1065,39 +1067,43 @@ def status_label(status):
 # MAIN KEYBOARDS
 # ============================================================
 
+def mini_app_url():
+    url = os.getenv("MINI_APP_URL", "").strip().rstrip("/")
+    if url:
+        return url
+    external = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
+    return f"{external}/app" if external else ""
+
+
 def main_keyboard():
+    app_url = mini_app_url()
+    if app_url:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[[
+                InlineKeyboardButton(
+                    text="🚗 Открыть BALTICAR Mini App",
+                    web_app=WebAppInfo(url=app_url),
+                )
+            ]]
+        )
     return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🚗 Автомобили", callback_data="catalog"),
-                InlineKeyboardButton(text="📋 Мои бронирования", callback_data="mybookings"),
-            ],
-            [
-                InlineKeyboardButton(text="⭐ Отзывы", callback_data="reviews"),
-                InlineKeyboardButton(text="✨ Почему мы", callback_data="why"),
-            ],
-            [
-                InlineKeyboardButton(text="ℹ️ Условия аренды", callback_data="terms"),
-                InlineKeyboardButton(text="📞 Связаться", callback_data="contact"),
-            ],
-        ]
+        inline_keyboard=[[InlineKeyboardButton(text="🚗 Автомобили", callback_data="catalog")]]
     )
 
 
 def welcome_text():
     return (
-        "🚗 <b>BALTICAR</b> <i>• аренда автомобилей</i>\n\n"
-        "📍 <b>Калининград</b>\n"
-        "Подберём автомобиль, покажем свободные даты и сразу рассчитаем стоимость.\n\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "🛡 Автомобили в отличном состоянии\n"
-        "💰 Понятные тарифы без сюрпризов\n"
-        "📅 Онлайн-бронирование в Telegram\n"
-        "⚡ Быстрое подтверждение заявки\n"
-        "☎️ Поддержка 24/7\n"
-        "━━━━━━━━━━━━━━━━━━\n\n"
-        "<b>Выберите нужный раздел ниже 👇</b>"
+        "🚗 <b>BALTICAR</b>\n"
+        "<i>Аренда автомобилей в Калининграде</i>\n\n"
+        "Подбор автомобиля, свободные даты, точная стоимость и бронирование — всё внутри нашего Mini App.\n\n"
+        "✨ <b>Красиво • быстро • удобно</b>\n\n"
+        "Нажмите кнопку ниже, чтобы открыть BALTICAR."
     )
+
+
+def welcome_photo_path():
+    path = Path(__file__).resolve().parent / "photos" / "balticar_hero.jpg"
+    return path if path.exists() else None
 
 
 def why_text():
@@ -1122,11 +1128,10 @@ def car_keyboard():
     rows = []
     for cid, car in active_cars().items():
         rows.append([InlineKeyboardButton(
-            text=f"🚗 {car['name']}",
-            callback_data=f"car:{cid}"
-        )])
-        rows.append([InlineKeyboardButton(
-            text=f"💰 от {money(car['rates'][2])}/сутки   •   {car['gear']}   •   {car['seats']} мест",
+            text=(
+                f"🚗 {car['name']}  •  от {money(car['rates'][2])}/сутки  •  "
+                f"{car['gear']}  •  {car['seats']} мест"
+            ),
             callback_data=f"car:{cid}"
         )])
     rows.append([InlineKeyboardButton(text="⭐ Отзывы", callback_data="reviews")])
@@ -2161,11 +2166,18 @@ async def start_handler(
 ):
 
     await state.clear()
-
-    await message.answer(
-        welcome_text(),
-        reply_markup=main_keyboard()
-    )
+    photo = welcome_photo_path()
+    if photo:
+        await message.answer_photo(
+            FSInputFile(str(photo)),
+            caption=welcome_text(),
+            reply_markup=main_keyboard(),
+        )
+    else:
+        await message.answer(
+            welcome_text(),
+            reply_markup=main_keyboard(),
+        )
 
 
 async def home(
@@ -2173,15 +2185,29 @@ async def home(
     state: FSMContext
 ):
 
-    # Отвечаем Telegram сразу.
     await safe_callback_answer(callback)
-
     await state.clear()
-
-    await callback.message.edit_text(
-        welcome_text(),
-        reply_markup=main_keyboard()
-    )
+    photo = welcome_photo_path()
+    try:
+        if photo and callback.message.content_type != "photo":
+            await callback.message.delete()
+            await callback.message.answer_photo(
+                FSInputFile(str(photo)),
+                caption=welcome_text(),
+                reply_markup=main_keyboard(),
+            )
+        elif callback.message.content_type == "photo":
+            await callback.message.edit_caption(
+                caption=welcome_text(),
+                reply_markup=main_keyboard(),
+            )
+        else:
+            await callback.message.edit_text(
+                welcome_text(),
+                reply_markup=main_keyboard(),
+            )
+    except Exception as exc:
+        print(f"[HOME] render error: {type(exc).__name__}: {exc}")
 
 
 async def id_handler(
@@ -2200,6 +2226,10 @@ async def catalog(
 
     await safe_callback_answer(callback)
 
+    # Всегда перечитываем тарифы из БД перед показом каталога,
+    # чтобы клиент сразу видел изменения, сделанные администратором.
+    await asyncio.to_thread(load_car_settings)
+
     await callback.message.edit_text(
         "🚗 <b>Автомобили BALTICAR</b>\n\n"
         "Выберите модель — откроется её фотокарточка, характеристики и актуальные тарифы.\n\n"
@@ -2213,6 +2243,10 @@ async def car_selected(
 ):
 
     await safe_callback_answer(callback)
+
+    # Обновляем настройки перед открытием карточки автомобиля,
+    # чтобы тарифы в уже существующих кнопках тоже не устаревали.
+    await asyncio.to_thread(load_car_settings)
 
     cid = callback.data.split(
         ":",
@@ -5893,6 +5927,367 @@ async def main():
         Booking.comment
     )
 
+
+    # ========================================================
+    # TELEGRAM MINI APP — BALTICAR
+    # ========================================================
+
+    import hashlib
+    import hmac
+    import json
+    from urllib.parse import parse_qsl
+
+    def mini_json(payload, status=200, headers=None):
+        return web.json_response(payload, status=status, headers=headers or {})
+
+    def mini_init_user(request):
+        """Проверяет Telegram WebApp initData и возвращает пользователя."""
+        init_data = request.headers.get("X-Telegram-Init-Data", "").strip()
+        if not init_data:
+            raise web.HTTPUnauthorized(text="Telegram initData is required")
+        try:
+            pairs = dict(parse_qsl(init_data, keep_blank_values=True))
+            received_hash = pairs.pop("hash", "")
+            if not received_hash:
+                raise ValueError("hash missing")
+            data_check_string = "\n".join(
+                f"{k}={v}" for k, v in sorted(pairs.items())
+            )
+            secret_key = hmac.new(
+                b"WebAppData",
+                BOT_TOKEN.encode(),
+                hashlib.sha256,
+            ).digest()
+            calculated = hmac.new(
+                secret_key,
+                data_check_string.encode(),
+                hashlib.sha256,
+            ).hexdigest()
+            if not hmac.compare_digest(calculated, received_hash):
+                raise ValueError("invalid hash")
+            user = json.loads(pairs.get("user", "{}"))
+            user_id = int(user.get("id", 0))
+            if not user_id:
+                raise ValueError("user missing")
+            auth_date = int(pairs.get("auth_date", "0") or 0)
+            if auth_date and abs(int(datetime.now(TZ).timestamp()) - auth_date) > 86400:
+                raise ValueError("initData expired")
+            return user
+        except Exception as exc:
+            print(f"[MINIAPP] auth error: {exc}")
+            raise web.HTTPUnauthorized(text="Invalid Telegram initData")
+
+    def mini_parse_dt(value):
+        if not value:
+            raise ValueError("datetime is required")
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=TZ)
+        return dt.astimezone(TZ)
+
+    def mini_cars_sync():
+        load_car_settings()
+        result=[]
+        for cid, car in active_cars().items():
+            result.append({
+                "id": cid,
+                "name": car["name"],
+                "gear": car["gear"],
+                "fuel": car.get("fuel", "Бензин"),
+                "seats": car.get("seats", 5),
+                "description": car.get("description", ""),
+                "rates": list(car["rates"]),
+                "photos": [p for p in car.get("photos", []) if os.path.exists(p)],
+            })
+        return result
+
+    def mini_availability_sync(cid, month_start, month_end):
+        con=db()
+        try:
+            with con.cursor() as cur:
+                bookings=cur.execute("""
+                    SELECT id,start_at,end_at,status FROM bookings
+                    WHERE car_id=%s
+                      AND status IN ('pending','confirmed')
+                      AND start_at < %s AND end_at > %s
+                    ORDER BY start_at
+                """, (cid, month_end, month_start)).fetchall()
+                maintenance=cur.execute("""
+                    SELECT id,start_at,end_at,reason FROM car_maintenance
+                    WHERE car_id=%s AND start_at < %s AND end_at > %s
+                    ORDER BY start_at
+                """, (cid, month_end, month_start)).fetchall()
+                return {
+                    "bookings":[{"id":r["id"],"start_at":ensure_tz(r["start_at"]).isoformat(),"end_at":ensure_tz(r["end_at"]).isoformat(),"status":r["status"]} for r in bookings],
+                    "maintenance":[{"id":r["id"],"start_at":ensure_tz(r["start_at"]).isoformat(),"end_at":ensure_tz(r["end_at"]).isoformat(),"reason":r["reason"]} for r in maintenance],
+                }
+        finally:
+            con.close()
+
+    def mini_calendar_slots_sync(cid, year, month_num, start_at=None):
+        """Server-side availability for every selectable hour.
+
+        This is deliberately calculated on the server in Europe/Kaliningrad,
+        using exactly the same overlap/buffer rules as booking creation.
+        If start_at is omitted, returns valid pickup hours for each date.
+        If start_at is supplied, returns valid return hours for each date.
+        """
+        first = date(year, month_num, 1)
+        next_first = date(year + 1, 1, 1) if month_num == 12 else date(year, month_num + 1, 1)
+        month_start = local_dt(first, time(0, 0))
+        month_end = local_dt(next_first, time(0, 0))
+
+        # We need a little context before/after the visible month because
+        # a booking immediately before/after the month can affect a slot.
+        query_start = month_start - timedelta(hours=BUFFER_HOURS)
+        query_end = month_end + timedelta(hours=24 + BUFFER_HOURS)
+
+        con = db()
+        try:
+            with con.cursor() as cur:
+                bookings = cur.execute("""
+                    SELECT id,start_at,end_at,status
+                    FROM bookings
+                    WHERE car_id=%s
+                      AND status IN ('pending','confirmed')
+                      AND start_at < %s AND end_at > %s
+                    ORDER BY start_at
+                """, (cid, query_end, query_start)).fetchall()
+
+                maintenance = cur.execute("""
+                    SELECT id,start_at,end_at,reason
+                    FROM car_maintenance
+                    WHERE car_id=%s
+                      AND start_at < %s AND end_at > %s
+                    ORDER BY start_at
+                """, (cid, query_end, query_start)).fetchall()
+        finally:
+            con.close()
+
+        bookings = [
+            {"id": r["id"], "start_at": ensure_tz(r["start_at"]), "end_at": ensure_tz(r["end_at"])}
+            for r in bookings
+        ]
+        maintenance = [
+            {"id": r["id"], "start_at": ensure_tz(r["start_at"]), "end_at": ensure_tz(r["end_at"])}
+            for r in maintenance
+        ]
+
+        def free_interval(a, b):
+            if b <= a:
+                return False
+            for row in bookings:
+                rs = row["start_at"]
+                re = row["end_at"]
+                if rs < b + timedelta(hours=BUFFER_HOURS) and re > a - timedelta(hours=BUFFER_HOURS):
+                    return False
+            for row in maintenance:
+                if row["start_at"] < b and row["end_at"] > a:
+                    return False
+            return True
+
+        now = datetime.now(TZ)
+        z = lambda n: str(n).zfill(2)
+
+        if start_at is None:
+            result = {}
+            current = first
+            while current < next_first:
+                hours = []
+                for hour in range(PICKUP_START_HOUR, PICKUP_END_HOUR + 1):
+                    candidate = local_dt(current, time(hour, 0))
+                    if candidate <= now:
+                        continue
+                    # A valid pickup must allow the minimum one-day rental.
+                    candidate_end = candidate + timedelta(days=1)
+                    if free_interval(candidate, candidate_end):
+                        hours.append(hour)
+                result[current.isoformat()] = hours
+                current += timedelta(days=1)
+            return {"mode": "start", "slots": result}
+
+        start_at = ensure_tz(start_at)
+        result = {}
+        current = first
+        while current < next_first:
+            hours = []
+            for hour in range(PICKUP_START_HOUR, PICKUP_END_HOUR + 1):
+                candidate_end = local_dt(current, time(hour, 0))
+                if candidate_end <= start_at:
+                    continue
+                if free_interval(start_at, candidate_end):
+                    hours.append(hour)
+            result[current.isoformat()] = hours
+            current += timedelta(days=1)
+        return {"mode": "end", "slots": result}
+
+    def mini_mybookings_sync(user_id):
+        cleanup_pending()
+        con=db()
+        try:
+            with con.cursor() as cur:
+                rows=cur.execute("""
+                    SELECT b.id,b.car_id,b.start_at,b.end_at,b.total,b.status,b.created_at,b.comment,
+                           EXISTS(SELECT 1 FROM reviews rv WHERE rv.booking_id=b.id) AS reviewed
+                    FROM bookings b WHERE b.user_id=%s ORDER BY b.id DESC LIMIT 20
+                """, (user_id,)).fetchall()
+                now=datetime.now(TZ)
+                return [{
+                    "id":r["id"],"car_id":r["car_id"],"car_name":CARS.get(r["car_id"],{}).get("name",r["car_id"]),
+                    "start_at":format_date_time(r["start_at"]),"end_at":format_date_time(r["end_at"]),
+                    "start_iso":ensure_tz(r["start_at"]).isoformat(),"end_iso":ensure_tz(r["end_at"]).isoformat(),
+                    "total":r["total"],"status":r["status"],"comment":r["comment"] or "",
+                    "past":ensure_tz(r["end_at"]) < now,"reviewed":bool(r["reviewed"]),
+                } for r in rows]
+        finally:
+            con.close()
+
+    def mini_reviews_sync():
+        con=db()
+        try:
+            with con.cursor() as cur:
+                rows=cur.execute("""
+                    SELECT r.rating,r.review_text,r.created_at,r.car_id,b.name
+                    FROM reviews r LEFT JOIN bookings b ON b.id=r.booking_id
+                    ORDER BY r.created_at DESC LIMIT 30
+                """).fetchall()
+                return [{"rating":r["rating"],"text":r["review_text"] or "", "created_at":ensure_tz(r["created_at"]).strftime("%d.%m.%Y"), "car_name":CARS.get(r["car_id"],{}).get("name",r["car_id"]), "name":r["name"] or "Клиент"} for r in rows]
+        finally:
+            con.close()
+
+    WEBAPP_DIR = Path(__file__).resolve().parent / "webapp"
+    PHOTOS_DIR = Path(__file__).resolve().parent / "photos"
+
+    async def mini_app(request):
+        index = WEBAPP_DIR / "index.html"
+        if not index.exists():
+            print(f"[MINIAPP] index missing: {index}")
+            raise web.HTTPNotFound(text="Mini App files are missing")
+        return web.FileResponse(index, headers={"Cache-Control": "no-store, max-age=0"})
+
+    async def mini_api_cars(request):
+        mini_init_user(request)
+        return mini_json({"cars": await asyncio.to_thread(mini_cars_sync)})
+
+    async def mini_api_availability(request):
+        mini_init_user(request)
+        cid=request.query.get("car_id", "")
+        year=int(request.query.get("year", "0"))
+        month_num=int(request.query.get("month", "0"))
+        if cid not in CARS or year < 2020 or not 1 <= month_num <= 12:
+            return mini_json({"error":"invalid parameters"},400)
+        month_start=local_dt(date(year,month_num,1), time(0,0))
+        if month_num==12: next_first=date(year+1,1,1)
+        else: next_first=date(year,month_num+1,1)
+        month_end=local_dt(next_first,time(0,0))
+        data=await asyncio.to_thread(mini_availability_sync,cid,month_start,month_end)
+        return mini_json(data)
+
+    async def mini_api_slots(request):
+        mini_init_user(request)
+        cid = request.query.get("car_id", "")
+        try:
+            year = int(request.query.get("year", "0"))
+            month_num = int(request.query.get("month", "0"))
+        except ValueError:
+            return mini_json({"error": "invalid parameters"}, 400)
+        if cid not in CARS or year < 2020 or not 1 <= month_num <= 12:
+            return mini_json({"error": "invalid parameters"}, 400)
+
+        start_iso = request.query.get("start_at")
+        try:
+            start_at = mini_parse_dt(start_iso) if start_iso else None
+        except Exception:
+            return mini_json({"error": "invalid start_at"}, 400)
+
+        data = await asyncio.to_thread(
+            mini_calendar_slots_sync,
+            cid,
+            year,
+            month_num,
+            start_at,
+        )
+        return mini_json(data, headers={"Cache-Control": "no-store"})
+
+    async def mini_api_mybookings(request):
+        user=mini_init_user(request)
+        await asyncio.to_thread(load_car_settings)
+        return mini_json({"bookings": await asyncio.to_thread(mini_mybookings_sync,int(user["id"]))})
+
+    async def mini_api_reviews(request):
+        mini_init_user(request)
+        return mini_json({"reviews": await asyncio.to_thread(mini_reviews_sync)})
+
+    async def mini_api_create_booking(request):
+        user=mini_init_user(request)
+        try:
+            payload=await request.json()
+            cid=str(payload.get("car_id",""))
+            start_at=mini_parse_dt(payload.get("start_at"))
+            end_at=mini_parse_dt(payload.get("end_at"))
+            name=str(payload.get("name","")).strip()
+            phone=str(payload.get("phone","")).strip()
+            comment=str(payload.get("comment","")).strip()
+            if cid not in CARS or not CARS[cid].get("active",True):
+                return mini_json({"ok":False,"message":"Автомобиль сейчас недоступен."},400)
+            if not name or len(phone)<7 or end_at<=start_at:
+                return mini_json({"ok":False,"message":"Проверьте имя, телефон и даты."},400)
+            await asyncio.to_thread(load_car_settings)
+            result=await asyncio.to_thread(create_booking_sync,int(user["id"]),str(user.get("username","") or ""),cid,start_at,end_at,name,phone,comment)
+            if not result.get("ok"):
+                reason=result.get("reason")
+                msg="Автомобиль уже занят или не хватает технического интервала." if reason=="overlap" else "Автомобиль недоступен из-за технического обслуживания." if reason=="maintenance" else "Не удалось создать заявку. Проверьте период."
+                return mini_json({"ok":False,"message":msg},409)
+            bid,days,total,expires=result["bid"],result["days"],result["total"],result["expires"]
+            if ADMIN_ID:
+                uname=f"@{user.get('username')}" if user.get("username") else "без username"
+                await bot.send_message(ADMIN_ID,
+                    f"🔔 <b>Новая заявка №{bid}</b>\n\n🚗 {CARS[cid]['name']} ({CARS[cid]['gear']})\n📅 {format_date_time(start_at)} → {format_date_time(end_at)}\n⏱ {days} суток\n💰 <b>{money(total)}</b>\n👤 {name}\n📞 {phone}\nTelegram: {uname}\n📝 {comment or '—'}\n\n⏳ Ожидает подтверждения до {expires.strftime('%d.%m.%Y %H:%M')}", reply_markup=admin_buttons(bid))
+            return mini_json({"ok":True,"id":bid,"days":days,"total":total,"expires":expires.strftime("%d.%m.%Y %H:%M")})
+        except Exception as exc:
+            print(f"[MINIAPP] create booking error: {type(exc).__name__}: {exc}")
+            return mini_json({"ok":False,"message":"Ошибка при создании заявки."},500)
+
+    async def mini_api_cancel_booking(request):
+        user=mini_init_user(request)
+        try:
+            payload=await request.json(); bid=int(payload.get("id",0))
+            con=db()
+            try:
+                with con.cursor() as cur:
+                    row=cur.execute("SELECT * FROM bookings WHERE id=%s AND user_id=%s",(bid,int(user["id"]))).fetchone()
+                    if not row: return mini_json({"ok":False,"message":"Бронь не найдена."},404)
+                    if row["status"] not in ("pending","confirmed"):
+                        return mini_json({"ok":False,"message":"Эту бронь уже нельзя отменить."},400)
+                    cur.execute("UPDATE bookings SET status='cancelled', expires_at=NULL WHERE id=%s",(bid,))
+                con.commit()
+            finally: con.close()
+            if ADMIN_ID:
+                await bot.send_message(ADMIN_ID,f"⚫ <b>Клиент отменил заявку №{bid}</b>\n🚗 {CARS[row['car_id']]['name']}\n📅 {format_date_time(row['start_at'])} → {format_date_time(row['end_at'])}")
+            return mini_json({"ok":True})
+        except Exception as exc:
+            print(f"[MINIAPP] cancel error: {type(exc).__name__}: {exc}")
+            return mini_json({"ok":False,"message":"Не удалось отменить бронь."},500)
+
+    async def mini_api_review(request):
+        user=mini_init_user(request)
+        try:
+            payload=await request.json(); bid=int(payload.get("booking_id",0)); rating=int(payload.get("rating",0)); review_text=str(payload.get("text","")).strip()
+            if rating<1 or rating>5: return mini_json({"ok":False,"message":"Оценка от 1 до 5."},400)
+            con=db()
+            try:
+                with con.cursor() as cur:
+                    row=cur.execute("SELECT * FROM bookings WHERE id=%s AND user_id=%s AND status='confirmed'",(bid,int(user["id"]))).fetchone()
+                    if not row: return mini_json({"ok":False,"message":"Отзыв доступен после завершённой подтверждённой аренды."},400)
+                    if ensure_tz(row["end_at"]) >= datetime.now(TZ): return mini_json({"ok":False,"message":"Отзыв можно оставить после окончания аренды."},400)
+                    cur.execute("""INSERT INTO reviews(booking_id,user_id,car_id,rating,review_text) VALUES(%s,%s,%s,%s,%s) ON CONFLICT(booking_id) DO UPDATE SET rating=EXCLUDED.rating, review_text=EXCLUDED.review_text""",(bid,int(user["id"]),row["car_id"],rating,review_text))
+                con.commit()
+            finally: con.close()
+            return mini_json({"ok":True})
+        except Exception as exc:
+            print(f"[MINIAPP] review error: {type(exc).__name__}: {exc}")
+            return mini_json({"ok":False,"message":"Не удалось сохранить отзыв."},500)
+
     # ========================================================
     # WEBHOOK / RENDER
     # ========================================================
@@ -6013,6 +6408,49 @@ async def main():
         )
 
     app = web.Application()
+
+    app.router.add_get(
+        "/app",
+        mini_app
+    )
+    app.router.add_static(
+        "/photos",
+        str(PHOTOS_DIR),
+        show_index=False
+    )
+
+    app.router.add_get(
+        "/api/cars",
+        mini_api_cars
+    )
+    app.router.add_get(
+        "/api/availability",
+        mini_api_availability
+    )
+    app.router.add_get(
+        "/api/slots",
+        mini_api_slots
+    )
+    app.router.add_get(
+        "/api/mybookings",
+        mini_api_mybookings
+    )
+    app.router.add_get(
+        "/api/reviews",
+        mini_api_reviews
+    )
+    app.router.add_post(
+        "/api/bookings",
+        mini_api_create_booking
+    )
+    app.router.add_post(
+        "/api/bookings/cancel",
+        mini_api_cancel_booking
+    )
+    app.router.add_post(
+        "/api/reviews",
+        mini_api_review
+    )
 
     app.router.add_get(
         "/",
