@@ -210,6 +210,7 @@ class AdminFeature(StatesGroup):
     car_name = State()
     car_rates = State()
     maintenance = State()
+    car_add = State()
 
 
 # ============================================================
@@ -339,10 +340,23 @@ def init_db():
                     rate_1_3 INTEGER NOT NULL,
                     rate_4_6 INTEGER NOT NULL,
                     rate_7_plus INTEGER NOT NULL,
+                    gear TEXT NOT NULL DEFAULT 'АКПП',
+                    fuel TEXT NOT NULL DEFAULT 'Бензин',
+                    seats INTEGER NOT NULL DEFAULT 5,
+                    description TEXT NOT NULL DEFAULT '',
+                    photo_path TEXT NOT NULL DEFAULT 'photos/i30_hero.jpg',
+                    deleted BOOLEAN NOT NULL DEFAULT FALSE,
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
                 """
             )
+
+            cur.execute("ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS gear TEXT NOT NULL DEFAULT 'АКПП'")
+            cur.execute("ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS fuel TEXT NOT NULL DEFAULT 'Бензин'")
+            cur.execute("ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS seats INTEGER NOT NULL DEFAULT 5")
+            cur.execute("ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''")
+            cur.execute("ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS photo_path TEXT NOT NULL DEFAULT 'photos/i30_hero.jpg'")
+            cur.execute("ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS deleted BOOLEAN NOT NULL DEFAULT FALSE")
 
             cur.execute(
                 """
@@ -395,16 +409,32 @@ def init_db():
 
 
 def load_car_settings():
-    """Загружает сохранённые настройки автомобилей из PostgreSQL."""
+    """Загружает настройки автомобилей из PostgreSQL, включая добавленные через админку."""
     con = db()
     try:
         with con.cursor() as cur:
-            rows = cur.execute("SELECT * FROM car_settings").fetchall()
+            rows = cur.execute("SELECT * FROM car_settings ORDER BY car_id").fetchall()
         for row in rows:
-            if row['car_id'] in CARS:
-                CARS[row['car_id']]['name'] = row['name']
-                CARS[row['car_id']]['rates'] = (row['rate_1_3'], row['rate_4_6'], row['rate_7_plus'])
-                CARS[row['car_id']]['active'] = row['active']
+            cid = row["car_id"]
+            if cid not in CARS:
+                CARS[cid] = {
+                    "name": row["name"],
+                    "gear": row.get("gear") or "АКПП",
+                    "rates": (row["rate_1_3"], row["rate_4_6"], row["rate_7_plus"]),
+                    "photos": [row.get("photo_path") or "photos/i30_hero.jpg"],
+                    "fuel": row.get("fuel") or "Бензин",
+                    "seats": int(row.get("seats") or 5),
+                    "description": row.get("description") or "Автомобиль BALTICAR для комфортных поездок.",
+                }
+            CARS[cid]["name"] = row["name"]
+            CARS[cid]["rates"] = (row["rate_1_3"], row["rate_4_6"], row["rate_7_plus"])
+            CARS[cid]["gear"] = row.get("gear") or CARS[cid].get("gear", "АКПП")
+            CARS[cid]["fuel"] = row.get("fuel") or CARS[cid].get("fuel", "Бензин")
+            CARS[cid]["seats"] = int(row.get("seats") or CARS[cid].get("seats", 5))
+            CARS[cid]["description"] = row.get("description") or CARS[cid].get("description", "")
+            CARS[cid]["photos"] = [row.get("photo_path") or (CARS[cid].get("photos") or ["photos/i30_hero.jpg"])[0]]
+            CARS[cid]["active"] = bool(row["active"]) and not bool(row.get("deleted", False))
+            CARS[cid]["deleted"] = bool(row.get("deleted", False))
     finally:
         con.close()
 
@@ -5063,12 +5093,15 @@ async def admin_search_message(message: Message, state: FSMContext):
 async def admin_cars(callback: CallbackQuery):
     await safe_callback_answer(callback)
     if callback.from_user.id != ADMIN_ID: return
+    await asyncio.to_thread(load_car_settings)
     rows=[]
     for cid,car in CARS.items():
-        state="🟢 включён" if car.get('active',True) else "⚪ выключен"
+        deleted=bool(car.get('deleted',False))
+        state="🗑 удалён" if deleted else ("🟢 включён" if car.get('active',True) else "⚪ выключен")
         rows.append([InlineKeyboardButton(text=f"🚗 {car['name']} — {state}", callback_data=f"admincarinfo:{cid}")])
+    rows.append([InlineKeyboardButton(text="➕ Добавить автомобиль", callback_data="caradd")])
     rows.append([InlineKeyboardButton(text="◀️ В админ-панель", callback_data="admin:back")])
-    await callback.message.edit_text("🚗 <b>Управление автомобилями</b>\n\nВыберите автомобиль:",reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+    await callback.message.edit_text("🚗 <b>Управление автомобилями</b>\n\nЗдесь можно добавить, отключить или удалить автомобиль из каталога.",reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
 def car_settings_sync(cid, **kwargs):
@@ -5111,6 +5144,76 @@ def delete_maintenance_sync(mid):
     finally: con.close()
 
 
+def add_car_sync(cid, name, gear, fuel, seats, rates, description, photo_path):
+    con=db()
+    try:
+        with con.cursor() as cur:
+            cur.execute(
+                """INSERT INTO car_settings
+                (car_id,name,active,rate_1_3,rate_4_6,rate_7_plus,gear,fuel,seats,description,photo_path,deleted)
+                VALUES(%s,%s,TRUE,%s,%s,%s,%s,%s,%s,%s,%s,FALSE)""",
+                (cid,name,rates[0],rates[1],rates[2],gear,fuel,seats,description,photo_path)
+            )
+        con.commit()
+    finally:
+        con.close()
+    load_car_settings()
+
+def delete_car_sync(cid):
+    con=db()
+    try:
+        with con.cursor() as cur:
+            cur.execute("UPDATE car_settings SET active=FALSE, deleted=TRUE, updated_at=NOW() WHERE car_id=%s",(cid,))
+        con.commit()
+    finally:
+        con.close()
+    load_car_settings()
+
+async def car_add_start(callback:CallbackQuery,state:FSMContext):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID:return
+    await state.set_state(AdminFeature.car_add)
+    await callback.message.edit_text(
+        "➕ <b>Добавление автомобиля</b>\n\n"
+        "Отправьте одной строкой через <b>|</b>:\n"
+        "<b>ID | Название | Коробка | Топливо | Мест | 1–3 4–6 7+ | Описание</b>\n\n"
+        "Пример:\n<code>kia_rio24 | Kia Rio 2024 | АКПП | Бензин | 5 | 3000 2900 2800 | Новый автомобиль для города</code>\n\n"
+        "Фото пока берётся стандартное; позже можно добавить загрузку фото прямо из админки."
+    )
+
+async def car_add_message(message:Message,state:FSMContext):
+    if message.from_user.id != ADMIN_ID:return
+    raw=(message.text or '').strip()
+    parts=[x.strip() for x in raw.split('|')]
+    if len(parts)!=7:
+        await message.answer("Нужно 7 полей через |. Пример: ID | Название | АКПП | Бензин | 5 | 3000 2900 2800 | Описание")
+        return
+    cid,name,gear,fuel,seats_s,rates_s,description=parts
+    if not cid or not name or cid in CARS or '|' in cid or ' ' in cid:
+        await message.answer("ID должен быть уникальным и без пробелов. Например: kia_rio24")
+        return
+    try:
+        seats=int(seats_s); rates=tuple(int(x) for x in rates_s.split())
+        if seats<1 or len(rates)!=3 or any(x<=0 for x in rates): raise ValueError
+    except Exception:
+        await message.answer("Проверьте количество мест и тарифы. Например: 5 и 3000 2900 2800")
+        return
+    try:
+        await asyncio.to_thread(add_car_sync,cid,name,gear or 'АКПП',fuel or 'Бензин',seats,rates,description or 'Автомобиль BALTICAR для комфортных поездок.','photos/i30_hero.jpg')
+    except Exception as e:
+        await message.answer(f"❌ Не удалось добавить автомобиль: {e}")
+        return
+    await state.clear()
+    await message.answer(f"✅ <b>{name}</b> добавлен в каталог.\n\n🔐 Залог: <b>10 000 ₽</b>",reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🚗 К автомобилям",callback_data="admin:cars")]]))
+
+async def car_delete(callback:CallbackQuery):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID:return
+    cid=callback.data.split(":",1)[1]
+    if cid not in CARS:return
+    await asyncio.to_thread(delete_car_sync,cid)
+    await callback.message.edit_text(f"🗑 <b>{CARS[cid]['name']}</b> удалён из каталога.\n\nИстория его бронирований сохранена.",reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ К автомобилям",callback_data="admin:cars")]]))
+
 async def admin_car_info(callback: CallbackQuery):
     await safe_callback_answer(callback)
     if callback.from_user.id != ADMIN_ID: return
@@ -5122,12 +5225,15 @@ async def admin_car_info(callback: CallbackQuery):
     text=(f"🚗 <b>{car['name']}</b>\n\n{car_text(cid)}\n\n"
           f"Статус: {'🟢 доступен' if active else '⚪ отключён'}\n\n"
           f"🔧 <b>Обслуживание</b>\n{mt}")
+    deleted=bool(car.get('deleted',False))
     buttons=[
-        [InlineKeyboardButton(text="⛔ Отключить" if active else "🟢 Включить",callback_data=f"cartoggle:{cid}")],
+        [InlineKeyboardButton(text="♻️ Восстановить" if deleted else ("⛔ Отключить" if active else "🟢 Включить"),callback_data=f"carrestore:{cid}" if deleted else f"cartoggle:{cid}")],
         [InlineKeyboardButton(text="💰 Изменить тарифы",callback_data=f"carrates:{cid}")],
         [InlineKeyboardButton(text="✏️ Изменить название",callback_data=f"carname:{cid}")],
         [InlineKeyboardButton(text="🔧 Добавить обслуживание",callback_data=f"maintadd:{cid}")],
     ]
+    if not deleted:
+        buttons.append([InlineKeyboardButton(text="🗑 Удалить из каталога",callback_data=f"cardelete:{cid}")])
     for x in maint[:5]: buttons.append([InlineKeyboardButton(text=f"🗑 Удалить ТО №{x['id']}",callback_data=f"maintdel:{x['id']}:{cid}")])
     buttons += [[InlineKeyboardButton(text="◀️ К автомобилям",callback_data="admin:cars")]]
     await callback.message.edit_text(text,reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
@@ -5141,6 +5247,14 @@ async def car_toggle(callback: CallbackQuery):
     await asyncio.to_thread(car_settings_sync,cid,active=new)
     await admin_car_info(callback)
 
+
+async def car_restore(callback:CallbackQuery):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID:return
+    cid=callback.data.split(":",1)[1]
+    if cid not in CARS:return
+    await asyncio.to_thread(car_settings_sync,cid,active=True,deleted=False)
+    await admin_car_info(callback)
 
 async def car_rates_start(callback: CallbackQuery,state:FSMContext):
     await safe_callback_answer(callback)
@@ -5605,6 +5719,10 @@ def income_sync(period):
     con=db()
     try:
         with con.cursor() as cur:
+            if period=='day':
+                start_day = datetime.now(TZ).replace(hour=0, minute=0, second=0, microsecond=0)
+                end_day = start_day + timedelta(days=1)
+                return cur.execute("SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS revenue, COUNT(DISTINCT car_id) AS cars FROM bookings WHERE status='confirmed' AND start_at >= %s AND start_at < %s", (start_day, end_day)).fetchone()
             if period=='month':
                 where="status='confirmed' AND date_trunc('month', start_at)=date_trunc('month', NOW())"
             elif period=='prev':
@@ -5636,7 +5754,7 @@ async def admin_stats(callback:CallbackQuery):
 async def admin_report(callback:CallbackQuery):
     await safe_callback_answer(callback)
     if callback.from_user.id != ADMIN_ID:return
-    rows=[[InlineKeyboardButton(text="📅 Текущий месяц",callback_data="report:month")],[InlineKeyboardButton(text="◀️ Предыдущий месяц",callback_data="report:prev")],[InlineKeyboardButton(text="📚 За всё время",callback_data="report:all")],[InlineKeyboardButton(text="◀️ В админ-панель",callback_data="admin:back")]]
+    rows=[[InlineKeyboardButton(text="📅 За сегодня",callback_data="report:day")],[InlineKeyboardButton(text="📅 Текущий месяц",callback_data="report:month")],[InlineKeyboardButton(text="◀️ Предыдущий месяц",callback_data="report:prev")],[InlineKeyboardButton(text="📚 За всё время",callback_data="report:all")],[InlineKeyboardButton(text="◀️ В админ-панель",callback_data="admin:back")]]
     await callback.message.edit_text("💰 <b>Отчёт по доходам</b>\n\nВыберите период:",reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
@@ -5644,7 +5762,7 @@ async def report_result(callback:CallbackQuery):
     await safe_callback_answer(callback)
     if callback.from_user.id != ADMIN_ID:return
     period=callback.data.split(":",1)[1]; row=await asyncio.to_thread(income_sync,period)
-    label={'month':'текущий месяц','prev':'предыдущий месяц','all':'всё время'}[period]
+    label={'day':'сегодня','month':'текущий месяц','prev':'предыдущий месяц','all':'всё время'}[period]
     await callback.message.edit_text(f"💰 <b>Доход — {label}</b>\n\n🚗 Автомобилей в аренде: <b>{row['cars']}</b>\n📋 Подтверждённых броней: <b>{row['cnt']}</b>\n💵 Выручка: <b>{money(int(row['revenue'] or 0))}</b>",reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ К отчётам",callback_data="admin:report")]]))
 
 
@@ -6024,7 +6142,10 @@ async def main():
     dp.callback_query.register(admin_filter_result, F.data.startswith("af:"))
     dp.callback_query.register(admin_filter_result, F.data.startswith("afcar:"))
     dp.callback_query.register(report_result, F.data.startswith("report:"))
+    dp.callback_query.register(car_add_start, F.data == "caradd")
     dp.callback_query.register(car_toggle, F.data.startswith("cartoggle:"))
+    dp.callback_query.register(car_restore, F.data.startswith("carrestore:"))
+    dp.callback_query.register(car_delete, F.data.startswith("cardelete:"))
     dp.callback_query.register(car_rates_start, F.data.startswith("carrates:"))
     dp.callback_query.register(car_name_start, F.data.startswith("carname:"))
     dp.callback_query.register(maintenance_start, F.data.startswith("maintadd:"))
@@ -6052,6 +6173,7 @@ async def main():
     # ========================================================
 
     dp.message.register(admin_search_message, AdminFeature.search)
+    dp.message.register(car_add_message, AdminFeature.car_add)
     dp.message.register(car_rates_message, AdminFeature.car_rates)
     dp.message.register(car_name_message, AdminFeature.car_name)
     dp.message.register(maintenance_message, AdminFeature.maintenance)
