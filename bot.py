@@ -4825,11 +4825,12 @@ async def admin_booking(
         reply_markup = InlineKeyboardMarkup(inline_keyboard=buttons)
     else:
         buttons = []
-        if row["status"] == "cancelled":
+        if row["status"] in ("cancelled", "expired"):
+            label = "🗑 Удалить отменённую бронь" if row["status"] == "cancelled" else "🗑 Удалить просроченную бронь"
             buttons.append([
                 InlineKeyboardButton(
-                    text="🗑 Удалить отменённую бронь",
-                    callback_data=f"deletecancel:{bid}"
+                    text=label,
+                    callback_data=f"deleteold:{bid}"
                 )
             ])
         buttons.append([
@@ -4844,10 +4845,10 @@ async def admin_booking(
 
 
 # ============================================================
-# DELETE CANCELLED BOOKING
+# DELETE CANCELLED / EXPIRED BOOKING
 # ============================================================
 
-def delete_cancelled_booking_sync(bid):
+def delete_old_booking_sync(bid):
 
     con = db()
 
@@ -4869,11 +4870,11 @@ def delete_cancelled_booking_sync(bid):
                 con.rollback()
                 return {"ok": False, "reason": "not_found"}
 
-            if row["status"] != "cancelled":
+            if row["status"] not in ("cancelled", "expired"):
                 con.rollback()
                 return {
                     "ok": False,
-                    "reason": "not_cancelled",
+                    "reason": "not_old",
                     "status": row["status"]
                 }
 
@@ -4881,7 +4882,7 @@ def delete_cancelled_booking_sync(bid):
                 """
                 DELETE FROM bookings
                 WHERE id=%s
-                  AND status='cancelled'
+                  AND status IN ('cancelled','expired')
                 """,
                 (bid,)
             )
@@ -4898,87 +4899,46 @@ def delete_cancelled_booking_sync(bid):
         con.close()
 
 
-async def delete_cancelled_booking(callback: CallbackQuery):
+async def delete_old_booking(callback: CallbackQuery):
 
     await safe_callback_answer(callback)
 
     if callback.from_user.id != ADMIN_ID:
-
-        await callback.message.answer(
-            "Нет доступа."
-        )
+        await callback.message.answer("Нет доступа.")
         return
 
     try:
         bid = int(callback.data.split(":", 1)[1])
     except (ValueError, IndexError):
-        await callback.message.answer(
-            "Некорректный номер брони."
-        )
+        await callback.message.answer("Некорректный номер брони.")
         return
 
-    result = await asyncio.to_thread(
-        delete_cancelled_booking_sync,
-        bid
-    )
+    result = await asyncio.to_thread(delete_old_booking_sync, bid)
 
     if not result["ok"]:
-
         if result["reason"] == "not_found":
-            await callback.message.answer(
-                "Бронь не найдена или уже удалена."
-            )
-            return
-
-        await callback.message.answer(
-            "Удалять можно только отменённые брони."
-        )
+            await callback.message.answer("Бронь не найдена или уже удалена.")
+        else:
+            await callback.message.answer("Удалять можно только отменённые или просроченные брони.")
         return
 
-    # После удаления сразу возвращаемся в обновлённый список.
     rows = await asyncio.to_thread(get_all_bookings_sync)
 
     if not rows:
         await callback.message.edit_text(
-            "📋 <b>Все бронирования</b>\n\n"
-            "Бронирований пока нет.",
+            "📋 <b>Все бронирования</b>\n\nБронирований пока нет.",
             reply_markup=admin_back_keyboard()
         )
         return
 
-    keyboard = []
-    for row in rows:
-        keyboard.append([
-            InlineKeyboardButton(
-                text=(
-                    f"№{row['id']} • "
-                    f"{status_label(row['status'])[:2]} • "
-                    f"{CARS[row['car_id']]['name'][:22]}"
-                ),
-                callback_data=f"adminbooking:{row['id']}"
-            )
-        ])
-        if row["status"] == "cancelled":
-            keyboard.append([
-                InlineKeyboardButton(
-                    text=f"🗑 Удалить бронь №{row['id']}",
-                    callback_data=f"deletecancel:{row['id']}"
-                )
-            ])
-
-    keyboard.append([
-        InlineKeyboardButton(
-            text="◀️ Назад",
-            callback_data="admin:back"
-        )
-    ])
+    keyboard = admin_bookings_markup(rows)
+    keyboard.append([InlineKeyboardButton(text="🔎 Фильтр / поиск", callback_data="admin:filter")])
+    keyboard.append([InlineKeyboardButton(text="◀️ В админ-панель", callback_data="admin:back")])
 
     await callback.message.edit_text(
         "📋 <b>Все бронирования</b>\n\n"
         f"Показаны последние {len(rows)} заявок.",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=keyboard
-        )
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
     )
 
 
@@ -5022,8 +4982,9 @@ def admin_bookings_markup(rows, show_delete=True):
     keyboard=[]
     for row in rows:
         keyboard.append([InlineKeyboardButton(text=f"№{row['id']} • {CARS[row['car_id']]['name'][:18]} • {status_label(row['status'])[:2]}", callback_data=f"adminbooking:{row['id']}")])
-        if show_delete and row['status']=='cancelled':
-            keyboard.append([InlineKeyboardButton(text=f"🗑 Удалить №{row['id']}", callback_data=f"deletecancel:{row['id']}")])
+        if show_delete and row['status'] in ('cancelled','expired'):
+            label = '🗑 Удалить отменённую' if row['status']=='cancelled' else '🗑 Удалить просроченную'
+            keyboard.append([InlineKeyboardButton(text=f"{label} №{row['id']}", callback_data=f"deleteold:{row['id']}")])
     return keyboard
 
 
@@ -5045,7 +5006,8 @@ async def admin_filter(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID: return
     rows=[[InlineKeyboardButton(text="📋 Все", callback_data="af:all")],
           [InlineKeyboardButton(text="🟡 Новые", callback_data="af:pending"), InlineKeyboardButton(text="🟢 Подтверждённые", callback_data="af:confirmed")],
-          [InlineKeyboardButton(text="⚫ Отменённые", callback_data="af:cancelled"), InlineKeyboardButton(text="🔴 Отклонённые", callback_data="af:rejected")]]
+          [InlineKeyboardButton(text="⚫ Отменённые", callback_data="af:cancelled"), InlineKeyboardButton(text="⚪ Просроченные", callback_data="af:expired")],
+          [InlineKeyboardButton(text="🔴 Отклонённые", callback_data="af:rejected")]]
     for cid,car in CARS.items():
         rows.append([InlineKeyboardButton(text=f"🚗 {car['name']}", callback_data=f"afcar:{cid}")])
     rows.append([InlineKeyboardButton(text="🔍 Найти по имени/телефону", callback_data="af:search")])
@@ -5058,7 +5020,7 @@ async def admin_filter_result(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID: return
     parts=callback.data.split(":",1)
     value=parts[1] if len(parts)>1 else "all"
-    status=value if value in {"pending","confirmed","cancelled","rejected"} else None
+    status=value if value in {"pending","confirmed","cancelled","expired","rejected"} else None
     car_id=value if value in CARS else None
     rows=await asyncio.to_thread(get_all_bookings_sync,status,car_id,None,50)
     title="📋 Результат фильтра"
@@ -6127,8 +6089,8 @@ async def main():
     )
 
     dp.callback_query.register(
-        delete_cancelled_booking,
-        F.data.startswith("deletecancel:")
+        delete_old_booking,
+        F.data.startswith("deleteold:")
     )
 
     dp.callback_query.register(
