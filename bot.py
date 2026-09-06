@@ -1831,37 +1831,16 @@ def admin_panel_keyboard():
 
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="🔔 Новые заявки",
-                    callback_data="admin:new"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="📅 Календарь занятости",
-                    callback_data="admin:calendar"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="📋 Все бронирования",
-                    callback_data="admin:bookings"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🚗 Автомобили",
-                    callback_data="admin:cars"
-                )
-            ],
-            [
-                InlineKeyboardButton(text="🔎 Поиск / фильтр", callback_data="admin:filter"),
-                InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")
-            ],
-            [
-                InlineKeyboardButton(text="💰 Отчёт по доходам", callback_data="admin:report")
-            ],
+            [InlineKeyboardButton(text="📊 Панель управления", callback_data="admin:dashboard")],
+            [InlineKeyboardButton(text="🔔 Новые заявки", callback_data="admin:new")],
+            [InlineKeyboardButton(text="📅 Календарь занятости", callback_data="admin:calendar")],
+            [InlineKeyboardButton(text="📋 Все бронирования", callback_data="admin:bookings")],
+            [InlineKeyboardButton(text="🚗 Автомобили", callback_data="admin:cars")],
+            [InlineKeyboardButton(text="👤 Клиенты", callback_data="admin:clients")],
+            [InlineKeyboardButton(text="⭐ Отзывы", callback_data="admin:reviews")],
+            [InlineKeyboardButton(text="🔎 Поиск / фильтр", callback_data="admin:filter"),
+             InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")],
+            [InlineKeyboardButton(text="💰 Отчёт по доходам", callback_data="admin:report")],
         ]
     )
 
@@ -4441,6 +4420,156 @@ async def admin_edit_backdate(callback: CallbackQuery, state: FSMContext):
 
 
 # ============================================================
+# ADMIN DASHBOARD / CLIENTS / REVIEWS / NOTIFICATIONS
+# ============================================================
+
+def admin_dashboard_sync():
+    con = db()
+    try:
+        with con.cursor() as cur:
+            return cur.execute("""
+                SELECT
+                    COUNT(*) FILTER (WHERE status='pending') AS pending,
+                    COUNT(*) FILTER (WHERE status='confirmed') AS confirmed,
+                    COUNT(*) FILTER (WHERE status='confirmed' AND start_at >= NOW() AND start_at < NOW() + interval '24 hours') AS today_next,
+                    COALESCE(SUM(total) FILTER (WHERE status='confirmed'),0) AS revenue,
+                    COUNT(DISTINCT user_id) AS clients,
+                    (SELECT COUNT(*) FROM reviews) AS reviews
+                FROM bookings
+            """).fetchone()
+    finally:
+        con.close()
+
+
+async def admin_dashboard(callback: CallbackQuery):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID:
+        return
+    row = await asyncio.to_thread(admin_dashboard_sync)
+    lines = [
+        "📊 <b>Панель управления BALTICAR</b>",
+        "",
+        f"🟡 Новых заявок: <b>{int(row['pending'] or 0)}</b>",
+        f"🟢 Подтверждённых: <b>{int(row['confirmed'] or 0)}</b>",
+        f"⏰ Начало аренды в ближайшие 24 ч: <b>{int(row['today_next'] or 0)}</b>",
+        f"👤 Клиентов: <b>{int(row['clients'] or 0)}</b>",
+        f"⭐ Отзывов: <b>{int(row['reviews'] or 0)}</b>",
+        f"💰 Выручка подтверждённых броней: <b>{money(int(row['revenue'] or 0))}</b>",
+        "",
+        "Выберите раздел ниже для управления.",
+    ]
+    kb = [
+        [InlineKeyboardButton(text="🔔 Новые заявки", callback_data="admin:new")],
+        [InlineKeyboardButton(text="📋 Бронирования", callback_data="admin:bookings")],
+        [InlineKeyboardButton(text="🚗 Автомобили", callback_data="admin:cars")],
+        [InlineKeyboardButton(text="👤 Клиенты", callback_data="admin:clients"), InlineKeyboardButton(text="⭐ Отзывы", callback_data="admin:reviews")],
+        [InlineKeyboardButton(text="💰 Доходы", callback_data="admin:report")],
+        [InlineKeyboardButton(text="◀️ В админ-панель", callback_data="admin:back")],
+    ]
+    await callback.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+
+
+def admin_clients_sync():
+    con = db()
+    try:
+        with con.cursor() as cur:
+            return cur.execute("""
+                SELECT user_id, MAX(username) AS username, MAX(name) AS name, MAX(phone) AS phone,
+                       COUNT(*) AS bookings,
+                       COUNT(*) FILTER (WHERE status='confirmed') AS confirmed,
+                       COALESCE(SUM(total) FILTER (WHERE status='confirmed'),0) AS spent,
+                       MAX(created_at) AS last_booking
+                FROM bookings
+                GROUP BY user_id
+                ORDER BY last_booking DESC
+                LIMIT 50
+            """).fetchall()
+    finally:
+        con.close()
+
+
+async def admin_clients(callback: CallbackQuery):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID:
+        return
+    rows = await asyncio.to_thread(admin_clients_sync)
+    if not rows:
+        await callback.message.edit_text("👤 <b>Клиенты</b>\n\nКлиентов пока нет.", reply_markup=admin_back_keyboard())
+        return
+    lines = ["👤 <b>Клиенты BALTICAR</b>", ""]
+    for i, r in enumerate(rows[:20], 1):
+        name = r['name'] or 'Без имени'
+        phone = r['phone'] or '—'
+        username = f"@{r['username']}" if r['username'] else 'без username'
+        lines.append(f"<b>{i}. {name}</b>\n📞 {phone} • {username}\n🚗 Броней: {int(r['bookings'])} • подтверждено: {int(r['confirmed'])}\n💰 Арендовано на: {money(int(r['spent'] or 0))}")
+    kb = [[InlineKeyboardButton(text="🔎 Найти клиента через бронирования", callback_data="admin:filter")], [InlineKeyboardButton(text="◀️ В админ-панель", callback_data="admin:back")]]
+    await callback.message.edit_text("\n\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+
+
+def admin_reviews_sync():
+    con = db()
+    try:
+        with con.cursor() as cur:
+            return cur.execute("""
+                SELECT r.id,r.booking_id,r.rating,r.review_text,r.created_at,r.car_id,b.name,b.phone
+                FROM reviews r LEFT JOIN bookings b ON b.id=r.booking_id
+                ORDER BY r.created_at DESC LIMIT 30
+            """).fetchall()
+    finally:
+        con.close()
+
+
+async def admin_reviews(callback: CallbackQuery):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID:
+        return
+    rows = await asyncio.to_thread(admin_reviews_sync)
+    if not rows:
+        await callback.message.edit_text("⭐ <b>Отзывы</b>\n\nОтзывов пока нет.", reply_markup=admin_back_keyboard())
+        return
+    lines = ["⭐ <b>Отзывы клиентов</b>", ""]
+    for r in rows[:15]:
+        stars = '⭐' * int(r['rating'])
+        text = (r['review_text'] or 'Без текста').strip().replace('<','&lt;').replace('>','&gt;')
+        if len(text) > 180:
+            text = text[:177] + '...'
+        car = CARS.get(r['car_id'], {'name': r['car_id']})['name']
+        lines.append(f"{stars} <b>{r['name'] or 'Клиент'}</b> • {car}\n{ text }\n📅 {ensure_tz(r['created_at']).strftime('%d.%m.%Y')}")
+    kb = [[InlineKeyboardButton(text="◀️ В админ-панель", callback_data="admin:back")]]
+    await callback.message.edit_text("\n\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+
+
+async def admin_notify_client(callback: CallbackQuery):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID:
+        return
+    try:
+        bid = int(callback.data.split(':',1)[1])
+    except Exception:
+        return
+    row = await asyncio.to_thread(get_booking_sync, bid)
+    if not row:
+        await callback.message.answer("Бронирование не найдено.")
+        return
+    start_at = ensure_tz(row['start_at'])
+    end_at = ensure_tz(row['end_at'])
+    await callback.bot.send_message(
+        row['user_id'],
+        f"📍 <b>Информация по бронированию №{bid}</b>\n\n"
+        f"🚗 {CARS[row['car_id']]['name']}\n"
+        f"📅 Получение: <b>{format_date_time(start_at)}</b>\n"
+        f"↩️ Возврат: <b>{format_date_time(end_at)}</b>\n"
+        f"⏰ Получение и возврат: 08:00–20:00\n"
+        f"🔐 Залог: <b>10 000 ₽</b>\n\n"
+        "📍 Точная точка встречи согласовывается менеджером.\n"
+        "Менеджер свяжется с вами для согласования места и деталей передачи автомобиля.\n\n"
+        "Если у вас изменились планы, пожалуйста, сообщите нам заранее.",
+        reply_markup=main_keyboard()
+    )
+    await callback.message.answer(f"📨 Клиенту по заявке №{bid} отправлена инструкция по получению и возврату.")
+
+
+# ============================================================
 # ADMIN NEW
 # ============================================================
 
@@ -4656,6 +4785,9 @@ async def admin_booking(
         ])
         buttons.append([
             InlineKeyboardButton(text="📍 Связаться для согласования точки", url="https://t.me/Balticar_kgd")
+        ])
+        buttons.append([
+            InlineKeyboardButton(text="📨 Отправить клиенту инструкцию", callback_data=f"adminnotify:{bid}")
         ])
         buttons.append([
             InlineKeyboardButton(text="◀️ К бронированиям", callback_data="admin:bookings")
@@ -5780,6 +5912,11 @@ async def main():
     # ========================================================
     # ADMIN
     # ========================================================
+
+    dp.callback_query.register(admin_dashboard, F.data == "admin:dashboard")
+    dp.callback_query.register(admin_clients, F.data == "admin:clients")
+    dp.callback_query.register(admin_reviews, F.data == "admin:reviews")
+    dp.callback_query.register(admin_notify_client, F.data.startswith("adminnotify:"))
 
     dp.callback_query.register(
         admin_back,
