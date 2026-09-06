@@ -4626,14 +4626,17 @@ async def admin_booking(
 
     text = (
         f"📋 <b>Бронирование №{bid}</b>\n" f"{status_label(row['status'])}\n\n"
-        f"🚗 <b>{CARS[row['car_id']]['name']}</b>\n\n"
-        f"📅 Получение:\n"
-        f"<b>{format_date_time(start_at)}</b>\n\n"
-        f"↩️ Возврат:\n"
-        f"<b>{format_date_time(end_at)}</b>\n\n"
+        f"🚗 <b>{CARS[row['car_id']]['name']}</b>\n"
+        f"🔐 Залог: <b>10 000 ₽</b>\n\n"
+        f"📍 <b>Получение автомобиля</b>\n"
+        f"🕐 {format_date_time(start_at)}\n"
+        f"Точная точка встречи согласовывается менеджером после подтверждения.\n\n"
+        f"↩️ <b>Возврат автомобиля</b>\n"
+        f"🕐 {format_date_time(end_at)}\n"
+        f"⏰ Получение и возврат: 08:00–20:00\n\n"
         f"⏱ {rental_days(start_at, end_at)} суток\n"
         f"💰 <b>{money(row['total'])}</b>\n\n"
-        f"👤 {row['name']}\n"
+        f"👤 <b>{row['name']}</b>\n"
         f"📞 {row['phone']}\n"
         f"Telegram: {username}\n"
         f"📝 {row['comment'] or '—'}"
@@ -4650,6 +4653,9 @@ async def admin_booking(
             ])
         buttons.append([
             InlineKeyboardButton(text="🚫 Отменить бронь", callback_data=f"cancel:{bid}")
+        ])
+        buttons.append([
+            InlineKeyboardButton(text="📍 Связаться для согласования точки", url="https://t.me/Balticar_kgd")
         ])
         buttons.append([
             InlineKeyboardButton(text="◀️ К бронированиям", callback_data="admin:bookings")
@@ -5420,9 +5426,12 @@ async def admin_action(
             f"↩️ Возврат:\n"
             f"<b>{format_date_time(end_at)}</b>\n\n"
             f"⏱ {rental_days(start_at, end_at)} суток\n"
-            f"💰 {money(row['total'])}\n\n"
-            "Менеджер свяжется с вами "
-            "для согласования деталей.",
+            f"💰 {money(row['total'])}\n"
+            f"🔐 Залог: <b>10 000 ₽</b>\n\n"
+            "📍 <b>Получение и возврат</b>\n"
+            "Точная точка встречи и детали передачи автомобиля согласовываются с менеджером.\n"
+            "🕐 Время получения/возврата: 08:00–20:00.\n\n"
+            "Менеджер свяжется с вами для согласования точки встречи.",
             reply_markup=main_keyboard()
         )
 
