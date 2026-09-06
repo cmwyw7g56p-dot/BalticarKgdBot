@@ -132,7 +132,9 @@ CARS = {
         "gear": "АКПП",
         "rates": (2700, 2600, 2500),
         "photos": [
-            "photos/solaris21_hero.jpg",
+            "photos/solaris21_1.svg",
+            "photos/solaris21_2.svg",
+            "photos/solaris21_3.svg",
         ],
         "fuel": "Бензин",
         "seats": 5,
@@ -147,7 +149,9 @@ CARS = {
         "gear": "АКПП",
         "rates": (2700, 2600, 2500),
         "photos": [
-            "photos/solaris20_hero.jpg",
+            "photos/solaris20_1.svg",
+            "photos/solaris20_2.svg",
+            "photos/solaris20_3.svg",
         ],
         "fuel": "Бензин",
         "seats": 5,
@@ -162,7 +166,9 @@ CARS = {
         "gear": "АКПП",
         "rates": (2400, 2300, 2200),
         "photos": [
-            "photos/solaris17_hero.jpg",
+            "photos/solaris17_1.svg",
+            "photos/solaris17_2.svg",
+            "photos/solaris17_3.svg",
         ],
         "fuel": "Бензин",
         "seats": 5,
@@ -177,7 +183,9 @@ CARS = {
         "gear": "МКПП",
         "rates": (2300, 2200, 2100),
         "photos": [
-            "photos/i30_hero.jpg",
+            "photos/i30_1.svg",
+            "photos/i30_2.svg",
+            "photos/i30_3.svg",
         ],
         "fuel": "Бензин",
         "seats": 5,
@@ -421,7 +429,7 @@ def load_car_settings():
                     "name": row["name"],
                     "gear": row.get("gear") or "АКПП",
                     "rates": (row["rate_1_3"], row["rate_4_6"], row["rate_7_plus"]),
-                    "photos": [row.get("photo_path") or "photos/i30_hero.jpg"],
+                    "photos": CARS.get(cid, {}).get("photos") or ["photos/i30_1.svg", "photos/i30_2.svg", "photos/i30_3.svg"],
                     "fuel": row.get("fuel") or "Бензин",
                     "seats": int(row.get("seats") or 5),
                     "description": row.get("description") or "Автомобиль BALTICAR для комфортных поездок.",
@@ -432,7 +440,11 @@ def load_car_settings():
             CARS[cid]["fuel"] = row.get("fuel") or CARS[cid].get("fuel", "Бензин")
             CARS[cid]["seats"] = int(row.get("seats") or CARS[cid].get("seats", 5))
             CARS[cid]["description"] = row.get("description") or CARS[cid].get("description", "")
-            CARS[cid]["photos"] = [row.get("photo_path") or (CARS[cid].get("photos") or ["photos/i30_hero.jpg"])[0]]
+            base_photos = list(CARS[cid].get("photos") or ["photos/i30_1.svg", "photos/i30_2.svg", "photos/i30_3.svg"])
+            custom_photo = row.get("photo_path")
+            if custom_photo and custom_photo not in base_photos:
+                base_photos = [custom_photo] + base_photos
+            CARS[cid]["photos"] = base_photos
             CARS[cid]["active"] = bool(row["active"]) and not bool(row.get("deleted", False))
             CARS[cid]["deleted"] = bool(row.get("deleted", False))
     finally:
@@ -5161,7 +5173,7 @@ async def car_add_message(message:Message,state:FSMContext):
         await message.answer("Проверьте количество мест и тарифы. Например: 5 и 3000 2900 2800")
         return
     try:
-        await asyncio.to_thread(add_car_sync,cid,name,gear or 'АКПП',fuel or 'Бензин',seats,rates,description or 'Автомобиль BALTICAR для комфортных поездок.','photos/i30_hero.jpg')
+        await asyncio.to_thread(add_car_sync,cid,name,gear or 'АКПП',fuel or 'Бензин',seats,rates,description or 'Автомобиль BALTICAR для комфортных поездок.','photos/i30_1.svg')
     except Exception as e:
         await message.answer(f"❌ Не удалось добавить автомобиль: {e}")
         return
