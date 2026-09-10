@@ -56,6 +56,31 @@ html.light .toast{background:#173044;color:#fff}
 html.light .empty{color:#607487}
 html.light .galleryCount{background:rgba(20,35,49,.72);color:#fff}
 
+
+/* CABINET 2.0 */
+.bookingHero{padding:16px;border-radius:22px;background:linear-gradient(135deg,rgba(22,131,255,.10),rgba(43,213,118,.08));border:1px solid rgba(22,131,255,.20);margin:14px 0}
+.bookingHero .heroLine{display:flex;justify-content:space-between;gap:10px;align-items:center}
+.bookingHero .heroTitle{font-size:18px;font-weight:900}
+.bookingHero .countdown{margin-top:10px;font-size:15px;font-weight:800}
+.bookingHero .countdown small{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-top:3px}
+.bookingCardTop{display:flex;gap:12px;align-items:flex-start}
+.bookingCarThumb{width:88px;height:62px;border-radius:14px;object-fit:cover;background:#e9eef3;flex:0 0 88px;border:1px solid var(--line)}
+.bookingCardInfo{min-width:0;flex:1}.bookingCardInfo b{display:block;font-size:17px;line-height:1.2}
+.bookingNo{font-size:11px;color:var(--muted);margin-bottom:4px}
+.bookingFacts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.bookingFact{padding:10px 11px;border-radius:14px;background:rgba(20,40,60,.045);border:1px solid #dfe5eb}
+.bookingFact span{display:block;font-size:10px;color:#687585}.bookingFact b{font-size:13px;margin-top:4px}
+.bookingStatusBox{margin-top:12px;padding:12px 14px;border-radius:15px;background:#f4f7fa;border:1px solid #d7e0e8;line-height:1.4}
+.bookingStatusBox.confirmed{background:#edf9f2;border-color:#c9ead8}.bookingStatusBox.completed{background:#f0f3f5}
+html.dark .bookingHero{background:linear-gradient(135deg,rgba(22,131,255,.13),rgba(43,213,118,.08));border-color:rgba(62,159,255,.25)}
+html.dark .bookingCarThumb{background:#142636}
+html.dark .bookingFact{background:#142636;border-color:#2a3a48}
+html.dark .bookingFact span{color:#9fb0bf}
+html.dark .bookingFact b{color:#f2f6fa}
+html.dark .bookingStatusBox{background:#142636;border-color:#2a3a48;color:#b7c4cf}
+html.dark .bookingStatusBox.confirmed{background:#123127;border-color:#285c46}
+@media(max-width:380px){.bookingCarThumb{width:76px;height:56px;flex-basis:76px}.bookingFacts{gap:6px}}
+
 </style>
 </head>
 <body>
@@ -215,8 +240,37 @@ function renderCalSummary(){const d=rentalDays();if(!d)return;$('calSummary').in
 function goForm(){if(!rentalDays()){toast('Выберите дату и время возврата');return}show('form');renderForm()}
 function renderForm(){$('form').innerHTML=`<button class="back" onclick="startBooking()">← Изменить период</button><div class="sectionTitle">Проверьте заявку</div><div class="block"><b>${selectedCar.name}</b><div class="sub" style="margin-top:7px">${fmtDate(startDate)} ${String(startTime).padStart(2,'0')}:00 → ${fmtDate(endDate)} ${String(endTime).padStart(2,'0')}:00<br>${rentalDays()} суток</div><div class="big" style="margin-top:8px">${money(rentalDays()*rate())}</div></div><div class="field"><label>Ваше имя</label><input id="name" placeholder="Имя"></div><div class="field"><label>Телефон</label><input id="phone" type="tel" placeholder="+7 ..."></div><div class="field"><label>Дополнительные пожелания</label><textarea id="comment" placeholder="Детское кресло, место встречи и т.п. (необязательно)"></textarea></div><button class="primary" onclick="submitBooking()">✓ Отправить заявку</button>`}
 async function submitBooking(){const name=$('name').value.trim(),phone=$('phone').value.trim(),comment=$('comment').value.trim();if(!name||phone.length<7){toast('Введите имя и корректный телефон');return}const a=localIso(startDate,startTime),b=localIso(endDate,endTime);try{const r=await api('/api/bookings',{method:'POST',body:JSON.stringify({car_id:selectedCar.id,start_at:a,end_at:b,name,phone,comment})});$('done').innerHTML=`<div class="hero" style="padding:24px"><div class="eyebrow">ЗАЯВКА ОТПРАВЛЕНА</div><h1>Спасибо, ${name}!</h1><p>Заявка №${r.id} принята менеджером.</p></div><div class="summary"><div class="sub">${selectedCar.name}</div><div style="margin-top:8px">${fmtDate(startDate)} ${String(startTime).padStart(2,'0')}:00 → ${fmtDate(endDate)} ${String(endTime).padStart(2,'0')}:00</div><div class="big">${money(r.total)}</div><div class="sub">${r.days} суток · удержание заявки до ${r.expires}</div></div><button class="primary" style="margin-top:12px" onclick="openBookings()">📋 Мои брони</button><button class="secondary" style="margin-top:10px" onclick="goHome()">⌂ Главное меню</button>`;show('done');tg?.HapticFeedback?.notificationOccurred('success')}catch(e){toast(e.message)}}
-async function openBookings(){show('bookings');$('bookings').innerHTML='<div class="sectionTitle">Мои брони</div><div class="sub">Все ваши заявки в одном месте.</div><div id="blist">Загрузка…</div>';try{const d=await api('/api/mybookings');if(!d.bookings.length){$('blist').innerHTML='<div class="empty">Пока нет бронирований.<br><button class="primary" style="margin-top:16px" onclick="openCars()">Выбрать автомобиль</button></div>';return}$('blist').innerHTML=d.bookings.map(b=>`<div class="bookingCard"><div style="display:flex;justify-content:space-between;gap:10px"><b>№${b.id} · ${b.car_name}</b><span class="status">${status(b.status)}</span></div><div class="sub" style="margin-top:10px">${b.start_at} → ${b.end_at}</div><div style="font-size:21px;font-weight:900;margin-top:8px">${money(b.total)}</div>${['pending','confirmed'].includes(b.status)?`<button class="secondary" style="margin-top:12px" onclick="cancelBooking(${b.id})">Отменить бронь</button>`:''}</div>`).join('')}catch(e){$('blist').innerHTML='<div class="empty">'+e.message+'</div>'}}
-function status(s){return ({pending:'🟡 Ожидает',confirmed:'🟢 Подтверждена',cancelled:'⚫ Отменена',rejected:'🔴 Отклонена',expired:'⚪ Истекла'})[s]||s}
+async function openBookings(){
+  show('bookings');
+  $('bookings').innerHTML='<div class="sectionTitle">Личный кабинет</div><div class="sub">Все ваши заявки, подтверждённые брони и завершённые аренды — в одном месте.</div><div id="bhero"></div><div id="blist">Загрузка…</div>';
+  try{
+    const d=await api('/api/mybookings');
+    if(!cars.length){try{cars=(await api('/api/cars')).cars||[]}catch(e){}}
+    if(!d.bookings.length){
+      $('blist').innerHTML='<div class="empty">Пока нет бронирований.<br><button class="primary" style="margin-top:16px" onclick="openCars()">Выбрать автомобиль</button></div>';return
+    }
+    const active=d.bookings.filter(b=>['pending','confirmed'].includes(b.status)&&!b.past);
+    const next=active.slice().sort((a,b)=>new Date(a.start_at)-new Date(b.start_at))[0];
+    if(next){
+      $('bhero').innerHTML=`<div class="bookingHero"><div class="heroLine"><div class="heroTitle">${next.status==='confirmed'?'🟢 Ближайшая подтверждённая бронь':'🟡 Ближайшая заявка'}</div><span class="status">№${next.id}</span></div><div class="countdown" id="countdown-${next.id}">До получения автомобиля — считаем…<small>${escapeHtml(next.car_name)} · ${escapeHtml(next.start_at)}</small></div></div>`;
+      startCountdown(next.id,next.start_at);
+    }
+    $('blist').innerHTML=d.bookings.map(b=>{
+      const c=cars.find(x=>x.id===b.car_id);
+      const canReview=(b.status==='confirmed'||b.status==='completed')&&b.past&&!b.reviewed;
+      const completed=(b.status==='completed')||(b.status==='confirmed'&&b.past);
+      const shownStatus=completed?'completed':b.status;
+      const guide=completed?'✓ Аренда завершена. Спасибо, что выбрали BALTICAR.':b.status==='confirmed'?'✓ Бронь подтверждена. Менеджер согласует точную точку встречи.':b.status==='pending'?'⏳ Заявка ожидает подтверждения. После подтверждения менеджер свяжется с вами.':b.status==='cancelled'?'Бронь отменена.':'Статус заявки обновлён.';
+      return `<div class="bookingCard"><div class="bookingCardTop">${c?`<img class="bookingCarThumb" src="${img(c.photos?.[0])}" alt="">`:''}<div class="bookingCardInfo"><div class="bookingNo">Бронирование №${b.id}</div><b>${escapeHtml(b.car_name)}</b><div style="margin-top:6px"><span class="status">${status(shownStatus)}</span></div></div></div><div class="bookingFacts"><div class="bookingFact"><span>Получение</span><b>${escapeHtml(b.start_at)}</b></div><div class="bookingFact"><span>Возврат</span><b>${escapeHtml(b.end_at)}</b></div></div><div class="priceBreak"><div class="priceRow"><span>Стоимость аренды</span><b>${money(b.total)}</b></div><div class="priceRow"><span>Залог</span><b>10 000 ₽</b></div><div class="priceRow"><span>Место</span><span>Калининград</span></div></div>${b.comment?`<div class="sub" style="margin-top:10px">📝 ${escapeHtml(b.comment)}</div>`:''}<div class="bookingStatusBox ${shownStatus==='confirmed'?'confirmed':''} ${completed?'completed':''}">${guide}</div><div class="detailActions">${canReview?`<button class="primary" onclick="openReviewForm(${b.id})">⭐ Оставить отзыв</button>`:''}${['pending','confirmed'].includes(b.status)&&!b.past?`<button class="secondary" onclick="cancelBooking(${b.id})">Отменить бронь</button>`:''}<div class="row"><button class="secondary" onclick="openMap()">🗺 Карта</button><button class="secondary" onclick="openContact()">💬 Менеджер</button></div></div></div>`
+    }).join('');
+  }catch(e){$('blist').innerHTML='<div class="empty">'+escapeHtml(e.message)+'</div>'}
+}
+function startCountdown(id,value){
+  const el=$('countdown-'+id);if(!el)return;
+  const tick=()=>{const d=new Date(value);const ms=d.getTime()-Date.now();if(!Number.isFinite(ms)){el.firstChild.textContent='Ближайшее получение: '+value;return}if(ms<=0){el.firstChild.textContent='Автомобиль уже должен быть выдан';return}const days=Math.floor(ms/86400000),hrs=Math.floor(ms%86400000/3600000),mins=Math.floor(ms%3600000/60000);el.firstChild.textContent=days?`До получения — ${days} дн. ${hrs} ч.`:`До получения — ${hrs} ч. ${mins} мин.`};tick();setInterval(tick,60000)
+}
+
+function status(s){return ({pending:'🟡 Ожидает',confirmed:'🟢 Подтверждена',completed:'🔵 Завершена',cancelled:'⚫ Отменена',rejected:'🔴 Отклонена',expired:'⚪ Истекла'})[s]||s}
 async function cancelBooking(id){if(!confirm('Отменить бронирование №'+id+'?'))return;try{await api('/api/bookings/cancel',{method:'POST',body:JSON.stringify({id})});toast('Бронирование отменено');openBookings()}catch(e){toast(e.message)}}
 async function openReviews(){show('reviews');$('reviews').innerHTML='<div class="sectionTitle">Отзывы клиентов</div><div class="sub">Реальные впечатления о BALTICAR.</div><div id="rlist">Загрузка…</div>';try{const d=await api('/api/reviews');$('rlist').innerHTML=d.reviews.length?d.reviews.map(r=>`<div class="bookingCard"><div style="font-size:20px">${'★'.repeat(r.rating)}${'☆'.repeat(5-r.rating)}</div><div style="margin-top:8px">${escapeHtml(r.text)||'Без текста'}</div><div class="sub" style="margin-top:8px">${escapeHtml(r.name)} · ${escapeHtml(r.car_name)} · ${r.created_at}</div></div>`).join(''):'<div class="empty">Пока нет отзывов.</div>'}catch(e){$('rlist').innerHTML='<div class="empty">'+e.message+'</div>'}}
 function openWhy(){show('why');$('why').innerHTML='<div class="sectionTitle">Почему BALTICAR</div><div class="sub">Сервис, который хочется рекомендовать.</div>'+[['🛡','Проверенные автомобили','Следим за состоянием, чистотой и обслуживанием.'],['💰','Прозрачные тарифы','Цена зависит от срока и видна до отправки заявки.'],['⚡','Быстрое подтверждение','Менеджер получает заявку сразу после отправки.'],['📅','Удобное бронирование','Весь путь от автомобиля до заявки — в одном окне.'],['🔔','Напоминания','Бот напомнит о предстоящей аренде заранее.']].map(x=>`<div class="block"><div style="font-size:25px">${x[0]}</div><h3>${x[1]}</h3><div class="sub">${x[2]}</div></div>`).join('')}
