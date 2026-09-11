@@ -3,7 +3,6 @@ import os
 import secrets
 import time as monotonic_time
 from datetime import date, datetime, timedelta, time
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
@@ -87,6 +86,8 @@ WEBHOOK_SECRET = os.getenv(
     ""
 ).strip()
 
+MINIAPP_URL = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/") + "/app" if os.getenv("RENDER_EXTERNAL_URL", "").strip() else ""
+
 
 # ============================================================
 # ВРЕМЯ АРЕНДЫ
@@ -132,9 +133,9 @@ CARS = {
         "gear": "АКПП",
         "rates": (2700, 2600, 2500),
         "photos": [
+            "photos/solaris21_hero.jpg",
             "photos/solaris21_1_front.jpg",
             "photos/solaris21_2_rear.jpg",
-            "photos/solaris21_3_interior.jpg",
         ],
         "fuel": "Бензин",
         "seats": 5,
@@ -149,9 +150,9 @@ CARS = {
         "gear": "АКПП",
         "rates": (2700, 2600, 2500),
         "photos": [
+            "photos/solaris20_hero.jpg",
             "photos/solaris20_1_front.jpg",
             "photos/solaris20_2_rear.jpg",
-            "photos/solaris20_3_interior.jpg",
         ],
         "fuel": "Бензин",
         "seats": 5,
@@ -166,9 +167,9 @@ CARS = {
         "gear": "АКПП",
         "rates": (2400, 2300, 2200),
         "photos": [
+            "photos/solaris17_hero.jpg",
             "photos/solaris17_1_front.jpg",
             "photos/solaris17_2_rear.jpg",
-            "photos/solaris17_3_interior.jpg",
         ],
         "fuel": "Бензин",
         "seats": 5,
@@ -183,9 +184,9 @@ CARS = {
         "gear": "МКПП",
         "rates": (2300, 2200, 2100),
         "photos": [
+            "photos/i30_hero.jpg",
             "photos/i30_1_front.jpg",
             "photos/i30_2_rear.jpg",
-            "photos/i30_3_interior.jpg",
         ],
         "fuel": "Бензин",
         "seats": 5,
@@ -218,7 +219,6 @@ class AdminFeature(StatesGroup):
     car_name = State()
     car_rates = State()
     maintenance = State()
-    car_add = State()
 
 
 # ============================================================
@@ -277,11 +277,6 @@ def init_db():
                 ADD COLUMN IF NOT EXISTS end_at TIMESTAMPTZ
                 """
             )
-
-            cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_location TEXT")
-            cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_location_type TEXT")
-            cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_location_note TEXT")
-            cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_location_fee INTEGER")
 
             cur.execute(
                 """
@@ -353,23 +348,10 @@ def init_db():
                     rate_1_3 INTEGER NOT NULL,
                     rate_4_6 INTEGER NOT NULL,
                     rate_7_plus INTEGER NOT NULL,
-                    gear TEXT NOT NULL DEFAULT 'АКПП',
-                    fuel TEXT NOT NULL DEFAULT 'Бензин',
-                    seats INTEGER NOT NULL DEFAULT 5,
-                    description TEXT NOT NULL DEFAULT '',
-                    photo_path TEXT NOT NULL DEFAULT 'photos/i30_hero.jpg',
-                    deleted BOOLEAN NOT NULL DEFAULT FALSE,
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
                 """
             )
-
-            cur.execute("ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS gear TEXT NOT NULL DEFAULT 'АКПП'")
-            cur.execute("ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS fuel TEXT NOT NULL DEFAULT 'Бензин'")
-            cur.execute("ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS seats INTEGER NOT NULL DEFAULT 5")
-            cur.execute("ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''")
-            cur.execute("ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS photo_path TEXT NOT NULL DEFAULT 'photos/i30_hero.jpg'")
-            cur.execute("ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS deleted BOOLEAN NOT NULL DEFAULT FALSE")
 
             cur.execute(
                 """
@@ -422,36 +404,16 @@ def init_db():
 
 
 def load_car_settings():
-    """Загружает настройки автомобилей из PostgreSQL, включая добавленные через админку."""
+    """Загружает сохранённые настройки автомобилей из PostgreSQL."""
     con = db()
     try:
         with con.cursor() as cur:
-            rows = cur.execute("SELECT * FROM car_settings ORDER BY car_id").fetchall()
+            rows = cur.execute("SELECT * FROM car_settings").fetchall()
         for row in rows:
-            cid = row["car_id"]
-            if cid not in CARS:
-                CARS[cid] = {
-                    "name": row["name"],
-                    "gear": row.get("gear") or "АКПП",
-                    "rates": (row["rate_1_3"], row["rate_4_6"], row["rate_7_plus"]),
-                    "photos": CARS.get(cid, {}).get("photos") or ["photos/i30_1_front.jpg", "photos/i30_2_rear.jpg", "photos/i30_3_interior.jpg"],
-                    "fuel": row.get("fuel") or "Бензин",
-                    "seats": int(row.get("seats") or 5),
-                    "description": row.get("description") or "Автомобиль BALTICAR для комфортных поездок.",
-                }
-            CARS[cid]["name"] = row["name"]
-            CARS[cid]["rates"] = (row["rate_1_3"], row["rate_4_6"], row["rate_7_plus"])
-            CARS[cid]["gear"] = row.get("gear") or CARS[cid].get("gear", "АКПП")
-            CARS[cid]["fuel"] = row.get("fuel") or CARS[cid].get("fuel", "Бензин")
-            CARS[cid]["seats"] = int(row.get("seats") or CARS[cid].get("seats", 5))
-            CARS[cid]["description"] = row.get("description") or CARS[cid].get("description", "")
-            base_photos = list(CARS[cid].get("photos") or ["photos/i30_1_front.jpg", "photos/i30_2_rear.jpg", "photos/i30_3_interior.jpg"])
-            custom_photo = row.get("photo_path")
-            if custom_photo and custom_photo != "photos/i30_hero.jpg" and custom_photo not in base_photos and os.path.exists(custom_photo):
-                base_photos = [custom_photo] + base_photos
-            CARS[cid]["photos"] = base_photos
-            CARS[cid]["active"] = bool(row["active"]) and not bool(row.get("deleted", False))
-            CARS[cid]["deleted"] = bool(row.get("deleted", False))
+            if row['car_id'] in CARS:
+                CARS[row['car_id']]['name'] = row['name']
+                CARS[row['car_id']]['rates'] = (row['rate_1_3'], row['rate_4_6'], row['rate_7_plus'])
+                CARS[row['car_id']]['active'] = row['active']
     finally:
         con.close()
 
@@ -1114,43 +1076,40 @@ def status_label(status):
 # MAIN KEYBOARDS
 # ============================================================
 
-def mini_app_url():
-    url = os.getenv("MINI_APP_URL", "").strip().rstrip("/")
-    if url:
-        return url
-    external = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
-    return f"{external}/app" if external else ""
-
-
 def main_keyboard():
-    app_url = mini_app_url()
-    if app_url:
-        return InlineKeyboardMarkup(
-            inline_keyboard=[[
-                InlineKeyboardButton(
-                    text="🚗 Открыть BALTICAR Mini App",
-                    web_app=WebAppInfo(url=app_url),
-                )
-            ]]
-        )
-    return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="🚗 Автомобили", callback_data="catalog")]]
-    )
+    rows = [
+        [InlineKeyboardButton(text="📱 Открыть Mini App", web_app=WebAppInfo(url=MINIAPP_URL))] if MINIAPP_URL else [],
+        [
+            InlineKeyboardButton(text="🚗 Автомобили", callback_data="catalog"),
+            InlineKeyboardButton(text="📋 Мои бронирования", callback_data="mybookings"),
+        ],
+        [
+            InlineKeyboardButton(text="⭐ Отзывы", callback_data="reviews"),
+            InlineKeyboardButton(text="✨ Почему мы", callback_data="why"),
+        ],
+        [
+            InlineKeyboardButton(text="ℹ️ Условия аренды", callback_data="terms"),
+            InlineKeyboardButton(text="📞 Связаться", callback_data="contact"),
+        ],
+    ]
+    rows = [r for r in rows if r]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def welcome_text():
     return (
-        "🚗 <b>BALTICAR</b>\n"
-        "<i>Аренда автомобилей в Калининграде</i>\n\n"
-        "Подбор автомобиля, свободные даты, точная стоимость и бронирование — всё внутри нашего Mini App.\n\n"
-        "✨ <b>Красиво • быстро • удобно</b>\n\n"
-        "Нажмите кнопку ниже, чтобы открыть BALTICAR."
+        "🚗 <b>BALTICAR</b> <i>• аренда автомобилей</i>\n\n"
+        "📍 <b>Калининград</b>\n"
+        "Подберём автомобиль, покажем свободные даты и сразу рассчитаем стоимость.\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🛡 Автомобили в отличном состоянии\n"
+        "💰 Понятные тарифы без сюрпризов\n"
+        "📅 Онлайн-бронирование в Telegram\n"
+        "⚡ Быстрое подтверждение заявки\n"
+        "☎️ Поддержка 24/7\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        "<b>Выберите нужный раздел ниже 👇</b>"
     )
-
-
-def welcome_photo_path():
-    path = Path(__file__).resolve().parent / "photos" / "balticar_hero.jpg"
-    return path if path.exists() else None
 
 
 def why_text():
@@ -1195,6 +1154,29 @@ def car_actions_keyboard(cid):
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")],
         ]
     )
+
+
+async def replace_client_message(
+    callback: CallbackQuery,
+    text: str,
+    reply_markup=None,
+):
+    """Показывает новый клиентский экран независимо от типа текущего сообщения.
+
+    Карточка автомобиля отправляется как photo-message, поэтому Telegram
+    не позволяет использовать edit_text() для её навигационных кнопок.
+    Для photo-message удаляем карточку и отправляем новый текстовый экран.
+    """
+    message = callback.message
+    if getattr(message, "photo", None):
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        await message.answer(text, reply_markup=reply_markup)
+        return
+
+    await message.edit_text(text, reply_markup=reply_markup)
 
 
 def back_home_keyboard():
@@ -1878,16 +1860,37 @@ def admin_panel_keyboard():
 
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📊 Панель управления", callback_data="admin:dashboard")],
-            [InlineKeyboardButton(text="🔔 Новые заявки", callback_data="admin:new")],
-            [InlineKeyboardButton(text="📅 Календарь занятости", callback_data="admin:calendar")],
-            [InlineKeyboardButton(text="📋 Все бронирования", callback_data="admin:bookings")],
-            [InlineKeyboardButton(text="🚗 Автомобили", callback_data="admin:cars")],
-            [InlineKeyboardButton(text="👤 Клиенты", callback_data="admin:clients")],
-            [InlineKeyboardButton(text="⭐ Отзывы", callback_data="admin:reviews")],
-            [InlineKeyboardButton(text="🔎 Поиск / фильтр", callback_data="admin:filter"),
-             InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")],
-            [InlineKeyboardButton(text="💰 Отчёт по доходам", callback_data="admin:report")],
+            [
+                InlineKeyboardButton(
+                    text="🔔 Новые заявки",
+                    callback_data="admin:new"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📅 Календарь занятости",
+                    callback_data="admin:calendar"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📋 Все бронирования",
+                    callback_data="admin:bookings"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🚗 Автомобили",
+                    callback_data="admin:cars"
+                )
+            ],
+            [
+                InlineKeyboardButton(text="🔎 Поиск / фильтр", callback_data="admin:filter"),
+                InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")
+            ],
+            [
+                InlineKeyboardButton(text="💰 Отчёт по доходам", callback_data="admin:report")
+            ],
         ]
     )
 
@@ -2192,18 +2195,11 @@ async def start_handler(
 ):
 
     await state.clear()
-    photo = welcome_photo_path()
-    if photo:
-        await message.answer_photo(
-            FSInputFile(str(photo)),
-            caption=welcome_text(),
-            reply_markup=main_keyboard(),
-        )
-    else:
-        await message.answer(
-            welcome_text(),
-            reply_markup=main_keyboard(),
-        )
+
+    await message.answer(
+        welcome_text(),
+        reply_markup=main_keyboard()
+    )
 
 
 async def home(
@@ -2211,29 +2207,16 @@ async def home(
     state: FSMContext
 ):
 
+    # Отвечаем Telegram сразу.
     await safe_callback_answer(callback)
+
     await state.clear()
-    photo = welcome_photo_path()
-    try:
-        if photo and callback.message.content_type != "photo":
-            await callback.message.delete()
-            await callback.message.answer_photo(
-                FSInputFile(str(photo)),
-                caption=welcome_text(),
-                reply_markup=main_keyboard(),
-            )
-        elif callback.message.content_type == "photo":
-            await callback.message.edit_caption(
-                caption=welcome_text(),
-                reply_markup=main_keyboard(),
-            )
-        else:
-            await callback.message.edit_text(
-                welcome_text(),
-                reply_markup=main_keyboard(),
-            )
-    except Exception as exc:
-        print(f"[HOME] render error: {type(exc).__name__}: {exc}")
+
+    await replace_client_message(
+        callback,
+        welcome_text(),
+        main_keyboard()
+    )
 
 
 async def id_handler(
@@ -2256,11 +2239,12 @@ async def catalog(
     # чтобы клиент сразу видел изменения, сделанные администратором.
     await asyncio.to_thread(load_car_settings)
 
-    await callback.message.edit_text(
+    await replace_client_message(
+        callback,
         "🚗 <b>Автомобили BALTICAR</b>\n\n"
         "Выберите модель — откроется её фотокарточка, характеристики и актуальные тарифы.\n\n"
         "💡 <b>Цена за выбранный период рассчитывается автоматически.</b>",
-        reply_markup=car_keyboard()
+        car_keyboard()
     )
 
 
@@ -3278,10 +3262,7 @@ def create_booking_sync(
     end_at,
     name,
     phone,
-    comment,
-    pickup_location=None,
-    pickup_location_type=None,
-    pickup_location_note=None
+    comment
 ):
     """
     Полностью синхронная транзакция PostgreSQL.
@@ -3417,10 +3398,6 @@ def create_booking_sync(
                     name,
                     phone,
                     comment,
-                    pickup_location,
-                    pickup_location_type,
-                    pickup_location_note,
-                    pickup_location_fee,
                     total,
                     status,
                     created_at,
@@ -3429,7 +3406,6 @@ def create_booking_sync(
                 VALUES (
                     %s, %s, %s, %s, %s,
                     %s, %s,
-                    %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     'pending', %s, %s
                 )
@@ -3446,10 +3422,6 @@ def create_booking_sync(
                     name,
                     phone,
                     comment,
-                    pickup_location,
-                    pickup_location_type,
-                    pickup_location_note,
-                    0 if pickup_location_type in ("airport", "station") else None,
                     total,
                     created_at,
                     expires
@@ -3624,11 +3596,12 @@ async def mybookings(callback: CallbackQuery):
         buttons.append([InlineKeyboardButton(text=f"№{row['id']} · {car_name} · {status_label(row['status'])[:2]}", callback_data=f"mybooking:{row['id']}")])
     buttons.append([InlineKeyboardButton(text="🚗 Новое бронирование", callback_data="catalog")])
     buttons.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")])
-    await callback.message.edit_text(
+    await replace_client_message(
+        callback,
         "📋 <b>Мои бронирования</b>\n\n"
         "Здесь хранятся ваши последние заявки.\n"
         "Нажмите на заявку, чтобы открыть детали.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+        InlineKeyboardMarkup(inline_keyboard=buttons)
     )
 
 
@@ -4121,9 +4094,6 @@ async def admin_day(
             f"📞 {row['phone']}\n"
             f"💰 {money(row['total'])}\n"
         )
-        if row.get("pickup_location"):
-            out.append(f"📍 Подача: {row['pickup_location']}" + (f" — {row['pickup_location_note']}" if row.get('pickup_location_note') else ""))
-
         if row["status"] in ("pending", "confirmed"):
             keyboard.append([InlineKeyboardButton(text=f"✏️ Изменить даты №{row['id']}", callback_data=f"adminedit:{row['id']}")])
             keyboard.append([InlineKeyboardButton(text=f"🚫 Отменить бронь №{row['id']}", callback_data=f"cancel:{row['id']}")])
@@ -4482,156 +4452,6 @@ async def admin_edit_backdate(callback: CallbackQuery, state: FSMContext):
 
 
 # ============================================================
-# ADMIN DASHBOARD / CLIENTS / REVIEWS / NOTIFICATIONS
-# ============================================================
-
-def admin_dashboard_sync():
-    con = db()
-    try:
-        with con.cursor() as cur:
-            return cur.execute("""
-                SELECT
-                    COUNT(*) FILTER (WHERE status='pending') AS pending,
-                    COUNT(*) FILTER (WHERE status='confirmed') AS confirmed,
-                    COUNT(*) FILTER (WHERE status='confirmed' AND start_at >= NOW() AND start_at < NOW() + interval '24 hours') AS today_next,
-                    COALESCE(SUM(total) FILTER (WHERE status='confirmed'),0) AS revenue,
-                    COUNT(DISTINCT user_id) AS clients,
-                    (SELECT COUNT(*) FROM reviews) AS reviews
-                FROM bookings
-            """).fetchone()
-    finally:
-        con.close()
-
-
-async def admin_dashboard(callback: CallbackQuery):
-    await safe_callback_answer(callback)
-    if callback.from_user.id != ADMIN_ID:
-        return
-    row = await asyncio.to_thread(admin_dashboard_sync)
-    lines = [
-        "📊 <b>Панель управления BALTICAR</b>",
-        "",
-        f"🟡 Новых заявок: <b>{int(row['pending'] or 0)}</b>",
-        f"🟢 Подтверждённых: <b>{int(row['confirmed'] or 0)}</b>",
-        f"⏰ Начало аренды в ближайшие 24 ч: <b>{int(row['today_next'] or 0)}</b>",
-        f"👤 Клиентов: <b>{int(row['clients'] or 0)}</b>",
-        f"⭐ Отзывов: <b>{int(row['reviews'] or 0)}</b>",
-        f"💰 Выручка подтверждённых броней: <b>{money(int(row['revenue'] or 0))}</b>",
-        "",
-        "Выберите раздел ниже для управления.",
-    ]
-    kb = [
-        [InlineKeyboardButton(text="🔔 Новые заявки", callback_data="admin:new")],
-        [InlineKeyboardButton(text="📋 Бронирования", callback_data="admin:bookings")],
-        [InlineKeyboardButton(text="🚗 Автомобили", callback_data="admin:cars")],
-        [InlineKeyboardButton(text="👤 Клиенты", callback_data="admin:clients"), InlineKeyboardButton(text="⭐ Отзывы", callback_data="admin:reviews")],
-        [InlineKeyboardButton(text="💰 Доходы", callback_data="admin:report")],
-        [InlineKeyboardButton(text="◀️ В админ-панель", callback_data="admin:back")],
-    ]
-    await callback.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
-
-
-def admin_clients_sync():
-    con = db()
-    try:
-        with con.cursor() as cur:
-            return cur.execute("""
-                SELECT user_id, MAX(username) AS username, MAX(name) AS name, MAX(phone) AS phone,
-                       COUNT(*) AS bookings,
-                       COUNT(*) FILTER (WHERE status='confirmed') AS confirmed,
-                       COALESCE(SUM(total) FILTER (WHERE status='confirmed'),0) AS spent,
-                       MAX(created_at) AS last_booking
-                FROM bookings
-                GROUP BY user_id
-                ORDER BY last_booking DESC
-                LIMIT 50
-            """).fetchall()
-    finally:
-        con.close()
-
-
-async def admin_clients(callback: CallbackQuery):
-    await safe_callback_answer(callback)
-    if callback.from_user.id != ADMIN_ID:
-        return
-    rows = await asyncio.to_thread(admin_clients_sync)
-    if not rows:
-        await callback.message.edit_text("👤 <b>Клиенты</b>\n\nКлиентов пока нет.", reply_markup=admin_back_keyboard())
-        return
-    lines = ["👤 <b>Клиенты BALTICAR</b>", ""]
-    for i, r in enumerate(rows[:20], 1):
-        name = r['name'] or 'Без имени'
-        phone = r['phone'] or '—'
-        username = f"@{r['username']}" if r['username'] else 'без username'
-        lines.append(f"<b>{i}. {name}</b>\n📞 {phone} • {username}\n🚗 Броней: {int(r['bookings'])} • подтверждено: {int(r['confirmed'])}\n💰 Арендовано на: {money(int(r['spent'] or 0))}")
-    kb = [[InlineKeyboardButton(text="🔎 Найти клиента через бронирования", callback_data="admin:filter")], [InlineKeyboardButton(text="◀️ В админ-панель", callback_data="admin:back")]]
-    await callback.message.edit_text("\n\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
-
-
-def admin_reviews_sync():
-    con = db()
-    try:
-        with con.cursor() as cur:
-            return cur.execute("""
-                SELECT r.id,r.booking_id,r.rating,r.review_text,r.created_at,r.car_id,b.name,b.phone
-                FROM reviews r LEFT JOIN bookings b ON b.id=r.booking_id
-                ORDER BY r.created_at DESC LIMIT 30
-            """).fetchall()
-    finally:
-        con.close()
-
-
-async def admin_reviews(callback: CallbackQuery):
-    await safe_callback_answer(callback)
-    if callback.from_user.id != ADMIN_ID:
-        return
-    rows = await asyncio.to_thread(admin_reviews_sync)
-    if not rows:
-        await callback.message.edit_text("⭐ <b>Отзывы</b>\n\nОтзывов пока нет.", reply_markup=admin_back_keyboard())
-        return
-    lines = ["⭐ <b>Отзывы клиентов</b>", ""]
-    for r in rows[:15]:
-        stars = '⭐' * int(r['rating'])
-        text = (r['review_text'] or 'Без текста').strip().replace('<','&lt;').replace('>','&gt;')
-        if len(text) > 180:
-            text = text[:177] + '...'
-        car = CARS.get(r['car_id'], {'name': r['car_id']})['name']
-        lines.append(f"{stars} <b>{r['name'] or 'Клиент'}</b> • {car}\n{ text }\n📅 {ensure_tz(r['created_at']).strftime('%d.%m.%Y')}")
-    kb = [[InlineKeyboardButton(text="◀️ В админ-панель", callback_data="admin:back")]]
-    await callback.message.edit_text("\n\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
-
-
-async def admin_notify_client(callback: CallbackQuery):
-    await safe_callback_answer(callback)
-    if callback.from_user.id != ADMIN_ID:
-        return
-    try:
-        bid = int(callback.data.split(':',1)[1])
-    except Exception:
-        return
-    row = await asyncio.to_thread(get_booking_sync, bid)
-    if not row:
-        await callback.message.answer("Бронирование не найдено.")
-        return
-    start_at = ensure_tz(row['start_at'])
-    end_at = ensure_tz(row['end_at'])
-    await callback.bot.send_message(
-        row['user_id'],
-        f"📍 <b>Информация по бронированию №{bid}</b>\n\n"
-        f"🚗 {CARS[row['car_id']]['name']}\n"
-        f"📅 Получение: <b>{format_date_time(start_at)}</b>\n"
-        f"↩️ Возврат: <b>{format_date_time(end_at)}</b>\n"
-        f"⏰ Получение и возврат: 08:00–20:00\n"
-        f"🔐 Залог: <b>10 000 ₽</b>\n\n"
-        "📍 Точная точка встречи согласовывается менеджером.\n"
-        "Менеджер свяжется с вами для согласования места и деталей передачи автомобиля.\n\n"
-        "Если у вас изменились планы, пожалуйста, сообщите нам заранее.",
-        reply_markup=main_keyboard()
-    )
-    await callback.message.answer(f"📨 Клиенту по заявке №{bid} отправлена инструкция по получению и возврату.")
-
-
-# ============================================================
 # ADMIN NEW
 # ============================================================
 
@@ -4817,17 +4637,14 @@ async def admin_booking(
 
     text = (
         f"📋 <b>Бронирование №{bid}</b>\n" f"{status_label(row['status'])}\n\n"
-        f"🚗 <b>{CARS[row['car_id']]['name']}</b>\n"
-        f"🔐 Залог: <b>10 000 ₽</b>\n\n"
-        f"📍 <b>Получение автомобиля</b>\n"
-        f"🕐 {format_date_time(start_at)}\n"
-        f"Точная точка встречи согласовывается менеджером после подтверждения.\n\n"
-        f"↩️ <b>Возврат автомобиля</b>\n"
-        f"🕐 {format_date_time(end_at)}\n"
-        f"⏰ Получение и возврат: 08:00–20:00\n\n"
+        f"🚗 <b>{CARS[row['car_id']]['name']}</b>\n\n"
+        f"📅 Получение:\n"
+        f"<b>{format_date_time(start_at)}</b>\n\n"
+        f"↩️ Возврат:\n"
+        f"<b>{format_date_time(end_at)}</b>\n\n"
         f"⏱ {rental_days(start_at, end_at)} суток\n"
         f"💰 <b>{money(row['total'])}</b>\n\n"
-        f"👤 <b>{row['name']}</b>\n"
+        f"👤 {row['name']}\n"
         f"📞 {row['phone']}\n"
         f"Telegram: {username}\n"
         f"📝 {row['comment'] or '—'}"
@@ -4846,23 +4663,16 @@ async def admin_booking(
             InlineKeyboardButton(text="🚫 Отменить бронь", callback_data=f"cancel:{bid}")
         ])
         buttons.append([
-            InlineKeyboardButton(text="📍 Связаться для согласования точки", url="https://t.me/Balticar_kgd")
-        ])
-        buttons.append([
-            InlineKeyboardButton(text="📨 Отправить клиенту инструкцию", callback_data=f"adminnotify:{bid}")
-        ])
-        buttons.append([
             InlineKeyboardButton(text="◀️ К бронированиям", callback_data="admin:bookings")
         ])
         reply_markup = InlineKeyboardMarkup(inline_keyboard=buttons)
     else:
         buttons = []
-        if row["status"] in ("cancelled", "expired"):
-            label = "🗑 Удалить отменённую бронь" if row["status"] == "cancelled" else "🗑 Удалить просроченную бронь"
+        if row["status"] == "cancelled":
             buttons.append([
                 InlineKeyboardButton(
-                    text=label,
-                    callback_data=f"deleteold:{bid}"
+                    text="🗑 Удалить отменённую бронь",
+                    callback_data=f"deletecancel:{bid}"
                 )
             ])
         buttons.append([
@@ -4877,10 +4687,10 @@ async def admin_booking(
 
 
 # ============================================================
-# DELETE CANCELLED / EXPIRED BOOKING
+# DELETE CANCELLED BOOKING
 # ============================================================
 
-def delete_old_booking_sync(bid):
+def delete_cancelled_booking_sync(bid):
 
     con = db()
 
@@ -4902,11 +4712,11 @@ def delete_old_booking_sync(bid):
                 con.rollback()
                 return {"ok": False, "reason": "not_found"}
 
-            if row["status"] not in ("cancelled", "expired"):
+            if row["status"] != "cancelled":
                 con.rollback()
                 return {
                     "ok": False,
-                    "reason": "not_old",
+                    "reason": "not_cancelled",
                     "status": row["status"]
                 }
 
@@ -4914,7 +4724,7 @@ def delete_old_booking_sync(bid):
                 """
                 DELETE FROM bookings
                 WHERE id=%s
-                  AND status IN ('cancelled','expired')
+                  AND status='cancelled'
                 """,
                 (bid,)
             )
@@ -4931,46 +4741,87 @@ def delete_old_booking_sync(bid):
         con.close()
 
 
-async def delete_old_booking(callback: CallbackQuery):
+async def delete_cancelled_booking(callback: CallbackQuery):
 
     await safe_callback_answer(callback)
 
     if callback.from_user.id != ADMIN_ID:
-        await callback.message.answer("Нет доступа.")
+
+        await callback.message.answer(
+            "Нет доступа."
+        )
         return
 
     try:
         bid = int(callback.data.split(":", 1)[1])
     except (ValueError, IndexError):
-        await callback.message.answer("Некорректный номер брони.")
+        await callback.message.answer(
+            "Некорректный номер брони."
+        )
         return
 
-    result = await asyncio.to_thread(delete_old_booking_sync, bid)
+    result = await asyncio.to_thread(
+        delete_cancelled_booking_sync,
+        bid
+    )
 
     if not result["ok"]:
+
         if result["reason"] == "not_found":
-            await callback.message.answer("Бронь не найдена или уже удалена.")
-        else:
-            await callback.message.answer("Удалять можно только отменённые или просроченные брони.")
+            await callback.message.answer(
+                "Бронь не найдена или уже удалена."
+            )
+            return
+
+        await callback.message.answer(
+            "Удалять можно только отменённые брони."
+        )
         return
 
+    # После удаления сразу возвращаемся в обновлённый список.
     rows = await asyncio.to_thread(get_all_bookings_sync)
 
     if not rows:
         await callback.message.edit_text(
-            "📋 <b>Все бронирования</b>\n\nБронирований пока нет.",
+            "📋 <b>Все бронирования</b>\n\n"
+            "Бронирований пока нет.",
             reply_markup=admin_back_keyboard()
         )
         return
 
-    keyboard = admin_bookings_markup(rows)
-    keyboard.append([InlineKeyboardButton(text="🔎 Фильтр / поиск", callback_data="admin:filter")])
-    keyboard.append([InlineKeyboardButton(text="◀️ В админ-панель", callback_data="admin:back")])
+    keyboard = []
+    for row in rows:
+        keyboard.append([
+            InlineKeyboardButton(
+                text=(
+                    f"№{row['id']} • "
+                    f"{status_label(row['status'])[:2]} • "
+                    f"{CARS[row['car_id']]['name'][:22]}"
+                ),
+                callback_data=f"adminbooking:{row['id']}"
+            )
+        ])
+        if row["status"] == "cancelled":
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=f"🗑 Удалить бронь №{row['id']}",
+                    callback_data=f"deletecancel:{row['id']}"
+                )
+            ])
+
+    keyboard.append([
+        InlineKeyboardButton(
+            text="◀️ Назад",
+            callback_data="admin:back"
+        )
+    ])
 
     await callback.message.edit_text(
         "📋 <b>Все бронирования</b>\n\n"
         f"Показаны последние {len(rows)} заявок.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=keyboard
+        )
     )
 
 
@@ -5014,9 +4865,8 @@ def admin_bookings_markup(rows, show_delete=True):
     keyboard=[]
     for row in rows:
         keyboard.append([InlineKeyboardButton(text=f"№{row['id']} • {CARS[row['car_id']]['name'][:18]} • {status_label(row['status'])[:2]}", callback_data=f"adminbooking:{row['id']}")])
-        if show_delete and row['status'] in ('cancelled','expired'):
-            label = '🗑 Удалить отменённую' if row['status']=='cancelled' else '🗑 Удалить просроченную'
-            keyboard.append([InlineKeyboardButton(text=f"{label} №{row['id']}", callback_data=f"deleteold:{row['id']}")])
+        if show_delete and row['status']=='cancelled':
+            keyboard.append([InlineKeyboardButton(text=f"🗑 Удалить №{row['id']}", callback_data=f"deletecancel:{row['id']}")])
     return keyboard
 
 
@@ -5038,8 +4888,7 @@ async def admin_filter(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID: return
     rows=[[InlineKeyboardButton(text="📋 Все", callback_data="af:all")],
           [InlineKeyboardButton(text="🟡 Новые", callback_data="af:pending"), InlineKeyboardButton(text="🟢 Подтверждённые", callback_data="af:confirmed")],
-          [InlineKeyboardButton(text="⚫ Отменённые", callback_data="af:cancelled"), InlineKeyboardButton(text="⚪ Просроченные", callback_data="af:expired")],
-          [InlineKeyboardButton(text="🔴 Отклонённые", callback_data="af:rejected")]]
+          [InlineKeyboardButton(text="⚫ Отменённые", callback_data="af:cancelled"), InlineKeyboardButton(text="🔴 Отклонённые", callback_data="af:rejected")]]
     for cid,car in CARS.items():
         rows.append([InlineKeyboardButton(text=f"🚗 {car['name']}", callback_data=f"afcar:{cid}")])
     rows.append([InlineKeyboardButton(text="🔍 Найти по имени/телефону", callback_data="af:search")])
@@ -5052,7 +4901,7 @@ async def admin_filter_result(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID: return
     parts=callback.data.split(":",1)
     value=parts[1] if len(parts)>1 else "all"
-    status=value if value in {"pending","confirmed","cancelled","expired","rejected"} else None
+    status=value if value in {"pending","confirmed","cancelled","rejected"} else None
     car_id=value if value in CARS else None
     rows=await asyncio.to_thread(get_all_bookings_sync,status,car_id,None,50)
     title="📋 Результат фильтра"
@@ -5087,15 +4936,12 @@ async def admin_search_message(message: Message, state: FSMContext):
 async def admin_cars(callback: CallbackQuery):
     await safe_callback_answer(callback)
     if callback.from_user.id != ADMIN_ID: return
-    await asyncio.to_thread(load_car_settings)
     rows=[]
     for cid,car in CARS.items():
-        deleted=bool(car.get('deleted',False))
-        state="🗑 удалён" if deleted else ("🟢 включён" if car.get('active',True) else "⚪ выключен")
+        state="🟢 включён" if car.get('active',True) else "⚪ выключен"
         rows.append([InlineKeyboardButton(text=f"🚗 {car['name']} — {state}", callback_data=f"admincarinfo:{cid}")])
-    rows.append([InlineKeyboardButton(text="➕ Добавить автомобиль", callback_data="caradd")])
     rows.append([InlineKeyboardButton(text="◀️ В админ-панель", callback_data="admin:back")])
-    await callback.message.edit_text("🚗 <b>Управление автомобилями</b>\n\nЗдесь можно добавить, отключить или удалить автомобиль из каталога.",reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+    await callback.message.edit_text("🚗 <b>Управление автомобилями</b>\n\nВыберите автомобиль:",reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
 def car_settings_sync(cid, **kwargs):
@@ -5138,76 +4984,6 @@ def delete_maintenance_sync(mid):
     finally: con.close()
 
 
-def add_car_sync(cid, name, gear, fuel, seats, rates, description, photo_path):
-    con=db()
-    try:
-        with con.cursor() as cur:
-            cur.execute(
-                """INSERT INTO car_settings
-                (car_id,name,active,rate_1_3,rate_4_6,rate_7_plus,gear,fuel,seats,description,photo_path,deleted)
-                VALUES(%s,%s,TRUE,%s,%s,%s,%s,%s,%s,%s,%s,FALSE)""",
-                (cid,name,rates[0],rates[1],rates[2],gear,fuel,seats,description,photo_path)
-            )
-        con.commit()
-    finally:
-        con.close()
-    load_car_settings()
-
-def delete_car_sync(cid):
-    con=db()
-    try:
-        with con.cursor() as cur:
-            cur.execute("UPDATE car_settings SET active=FALSE, deleted=TRUE, updated_at=NOW() WHERE car_id=%s",(cid,))
-        con.commit()
-    finally:
-        con.close()
-    load_car_settings()
-
-async def car_add_start(callback:CallbackQuery,state:FSMContext):
-    await safe_callback_answer(callback)
-    if callback.from_user.id != ADMIN_ID:return
-    await state.set_state(AdminFeature.car_add)
-    await callback.message.edit_text(
-        "➕ <b>Добавление автомобиля</b>\n\n"
-        "Отправьте одной строкой через <b>|</b>:\n"
-        "<b>ID | Название | Коробка | Топливо | Мест | 1–3 4–6 7+ | Описание</b>\n\n"
-        "Пример:\n<code>kia_rio24 | Kia Rio 2024 | АКПП | Бензин | 5 | 3000 2900 2800 | Новый автомобиль для города</code>\n\n"
-        "Фото пока берётся стандартное; позже можно добавить загрузку фото прямо из админки."
-    )
-
-async def car_add_message(message:Message,state:FSMContext):
-    if message.from_user.id != ADMIN_ID:return
-    raw=(message.text or '').strip()
-    parts=[x.strip() for x in raw.split('|')]
-    if len(parts)!=7:
-        await message.answer("Нужно 7 полей через |. Пример: ID | Название | АКПП | Бензин | 5 | 3000 2900 2800 | Описание")
-        return
-    cid,name,gear,fuel,seats_s,rates_s,description=parts
-    if not cid or not name or cid in CARS or '|' in cid or ' ' in cid:
-        await message.answer("ID должен быть уникальным и без пробелов. Например: kia_rio24")
-        return
-    try:
-        seats=int(seats_s); rates=tuple(int(x) for x in rates_s.split())
-        if seats<1 or len(rates)!=3 or any(x<=0 for x in rates): raise ValueError
-    except Exception:
-        await message.answer("Проверьте количество мест и тарифы. Например: 5 и 3000 2900 2800")
-        return
-    try:
-        await asyncio.to_thread(add_car_sync,cid,name,gear or 'АКПП',fuel or 'Бензин',seats,rates,description or 'Автомобиль BALTICAR для комфортных поездок.','photos/i30_1_front.jpg')
-    except Exception as e:
-        await message.answer(f"❌ Не удалось добавить автомобиль: {e}")
-        return
-    await state.clear()
-    await message.answer(f"✅ <b>{name}</b> добавлен в каталог.\n\n🔐 Залог: <b>10 000 ₽</b>",reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🚗 К автомобилям",callback_data="admin:cars")]]))
-
-async def car_delete(callback:CallbackQuery):
-    await safe_callback_answer(callback)
-    if callback.from_user.id != ADMIN_ID:return
-    cid=callback.data.split(":",1)[1]
-    if cid not in CARS:return
-    await asyncio.to_thread(delete_car_sync,cid)
-    await callback.message.edit_text(f"🗑 <b>{CARS[cid]['name']}</b> удалён из каталога.\n\nИстория его бронирований сохранена.",reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ К автомобилям",callback_data="admin:cars")]]))
-
 async def admin_car_info(callback: CallbackQuery):
     await safe_callback_answer(callback)
     if callback.from_user.id != ADMIN_ID: return
@@ -5219,15 +4995,12 @@ async def admin_car_info(callback: CallbackQuery):
     text=(f"🚗 <b>{car['name']}</b>\n\n{car_text(cid)}\n\n"
           f"Статус: {'🟢 доступен' if active else '⚪ отключён'}\n\n"
           f"🔧 <b>Обслуживание</b>\n{mt}")
-    deleted=bool(car.get('deleted',False))
     buttons=[
-        [InlineKeyboardButton(text="♻️ Восстановить" if deleted else ("⛔ Отключить" if active else "🟢 Включить"),callback_data=f"carrestore:{cid}" if deleted else f"cartoggle:{cid}")],
+        [InlineKeyboardButton(text="⛔ Отключить" if active else "🟢 Включить",callback_data=f"cartoggle:{cid}")],
         [InlineKeyboardButton(text="💰 Изменить тарифы",callback_data=f"carrates:{cid}")],
         [InlineKeyboardButton(text="✏️ Изменить название",callback_data=f"carname:{cid}")],
         [InlineKeyboardButton(text="🔧 Добавить обслуживание",callback_data=f"maintadd:{cid}")],
     ]
-    if not deleted:
-        buttons.append([InlineKeyboardButton(text="🗑 Удалить из каталога",callback_data=f"cardelete:{cid}")])
     for x in maint[:5]: buttons.append([InlineKeyboardButton(text=f"🗑 Удалить ТО №{x['id']}",callback_data=f"maintdel:{x['id']}:{cid}")])
     buttons += [[InlineKeyboardButton(text="◀️ К автомобилям",callback_data="admin:cars")]]
     await callback.message.edit_text(text,reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
@@ -5241,14 +5014,6 @@ async def car_toggle(callback: CallbackQuery):
     await asyncio.to_thread(car_settings_sync,cid,active=new)
     await admin_car_info(callback)
 
-
-async def car_restore(callback:CallbackQuery):
-    await safe_callback_answer(callback)
-    if callback.from_user.id != ADMIN_ID:return
-    cid=callback.data.split(":",1)[1]
-    if cid not in CARS:return
-    await asyncio.to_thread(car_settings_sync,cid,active=True,deleted=False)
-    await admin_car_info(callback)
 
 async def car_rates_start(callback: CallbackQuery,state:FSMContext):
     await safe_callback_answer(callback)
@@ -5666,12 +5431,9 @@ async def admin_action(
             f"↩️ Возврат:\n"
             f"<b>{format_date_time(end_at)}</b>\n\n"
             f"⏱ {rental_days(start_at, end_at)} суток\n"
-            f"💰 {money(row['total'])}\n"
-            f"🔐 Залог: <b>10 000 ₽</b>\n\n"
-            "📍 <b>Получение и возврат</b>\n"
-            "Точная точка встречи и детали передачи автомобиля согласовываются с менеджером.\n"
-            "🕐 Время получения/возврата: 08:00–20:00.\n\n"
-            "Менеджер свяжется с вами для согласования точки встречи.",
+            f"💰 {money(row['total'])}\n\n"
+            "Менеджер свяжется с вами "
+            "для согласования деталей.",
             reply_markup=main_keyboard()
         )
 
@@ -5713,10 +5475,6 @@ def income_sync(period):
     con=db()
     try:
         with con.cursor() as cur:
-            if period=='day':
-                start_day = datetime.now(TZ).replace(hour=0, minute=0, second=0, microsecond=0)
-                end_day = start_day + timedelta(days=1)
-                return cur.execute("SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS revenue, COUNT(DISTINCT car_id) AS cars FROM bookings WHERE status='confirmed' AND start_at >= %s AND start_at < %s", (start_day, end_day)).fetchone()
             if period=='month':
                 where="status='confirmed' AND date_trunc('month', start_at)=date_trunc('month', NOW())"
             elif period=='prev':
@@ -5748,7 +5506,7 @@ async def admin_stats(callback:CallbackQuery):
 async def admin_report(callback:CallbackQuery):
     await safe_callback_answer(callback)
     if callback.from_user.id != ADMIN_ID:return
-    rows=[[InlineKeyboardButton(text="📅 За сегодня",callback_data="report:day")],[InlineKeyboardButton(text="📅 Текущий месяц",callback_data="report:month")],[InlineKeyboardButton(text="◀️ Предыдущий месяц",callback_data="report:prev")],[InlineKeyboardButton(text="📚 За всё время",callback_data="report:all")],[InlineKeyboardButton(text="◀️ В админ-панель",callback_data="admin:back")]]
+    rows=[[InlineKeyboardButton(text="📅 Текущий месяц",callback_data="report:month")],[InlineKeyboardButton(text="◀️ Предыдущий месяц",callback_data="report:prev")],[InlineKeyboardButton(text="📚 За всё время",callback_data="report:all")],[InlineKeyboardButton(text="◀️ В админ-панель",callback_data="admin:back")]]
     await callback.message.edit_text("💰 <b>Отчёт по доходам</b>\n\nВыберите период:",reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
 
 
@@ -5756,7 +5514,7 @@ async def report_result(callback:CallbackQuery):
     await safe_callback_answer(callback)
     if callback.from_user.id != ADMIN_ID:return
     period=callback.data.split(":",1)[1]; row=await asyncio.to_thread(income_sync,period)
-    label={'day':'сегодня','month':'текущий месяц','prev':'предыдущий месяц','all':'всё время'}[period]
+    label={'month':'текущий месяц','prev':'предыдущий месяц','all':'всё время'}[period]
     await callback.message.edit_text(f"💰 <b>Доход — {label}</b>\n\n🚗 Автомобилей в аренде: <b>{row['cars']}</b>\n📋 Подтверждённых броней: <b>{row['cnt']}</b>\n💵 Выручка: <b>{money(int(row['revenue'] or 0))}</b>",reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ К отчётам",callback_data="admin:report")]]))
 
 
@@ -5884,12 +5642,15 @@ async def main():
     # BOT
     # ========================================================
 
+    global MINI_BOT
+
     bot = Bot(
         BOT_TOKEN,
         default=DefaultBotProperties(
             parse_mode=ParseMode.HTML
         )
     )
+    MINI_BOT = bot
 
     dp = Dispatcher()
 
@@ -6025,11 +5786,6 @@ async def main():
     # ADMIN
     # ========================================================
 
-    dp.callback_query.register(admin_dashboard, F.data == "admin:dashboard")
-    dp.callback_query.register(admin_clients, F.data == "admin:clients")
-    dp.callback_query.register(admin_reviews, F.data == "admin:reviews")
-    dp.callback_query.register(admin_notify_client, F.data.startswith("adminnotify:"))
-
     dp.callback_query.register(
         admin_back,
         F.data == "admin:back"
@@ -6121,8 +5877,8 @@ async def main():
     )
 
     dp.callback_query.register(
-        delete_old_booking,
-        F.data.startswith("deleteold:")
+        delete_cancelled_booking,
+        F.data.startswith("deletecancel:")
     )
 
     dp.callback_query.register(
@@ -6136,10 +5892,7 @@ async def main():
     dp.callback_query.register(admin_filter_result, F.data.startswith("af:"))
     dp.callback_query.register(admin_filter_result, F.data.startswith("afcar:"))
     dp.callback_query.register(report_result, F.data.startswith("report:"))
-    dp.callback_query.register(car_add_start, F.data == "caradd")
     dp.callback_query.register(car_toggle, F.data.startswith("cartoggle:"))
-    dp.callback_query.register(car_restore, F.data.startswith("carrestore:"))
-    dp.callback_query.register(car_delete, F.data.startswith("cardelete:"))
     dp.callback_query.register(car_rates_start, F.data.startswith("carrates:"))
     dp.callback_query.register(car_name_start, F.data.startswith("carname:"))
     dp.callback_query.register(maintenance_start, F.data.startswith("maintadd:"))
@@ -6167,7 +5920,6 @@ async def main():
     # ========================================================
 
     dp.message.register(admin_search_message, AdminFeature.search)
-    dp.message.register(car_add_message, AdminFeature.car_add)
     dp.message.register(car_rates_message, AdminFeature.car_rates)
     dp.message.register(car_name_message, AdminFeature.car_name)
     dp.message.register(maintenance_message, AdminFeature.maintenance)
@@ -6188,381 +5940,6 @@ async def main():
         comment_handler,
         Booking.comment
     )
-
-
-    # ========================================================
-    # TELEGRAM MINI APP — BALTICAR
-    # ========================================================
-
-    import hashlib
-    import hmac
-    import json
-    from urllib.parse import parse_qsl
-
-    def mini_json(payload, status=200, headers=None):
-        return web.json_response(payload, status=status, headers=headers or {})
-
-    def mini_init_user(request):
-        """Проверяет Telegram WebApp initData и возвращает пользователя."""
-        init_data = request.headers.get("X-Telegram-Init-Data", "").strip()
-        if not init_data:
-            raise web.HTTPUnauthorized(text="Telegram initData is required")
-        try:
-            pairs = dict(parse_qsl(init_data, keep_blank_values=True))
-            received_hash = pairs.pop("hash", "")
-            if not received_hash:
-                raise ValueError("hash missing")
-            data_check_string = "\n".join(
-                f"{k}={v}" for k, v in sorted(pairs.items())
-            )
-            secret_key = hmac.new(
-                b"WebAppData",
-                BOT_TOKEN.encode(),
-                hashlib.sha256,
-            ).digest()
-            calculated = hmac.new(
-                secret_key,
-                data_check_string.encode(),
-                hashlib.sha256,
-            ).hexdigest()
-            if not hmac.compare_digest(calculated, received_hash):
-                raise ValueError("invalid hash")
-            user = json.loads(pairs.get("user", "{}"))
-            user_id = int(user.get("id", 0))
-            if not user_id:
-                raise ValueError("user missing")
-            auth_date = int(pairs.get("auth_date", "0") or 0)
-            if auth_date and abs(int(datetime.now(TZ).timestamp()) - auth_date) > 86400:
-                raise ValueError("initData expired")
-            return user
-        except Exception as exc:
-            print(f"[MINIAPP] auth error: {exc}")
-            raise web.HTTPUnauthorized(text="Invalid Telegram initData")
-
-    def mini_parse_dt(value):
-        if not value:
-            raise ValueError("datetime is required")
-        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=TZ)
-        return dt.astimezone(TZ)
-
-    def mini_cars_sync():
-        load_car_settings()
-        result=[]
-        for cid, car in active_cars().items():
-            result.append({
-                "id": cid,
-                "name": car["name"],
-                "gear": car["gear"],
-                "fuel": car.get("fuel", "Бензин"),
-                "seats": car.get("seats", 5),
-                "description": car.get("description", ""),
-                "rates": list(car["rates"]),
-                "photos": [p for p in car.get("photos", []) if os.path.exists(p)],
-            })
-        return result
-
-    def mini_availability_sync(cid, month_start, month_end):
-        con=db()
-        try:
-            with con.cursor() as cur:
-                bookings=cur.execute("""
-                    SELECT id,start_at,end_at,status FROM bookings
-                    WHERE car_id=%s
-                      AND status IN ('pending','confirmed')
-                      AND start_at < %s AND end_at > %s
-                    ORDER BY start_at
-                """, (cid, month_end, month_start)).fetchall()
-                maintenance=cur.execute("""
-                    SELECT id,start_at,end_at,reason FROM car_maintenance
-                    WHERE car_id=%s AND start_at < %s AND end_at > %s
-                    ORDER BY start_at
-                """, (cid, month_end, month_start)).fetchall()
-                return {
-                    "bookings":[{"id":r["id"],"start_at":ensure_tz(r["start_at"]).isoformat(),"end_at":ensure_tz(r["end_at"]).isoformat(),"status":r["status"]} for r in bookings],
-                    "maintenance":[{"id":r["id"],"start_at":ensure_tz(r["start_at"]).isoformat(),"end_at":ensure_tz(r["end_at"]).isoformat(),"reason":r["reason"]} for r in maintenance],
-                }
-        finally:
-            con.close()
-
-    def mini_calendar_slots_sync(cid, year, month_num, start_at=None):
-        """Server-side availability for every selectable hour.
-
-        This is deliberately calculated on the server in Europe/Kaliningrad,
-        using exactly the same overlap/buffer rules as booking creation.
-        If start_at is omitted, returns valid pickup hours for each date.
-        If start_at is supplied, returns valid return hours for each date.
-        """
-        first = date(year, month_num, 1)
-        next_first = date(year + 1, 1, 1) if month_num == 12 else date(year, month_num + 1, 1)
-        month_start = local_dt(first, time(0, 0))
-        month_end = local_dt(next_first, time(0, 0))
-
-        # We need a little context before/after the visible month because
-        # a booking immediately before/after the month can affect a slot.
-        query_start = month_start - timedelta(hours=BUFFER_HOURS)
-        query_end = month_end + timedelta(hours=24 + BUFFER_HOURS)
-
-        con = db()
-        try:
-            with con.cursor() as cur:
-                bookings = cur.execute("""
-                    SELECT id,start_at,end_at,status
-                    FROM bookings
-                    WHERE car_id=%s
-                      AND status IN ('pending','confirmed')
-                      AND start_at < %s AND end_at > %s
-                    ORDER BY start_at
-                """, (cid, query_end, query_start)).fetchall()
-
-                maintenance = cur.execute("""
-                    SELECT id,start_at,end_at,reason
-                    FROM car_maintenance
-                    WHERE car_id=%s
-                      AND start_at < %s AND end_at > %s
-                    ORDER BY start_at
-                """, (cid, query_end, query_start)).fetchall()
-        finally:
-            con.close()
-
-        bookings = [
-            {"id": r["id"], "start_at": ensure_tz(r["start_at"]), "end_at": ensure_tz(r["end_at"])}
-            for r in bookings
-        ]
-        maintenance = [
-            {"id": r["id"], "start_at": ensure_tz(r["start_at"]), "end_at": ensure_tz(r["end_at"])}
-            for r in maintenance
-        ]
-
-        def free_interval(a, b):
-            if b <= a:
-                return False
-            for row in bookings:
-                rs = row["start_at"]
-                re = row["end_at"]
-                if rs < b + timedelta(hours=BUFFER_HOURS) and re > a - timedelta(hours=BUFFER_HOURS):
-                    return False
-            for row in maintenance:
-                if row["start_at"] < b and row["end_at"] > a:
-                    return False
-            return True
-
-        now = datetime.now(TZ)
-        z = lambda n: str(n).zfill(2)
-
-        if start_at is None:
-            result = {}
-            current = first
-            while current < next_first:
-                hours = []
-                for hour in range(PICKUP_START_HOUR, PICKUP_END_HOUR + 1):
-                    candidate = local_dt(current, time(hour, 0))
-                    if candidate <= now:
-                        continue
-                    # A valid pickup must allow the minimum one-day rental.
-                    candidate_end = candidate + timedelta(days=1)
-                    if free_interval(candidate, candidate_end):
-                        hours.append(hour)
-                result[current.isoformat()] = hours
-                current += timedelta(days=1)
-            return {"mode": "start", "slots": result}
-
-        start_at = ensure_tz(start_at)
-        result = {}
-        current = first
-        while current < next_first:
-            hours = []
-            for hour in range(PICKUP_START_HOUR, PICKUP_END_HOUR + 1):
-                candidate_end = local_dt(current, time(hour, 0))
-                if candidate_end <= start_at:
-                    continue
-                if free_interval(start_at, candidate_end):
-                    hours.append(hour)
-            result[current.isoformat()] = hours
-            current += timedelta(days=1)
-        return {"mode": "end", "slots": result}
-
-    def mini_mybookings_sync(user_id):
-        cleanup_pending()
-        con=db()
-        try:
-            with con.cursor() as cur:
-                rows=cur.execute("""
-                    SELECT b.id,b.car_id,b.start_at,b.end_at,b.total,b.status,b.created_at,b.comment,b.pickup_location,b.pickup_location_type,b.pickup_location_note,b.pickup_location_fee,
-                           EXISTS(SELECT 1 FROM reviews rv WHERE rv.booking_id=b.id) AS reviewed
-                    FROM bookings b WHERE b.user_id=%s ORDER BY b.id DESC LIMIT 20
-                """, (user_id,)).fetchall()
-                now=datetime.now(TZ)
-                return [{
-                    "id":r["id"],"car_id":r["car_id"],"car_name":CARS.get(r["car_id"],{}).get("name",r["car_id"]),
-                    "start_at":format_date_time(r["start_at"]),"end_at":format_date_time(r["end_at"]),
-                    "start_iso":ensure_tz(r["start_at"]).isoformat(),"end_iso":ensure_tz(r["end_at"]).isoformat(),
-                    "total":r["total"],"status":r["status"],"comment":r["comment"] or "",
-                    "pickup_location":r.get("pickup_location") or "Калининград",
-                    "pickup_location_type":r.get("pickup_location_type") or "city",
-                    "pickup_location_note":r.get("pickup_location_note") or "",
-                    "pickup_location_fee":r.get("pickup_location_fee"),
-                    "past":ensure_tz(r["end_at"]) < now,"reviewed":bool(r["reviewed"]),
-                } for r in rows]
-        finally:
-            con.close()
-
-    def mini_reviews_sync():
-        con=db()
-        try:
-            with con.cursor() as cur:
-                rows=cur.execute("""
-                    SELECT r.rating,r.review_text,r.created_at,r.car_id,b.name
-                    FROM reviews r LEFT JOIN bookings b ON b.id=r.booking_id
-                    ORDER BY r.created_at DESC LIMIT 30
-                """).fetchall()
-                return [{"rating":r["rating"],"text":r["review_text"] or "", "created_at":ensure_tz(r["created_at"]).strftime("%d.%m.%Y"), "car_name":CARS.get(r["car_id"],{}).get("name",r["car_id"]), "name":r["name"] or "Клиент"} for r in rows]
-        finally:
-            con.close()
-
-    WEBAPP_DIR = Path(__file__).resolve().parent / "webapp"
-    PHOTOS_DIR = Path(__file__).resolve().parent / "photos"
-
-    async def mini_app(request):
-        index = WEBAPP_DIR / "index.html"
-        if not index.exists():
-            print(f"[MINIAPP] index missing: {index}")
-            raise web.HTTPNotFound(text="Mini App files are missing")
-        return web.FileResponse(index, headers={"Cache-Control": "no-store, max-age=0"})
-
-    async def mini_api_cars(request):
-        mini_init_user(request)
-        return mini_json({"cars": await asyncio.to_thread(mini_cars_sync)})
-
-    async def mini_api_availability(request):
-        mini_init_user(request)
-        cid=request.query.get("car_id", "")
-        year=int(request.query.get("year", "0"))
-        month_num=int(request.query.get("month", "0"))
-        if cid not in CARS or year < 2020 or not 1 <= month_num <= 12:
-            return mini_json({"error":"invalid parameters"},400)
-        month_start=local_dt(date(year,month_num,1), time(0,0))
-        if month_num==12: next_first=date(year+1,1,1)
-        else: next_first=date(year,month_num+1,1)
-        month_end=local_dt(next_first,time(0,0))
-        data=await asyncio.to_thread(mini_availability_sync,cid,month_start,month_end)
-        return mini_json(data)
-
-    async def mini_api_slots(request):
-        mini_init_user(request)
-        cid = request.query.get("car_id", "")
-        try:
-            year = int(request.query.get("year", "0"))
-            month_num = int(request.query.get("month", "0"))
-        except ValueError:
-            return mini_json({"error": "invalid parameters"}, 400)
-        if cid not in CARS or year < 2020 or not 1 <= month_num <= 12:
-            return mini_json({"error": "invalid parameters"}, 400)
-
-        start_iso = request.query.get("start_at")
-        try:
-            start_at = mini_parse_dt(start_iso) if start_iso else None
-        except Exception:
-            return mini_json({"error": "invalid start_at"}, 400)
-
-        data = await asyncio.to_thread(
-            mini_calendar_slots_sync,
-            cid,
-            year,
-            month_num,
-            start_at,
-        )
-        return mini_json(data, headers={"Cache-Control": "no-store"})
-
-    async def mini_api_mybookings(request):
-        user=mini_init_user(request)
-        await asyncio.to_thread(load_car_settings)
-        return mini_json({"bookings": await asyncio.to_thread(mini_mybookings_sync,int(user["id"]))})
-
-    async def mini_api_reviews(request):
-        mini_init_user(request)
-        return mini_json({"reviews": await asyncio.to_thread(mini_reviews_sync)})
-
-    async def mini_api_create_booking(request):
-        user=mini_init_user(request)
-        try:
-            payload=await request.json()
-            cid=str(payload.get("car_id",""))
-            start_at=mini_parse_dt(payload.get("start_at"))
-            end_at=mini_parse_dt(payload.get("end_at"))
-            name=str(payload.get("name","")).strip()
-            phone=str(payload.get("phone","")).strip()
-            comment=str(payload.get("comment","")).strip()
-            pickup_location=str(payload.get("pickup_location","")).strip() or "Аэропорт Храброво"
-            pickup_location_type=str(payload.get("pickup_location_type","")).strip() or "airport"
-            pickup_location_note=str(payload.get("pickup_location_note","")).strip()
-            allowed_locations={"airport":"Аэропорт Храброво","station":"Южный вокзал","city":"Калининград","region":"Калининградская область","other":"Другое место"}
-            if pickup_location_type not in allowed_locations:
-                return mini_json({"ok":False,"message":"Выберите корректное место подачи."},400)
-            pickup_location=allowed_locations[pickup_location_type]
-            if pickup_location_type=="other" and not pickup_location_note:
-                return mini_json({"ok":False,"message":"Укажите адрес или описание места подачи."},400)
-            pickup_fee=0 if pickup_location_type in ("airport","station") else None
-            if cid not in CARS or not CARS[cid].get("active",True):
-                return mini_json({"ok":False,"message":"Автомобиль сейчас недоступен."},400)
-            if not name or len(phone)<7 or end_at<=start_at:
-                return mini_json({"ok":False,"message":"Проверьте имя, телефон и даты."},400)
-            await asyncio.to_thread(load_car_settings)
-            result=await asyncio.to_thread(create_booking_sync,int(user["id"]),str(user.get("username","") or ""),cid,start_at,end_at,name,phone,comment,pickup_location,pickup_location_type,pickup_location_note)
-            if not result.get("ok"):
-                reason=result.get("reason")
-                msg="Автомобиль уже занят или не хватает технического интервала." if reason=="overlap" else "Автомобиль недоступен из-за технического обслуживания." if reason=="maintenance" else "Не удалось создать заявку. Проверьте период."
-                return mini_json({"ok":False,"message":msg},409)
-            bid,days,total,expires=result["bid"],result["days"],result["total"],result["expires"]
-            if ADMIN_ID:
-                uname=f"@{user.get('username')}" if user.get("username") else "без username"
-                await bot.send_message(ADMIN_ID,
-                    f"🔔 <b>Новая заявка №{bid}</b>\n\n🚗 {CARS[cid]['name']} ({CARS[cid]['gear']})\n📅 {format_date_time(start_at)} → {format_date_time(end_at)}\n⏱ {days} суток\n📍 Подача: <b>{pickup_location}</b>" + (f"\n📝 Адрес: {pickup_location_note}" if pickup_location_note else "") + ("\n💚 Подача БЕСПЛАТНО" if pickup_location_type in ("airport","station") else "\n💰 Подача: от 1 000 ₽, уточнить по адресу") + f"\n💰 <b>{money(total)}</b>\n👤 {name}\n📞 {phone}\nTelegram: {uname}\n📝 Пожелания: {comment or '—'}\n\n⏳ Ожидает подтверждения до {expires.strftime('%d.%m.%Y %H:%M')}", reply_markup=admin_buttons(bid))
-            return mini_json({"ok":True,"id":bid,"days":days,"total":total,"pickup_fee":pickup_fee,"pickup_location":pickup_location,"pickup_location_type":pickup_location_type,"pickup_location_note":pickup_location_note,"expires":expires.strftime("%d.%m.%Y %H:%M")})
-        except Exception as exc:
-            print(f"[MINIAPP] create booking error: {type(exc).__name__}: {exc}")
-            return mini_json({"ok":False,"message":"Ошибка при создании заявки."},500)
-
-    async def mini_api_cancel_booking(request):
-        user=mini_init_user(request)
-        try:
-            payload=await request.json(); bid=int(payload.get("id",0))
-            con=db()
-            try:
-                with con.cursor() as cur:
-                    row=cur.execute("SELECT * FROM bookings WHERE id=%s AND user_id=%s",(bid,int(user["id"]))).fetchone()
-                    if not row: return mini_json({"ok":False,"message":"Бронь не найдена."},404)
-                    if row["status"] not in ("pending","confirmed"):
-                        return mini_json({"ok":False,"message":"Эту бронь уже нельзя отменить."},400)
-                    cur.execute("UPDATE bookings SET status='cancelled', expires_at=NULL WHERE id=%s",(bid,))
-                con.commit()
-            finally: con.close()
-            if ADMIN_ID:
-                await bot.send_message(ADMIN_ID,f"⚫ <b>Клиент отменил заявку №{bid}</b>\n🚗 {CARS[row['car_id']]['name']}\n📅 {format_date_time(row['start_at'])} → {format_date_time(row['end_at'])}")
-            return mini_json({"ok":True})
-        except Exception as exc:
-            print(f"[MINIAPP] cancel error: {type(exc).__name__}: {exc}")
-            return mini_json({"ok":False,"message":"Не удалось отменить бронь."},500)
-
-    async def mini_api_review(request):
-        user=mini_init_user(request)
-        try:
-            payload=await request.json(); bid=int(payload.get("booking_id",0)); rating=int(payload.get("rating",0)); review_text=str(payload.get("text","")).strip()
-            if rating<1 or rating>5: return mini_json({"ok":False,"message":"Оценка от 1 до 5."},400)
-            con=db()
-            try:
-                with con.cursor() as cur:
-                    row=cur.execute("SELECT * FROM bookings WHERE id=%s AND user_id=%s AND status='confirmed'",(bid,int(user["id"]))).fetchone()
-                    if not row: return mini_json({"ok":False,"message":"Отзыв доступен после завершённой подтверждённой аренды."},400)
-                    if ensure_tz(row["end_at"]) >= datetime.now(TZ): return mini_json({"ok":False,"message":"Отзыв можно оставить после окончания аренды."},400)
-                    cur.execute("""INSERT INTO reviews(booking_id,user_id,car_id,rating,review_text) VALUES(%s,%s,%s,%s,%s) ON CONFLICT(booking_id) DO UPDATE SET rating=EXCLUDED.rating, review_text=EXCLUDED.review_text""",(bid,int(user["id"]),row["car_id"],rating,review_text))
-                con.commit()
-            finally: con.close()
-            return mini_json({"ok":True})
-        except Exception as exc:
-            print(f"[MINIAPP] review error: {type(exc).__name__}: {exc}")
-            return mini_json({"ok":False,"message":"Не удалось сохранить отзыв."},500)
 
     # ========================================================
     # WEBHOOK / RENDER
@@ -6685,48 +6062,7 @@ async def main():
 
     app = web.Application()
 
-    app.router.add_get(
-        "/app",
-        mini_app
-    )
-    app.router.add_static(
-        "/photos",
-        str(PHOTOS_DIR),
-        show_index=False
-    )
-
-    app.router.add_get(
-        "/api/cars",
-        mini_api_cars
-    )
-    app.router.add_get(
-        "/api/availability",
-        mini_api_availability
-    )
-    app.router.add_get(
-        "/api/slots",
-        mini_api_slots
-    )
-    app.router.add_get(
-        "/api/mybookings",
-        mini_api_mybookings
-    )
-    app.router.add_get(
-        "/api/reviews",
-        mini_api_reviews
-    )
-    app.router.add_post(
-        "/api/bookings",
-        mini_api_create_booking
-    )
-    app.router.add_post(
-        "/api/bookings/cancel",
-        mini_api_cancel_booking
-    )
-    app.router.add_post(
-        "/api/reviews",
-        mini_api_review
-    )
+    await mini_app_routes(app)
 
     app.router.add_get(
         "/",
@@ -6776,6 +6112,300 @@ async def main():
 
         await bot.session.close()
 
+
+
+# ============================================================
+# TELEGRAM MINI APP / WEB APP
+# ============================================================
+import hashlib
+import hmac
+import json
+from urllib.parse import parse_qsl
+
+WEBAPP_DIR = Path(__file__).resolve().parent / "webapp"
+MINI_BOT = None
+PHOTOS_DIR = Path(__file__).resolve().parent / "photos"
+DEPOSIT_AMOUNT = 10000
+LOCATION_TYPES = {
+    "airport": ("Аэропорт Храброво", 0),
+    "station": ("Южный вокзал", 0),
+    "city": ("Калининград", None),
+    "region": ("Калининградская область", None),
+    "other": ("Другое место", None),
+}
+
+
+def mini_validate_init_data(init_data: str):
+    """Validate Telegram WebApp initData and return user id when available."""
+    if not init_data or not BOT_TOKEN:
+        return None
+    try:
+        pairs = dict(parse_qsl(init_data, keep_blank_values=True))
+        received_hash = pairs.pop("hash", "")
+        if not received_hash:
+            return None
+        data_check = "\n".join(f"{k}={pairs[k]}" for k in sorted(pairs))
+        secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+        calc = hmac.new(secret_key, data_check.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(calc, received_hash):
+            return None
+        user_raw = pairs.get("user", "")
+        user = json.loads(user_raw) if user_raw else {}
+        uid = user.get("id")
+        return int(uid) if uid is not None else None
+    except Exception:
+        return None
+
+
+def mini_user_id(request):
+    uid = mini_validate_init_data(request.headers.get("X-Telegram-Init-Data", ""))
+    return uid
+
+
+def mini_json(data, status=200):
+    return web.json_response(data, status=status, headers={"Cache-Control": "no-store"})
+
+
+def mini_car_payload():
+    load_car_settings()
+    result=[]
+    for cid, c in active_cars().items():
+        photos=[]
+        for p in c.get("photos", []):
+            if Path(p).exists():
+                photos.append(p.replace("\\", "/"))
+        result.append({
+            "id": cid,
+            "name": c.get("name", cid),
+            "gear": c.get("gear", "АКПП"),
+            "fuel": c.get("fuel", "Бензин"),
+            "seats": int(c.get("seats", 5)),
+            "description": c.get("description", ""),
+            "rates": list(c.get("rates", (0,0,0))),
+            "photos": photos,
+            "color": "Белый",
+        })
+    return result
+
+
+def mini_parse_local_iso(value):
+    dt = datetime.fromisoformat(value)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=TZ)
+    return dt.astimezone(TZ)
+
+
+def mini_slots_sync(car_id, year, month, start_at=None):
+    if car_id not in active_cars():
+        return {"mode":"start", "slots":{}}
+    slots={}
+    import calendar
+    days=calendar.monthrange(year, month)[1]
+    now=datetime.now(TZ)
+    start_dt=mini_parse_local_iso(start_at) if start_at else None
+    for day_n in range(1, days+1):
+        d=date(year,month,day_n)
+        arr=[]
+        for hour in range(PICKUP_START_HOUR, PICKUP_END_HOUR+1):
+            candidate=local_dt(d,time(hour,0))
+            if start_dt is None:
+                if candidate <= now:
+                    continue
+                if candidate < now + timedelta(hours=0):
+                    continue
+                if booking_overlaps(car_id,candidate,candidate+timedelta(hours=1)):
+                    continue
+            else:
+                if candidate <= start_dt:
+                    continue
+                if booking_overlaps(car_id,start_dt,candidate):
+                    continue
+            arr.append(hour)
+        slots[d.isoformat()]=arr
+    return {"mode":"end" if start_dt else "start", "slots":slots}
+
+
+def mini_create_booking_sync(user_id, cid, start_at, end_at, name, phone, comment, location_type, location_note):
+    start_at=mini_parse_local_iso(start_at)
+    end_at=mini_parse_local_iso(end_at)
+    if cid not in active_cars():
+        return {"ok":False,"reason":"car"}
+    if end_at <= start_at:
+        return {"ok":False,"reason":"period"}
+    now=datetime.now(TZ)
+    if start_at <= now:
+        return {"ok":False,"reason":"past"}
+    if start_at.time() < time(PICKUP_START_HOUR,0) or start_at.time() > time(PICKUP_END_HOUR,0):
+        return {"ok":False,"reason":"time"}
+    if end_at.time() < time(PICKUP_START_HOUR,0) or end_at.time() > time(PICKUP_END_HOUR,0):
+        return {"ok":False,"reason":"time"}
+    if location_type not in LOCATION_TYPES:
+        return {"ok":False,"reason":"location"}
+    if location_type == "other" and not (location_note or "").strip():
+        return {"ok":False,"reason":"location_note"}
+    days=rental_days(start_at,end_at)
+    daily=rate_for_days(cid,days)
+    rental_total=days*daily
+    location_fee=0 if location_type in ("airport","station") else None
+    con=db()
+    try:
+        with con.cursor() as cur:
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext('balticar-bookings'))")
+            cur.execute("UPDATE bookings SET status='expired' WHERE status='pending' AND expires_at IS NOT NULL AND expires_at < NOW()")
+            buffer_delta=timedelta(hours=BUFFER_HOURS)
+            maintenance=cur.execute("SELECT id FROM car_maintenance WHERE car_id=%s AND start_at < %s AND end_at > %s LIMIT 1",(cid,end_at,start_at)).fetchone()
+            if maintenance:
+                con.rollback(); return {"ok":False,"reason":"maintenance"}
+            overlap=cur.execute("""SELECT id FROM bookings WHERE car_id=%s AND status IN ('pending','confirmed') AND start_at < %s AND end_at > %s LIMIT 1""",(cid,end_at+buffer_delta,start_at-buffer_delta)).fetchone()
+            if overlap:
+                con.rollback(); return {"ok":False,"reason":"overlap"}
+            expires=datetime.now(TZ)+timedelta(minutes=HOLD_MINUTES)
+            cur.execute("""INSERT INTO bookings (user_id,username,car_id,start_date,end_date,start_at,end_at,name,phone,comment,total,status,created_at,expires_at,pickup_location,pickup_location_type,pickup_location_note,pickup_location_fee) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending',%s,%s,%s,%s,%s,%s) RETURNING id""",(
+                user_id,"",cid,start_at.date(),end_at.date(),start_at,end_at,name,phone,comment,rental_total,datetime.now(TZ),expires,
+                LOCATION_TYPES[location_type][0],location_type,location_note or "",location_fee))
+            bid=cur.fetchone()["id"]
+        con.commit()
+        return {"ok":True,"bid":bid,"days":days,"total":rental_total,"rental_total":rental_total,"location_fee":location_fee,"location":LOCATION_TYPES[location_type][0],"expires":expires.isoformat()}
+    except Exception:
+        con.rollback(); raise
+    finally:
+        con.close()
+
+
+def mini_add_location_columns():
+    con=db()
+    try:
+        with con.cursor() as cur:
+            for sql in [
+                "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_location TEXT",
+                "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_location_type TEXT",
+                "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_location_note TEXT",
+                "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_location_fee INTEGER",
+            ]:
+                cur.execute(sql)
+        con.commit()
+    finally:
+        con.close()
+
+
+def mini_auth_or_401(request):
+    uid=mini_user_id(request)
+    if uid is None:
+        raise web.HTTPUnauthorized(text="Telegram authorization required")
+    return uid
+
+async def mini_app(request):
+    if not WEBAPP_DIR.exists():
+        raise web.HTTPNotFound(text="Mini App not found")
+    return web.FileResponse(WEBAPP_DIR / "index.html")
+
+async def mini_photo(request):
+    name=request.match_info.get("name","")
+    p=(PHOTOS_DIR / name).resolve()
+    if PHOTOS_DIR.resolve() not in p.parents or not p.is_file():
+        raise web.HTTPNotFound()
+    return web.FileResponse(p)
+
+async def mini_cars(request):
+    return mini_json({"cars":mini_car_payload()})
+
+async def mini_slots(request):
+    try:
+        cid=request.query.get("car_id","")
+        year=int(request.query.get("year")); month=int(request.query.get("month"))
+        start_at=request.query.get("start_at")
+        return mini_json(mini_slots_sync(cid,year,month,start_at))
+    except Exception as exc:
+        print(f"[MINI/SLOTS] {type(exc).__name__}: {exc}")
+        return mini_json({"message":"Не удалось загрузить доступное время."},500)
+
+async def mini_mybookings(request):
+    uid=mini_auth_or_401(request)
+    mini_add_location_columns()
+    con=db()
+    try:
+        with con.cursor() as cur:
+            rows=cur.execute("""SELECT b.*, COALESCE(r.id,0) AS review_id FROM bookings b LEFT JOIN reviews r ON r.booking_id=b.id WHERE b.user_id=%s ORDER BY b.id DESC LIMIT 20""",(uid,)).fetchall()
+        out=[]
+        now=datetime.now(TZ)
+        for r in rows:
+            sa=ensure_tz(r.get("start_at")) if r.get("start_at") else local_dt(r["start_date"],time(10,0))
+            ea=ensure_tz(r.get("end_at")) if r.get("end_at") else local_dt(r["end_date"],time(17,0))
+            out.append({"id":r["id"],"status":r["status"],"car_name":CARS.get(r["car_id"],{}).get("name",r["car_id"]),"car_id":r["car_id"],"start_at":sa.strftime("%d.%m.%Y · %H:%M"),"end_at":ea.strftime("%d.%m.%Y · %H:%M"),"total":r["total"],"past":ea < now,"reviewed":bool(r.get("review_id")),"comment":r.get("comment") or "","pickup_location":r.get("pickup_location") or "","pickup_location_type":r.get("pickup_location_type") or "","pickup_location_note":r.get("pickup_location_note") or "","pickup_location_fee":r.get("pickup_location_fee")})
+        return mini_json({"bookings":out})
+    finally: con.close()
+
+async def mini_bookings(request):
+    uid=mini_auth_or_401(request)
+    try:
+        data=await request.json()
+        name=str(data.get("name","")).strip(); phone=str(data.get("phone","")).strip()
+        cid=str(data.get("car_id","")).strip(); comment=str(data.get("comment","")).strip()
+        location_type=str(data.get("pickup_location_type",data.get("location_type","airport"))).strip()
+        location_note=str(data.get("pickup_location_note",data.get("location_note",""))).strip()
+        result=mini_create_booking_sync(uid,cid,str(data.get("start_at")),str(data.get("end_at")),name,phone,comment,location_type,location_note)
+        if not result["ok"]:
+            messages={"car":"Автомобиль недоступен.","period":"Проверьте даты и время.","past":"Выбранное время уже прошло.","time":"Выдача и возврат доступны с 08:00 до 20:00.","location":"Выберите место подачи.","location_note":"Укажите адрес или комментарий для другого места.","maintenance":"Автомобиль недоступен в выбранный период.","overlap":"Эти даты или время уже заняты. Выберите другой вариант."}
+            return mini_json({"message":messages.get(result["reason"],"Не удалось создать заявку.")},409)
+        # Notify admin in Telegram without changing existing /publish.
+        try:
+            loc=result["location"]
+            loc_line=f"📍 Место подачи: <b>{loc}</b>"
+            if location_note: loc_line += f"\n📝 {escape_html(location_note)}"
+            if MINI_BOT is not None:
+                await MINI_BOT.send_message(ADMIN_ID, f"📥 <b>Новая заявка из Mini App №{result['bid']}</b>\n🚗 {escape_html(CARS[cid]['name'])}\n👤 {escape_html(name)}\n📞 {escape_html(phone)}\n📅 {mini_parse_local_iso(str(data.get('start_at'))).strftime('%d.%m.%Y %H:%M')} → {mini_parse_local_iso(str(data.get('end_at'))).strftime('%d.%m.%Y %H:%M')}\n{loc_line}\n💰 Аренда: <b>{money(result['rental_total'])}</b>\n🔐 Залог: <b>{money(DEPOSIT_AMOUNT)}</b>")
+        except Exception as exc:
+            print(f"[MINI/ADMIN_NOTIFY] {type(exc).__name__}: {exc}")
+        return mini_json({"id":result["bid"],"days":result["days"],"total":result["total"],"location_fee":result["location_fee"],"location":result["location"],"expires":result["expires"]})
+    except Exception as exc:
+        print(f"[MINI/BOOKING] {type(exc).__name__}: {exc}")
+        return mini_json({"message":"Не удалось отправить заявку. Попробуйте ещё раз."},500)
+
+async def mini_cancel_booking(request):
+    uid=mini_auth_or_401(request)
+    data=await request.json(); bid=int(data.get("id",0))
+    con=db()
+    try:
+        with con.cursor() as cur:
+            row=cur.execute("SELECT * FROM bookings WHERE id=%s AND user_id=%s FOR UPDATE",(bid,uid)).fetchone()
+            if not row: con.rollback(); return mini_json({"message":"Бронирование не найдено."},404)
+            if row["status"] not in ("pending","confirmed"): con.rollback(); return mini_json({"message":"Это бронирование уже обработано."},409)
+            cur.execute("UPDATE bookings SET status='cancelled', expires_at=NULL WHERE id=%s",(bid,))
+        con.commit(); return mini_json({"ok":True})
+    finally: con.close()
+
+async def mini_reviews_get(request):
+    con=db()
+    try:
+        with con.cursor() as cur:
+            rows=cur.execute("""SELECT r.id,r.booking_id,r.rating,r.review_text AS text,r.created_at,b.name,c.car_id FROM reviews r JOIN bookings b ON b.id=r.booking_id JOIN car_settings c ON c.car_id=r.car_id ORDER BY r.created_at DESC LIMIT 30""").fetchall()
+        return mini_json({"reviews":[{"id":r["id"],"booking_id":r["booking_id"],"rating":r["rating"],"text":r.get("text") or "","name":r.get("name") or "Клиент","car_name":CARS.get(r["car_id"],{}).get("name",r["car_id"]),"created_at":ensure_tz(r["created_at"]).strftime("%d.%m.%Y")} for r in rows]})
+    finally: con.close()
+
+async def mini_reviews_post(request):
+    uid=mini_auth_or_401(request); data=await request.json(); bid=int(data.get("booking_id",0)); rating=max(1,min(5,int(data.get("rating",5)))); text=str(data.get("text","")).strip()
+    con=db()
+    try:
+        with con.cursor() as cur:
+            row=cur.execute("SELECT * FROM bookings WHERE id=%s AND user_id=%s AND status='confirmed'",(bid,uid)).fetchone()
+            if not row: con.rollback(); return mini_json({"message":"Отзыв доступен после подтверждённой аренды."},409)
+            end_at=ensure_tz(row["end_at"]) if row.get("end_at") else local_dt(row["end_date"],time(17,0))
+            if end_at >= datetime.now(TZ): con.rollback(); return mini_json({"message":"Оставить отзыв можно после завершения аренды."},409)
+            cur.execute("INSERT INTO reviews(booking_id,user_id,car_id,rating,review_text) VALUES(%s,%s,%s,%s,%s) ON CONFLICT(booking_id) DO NOTHING",(bid,uid,row["car_id"],rating,text))
+        con.commit(); return mini_json({"ok":True})
+    finally: con.close()
+
+async def mini_app_routes(app):
+    mini_add_location_columns()
+    app.router.add_get("/app", mini_app)
+    app.router.add_get("/photos/{name:.*}", mini_photo)
+    app.router.add_get("/api/cars", mini_cars)
+    app.router.add_get("/api/slots", mini_slots)
+    app.router.add_get("/api/mybookings", mini_mybookings)
+    app.router.add_post("/api/bookings", mini_bookings)
+    app.router.add_post("/api/bookings/cancel", mini_cancel_booking)
+    app.router.add_get("/api/reviews", mini_reviews_get)
+    app.router.add_post("/api/reviews", mini_reviews_post)
 
 # ============================================================
 # START
