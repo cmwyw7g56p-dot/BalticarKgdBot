@@ -3,196 +3,150 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#f4f7fa">
+<meta name="theme-color" content="#f5f7fa">
 <title>BALTICAR — аренда автомобилей</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-:root{--bg:#06101a;--panel:#0b1b29;--panel2:#102537;--line:rgba(255,255,255,.09);--text:#f5f8fb;--muted:#91a3b5;--blue:#1683ff;--blue2:#0b63d9;--green:#2bd576;--amber:#ffb62b;--danger:#ff5f6d;--radius:22px}
-*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;min-height:100%;-webkit-font-smoothing:antialiased}body{background:radial-gradient(900px 500px at 50% -10%,#123657 0,#07131f 55%,#06101a 100%)}button{font:inherit;color:inherit;border:0;cursor:pointer}#app{max-width:720px;margin:auto;padding:env(safe-area-inset-top) 16px calc(24px + env(safe-area-inset-bottom))}
-.top{display:flex;align-items:center;justify-content:space-between;padding:14px 2px 12px;position:sticky;top:0;z-index:5;background:linear-gradient(var(--bg) 70%,transparent)}.brand{font-weight:800;letter-spacing:.08em;font-size:18px}.brand span{color:#5db1ff}.topbtn{width:42px;height:42px;border-radius:14px;background:rgba(255,255,255,.06);border:1px solid var(--line);font-size:19px}.screen{display:none}.screen.active{display:block;animation:in .22s ease}@keyframes in{from{opacity:.2;transform:translateY(8px)}to{opacity:1;transform:none}}
-.hero{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:28px;background:#0b1a27;box-shadow:0 20px 60px rgba(0,0,0,.28);margin-bottom:18px}.hero img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover}.heroShade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.02) 25%,rgba(2,10,16,.88) 100%)}.heroCopy{position:absolute;left:20px;right:20px;bottom:18px}.eyebrow{font-size:12px;color:#9acaff;letter-spacing:.13em;text-transform:uppercase;font-weight:700}.hero h1{font-size:30px;line-height:1.05;margin:6px 0}.hero p{margin:0;color:#d1dde8}.sectionTitle{font-size:23px;font-weight:800;margin:20px 2px 10px}.sub{color:var(--muted);font-size:14px;line-height:1.5}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.navcard{padding:17px;border-radius:20px;background:linear-gradient(145deg,#112a3e,#0b1c2a);border:1px solid var(--line);min-height:98px;text-align:left;box-shadow:0 10px 30px rgba(0,0,0,.18)}.navcard .ico{font-size:25px}.navcard strong{display:block;margin-top:8px;font-size:16px}.navcard small{display:block;margin-top:4px;color:var(--muted)}
-.car{overflow:hidden;background:linear-gradient(145deg,#0d2232,#091824);border:1px solid var(--line);border-radius:24px;margin:14px 0;box-shadow:0 15px 40px rgba(0,0,0,.22)}.car img{width:100%;display:block;aspect-ratio:16/9;object-fit:cover}.carbody{padding:15px}.carline{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.carname{font-size:19px;font-weight:800}.from{font-size:14px;color:#9bcfff;text-align:right;white-space:nowrap}.from b{display:block;font-size:18px;color:#fff}.chips{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0}.chip{padding:7px 9px;border-radius:10px;background:rgba(255,255,255,.06);color:#c9d5df;font-size:12px}.primary{width:100%;padding:14px 16px;border-radius:15px;background:linear-gradient(135deg,var(--blue),#0561d2);font-weight:800;box-shadow:0 10px 24px rgba(22,131,255,.24)}.secondary{width:100%;padding:13px 16px;border-radius:15px;background:rgba(255,255,255,.055);border:1px solid var(--line);font-weight:700}.row{display:flex;gap:10px}.row>*{flex:1}.back{margin:6px 0 14px;color:#9bcfff;background:none;font-weight:700;padding:6px 0}.detailImg{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:24px;border:1px solid var(--line);display:block}.detailTitle{font-size:27px;margin:15px 0 5px}.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:14px 0}.fact{padding:12px;border-radius:15px;background:rgba(255,255,255,.045);border:1px solid var(--line);font-size:12px;color:var(--muted)}.fact b{display:block;color:#fff;font-size:14px;margin-top:5px}.block{padding:16px;border-radius:20px;background:rgba(255,255,255,.035);border:1px solid var(--line);margin:12px 0}.block h3{margin:0 0 9px;font-size:16px}.tariffs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.tariff{padding:12px;border-radius:14px;background:#0c2030;border:1px solid var(--line)}.tariff span{display:block;color:var(--muted);font-size:11px}.tariff b{display:block;margin-top:6px;font-size:15px}
-.calendar{background:#0b1b29;border:1px solid var(--line);border-radius:22px;padding:13px}.calhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.calhead button{background:rgba(255,255,255,.06);width:40px;height:40px;border-radius:12px}.week,.days{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}.week div{text-align:center;color:var(--muted);font-size:11px;padding:5px 0}.day{min-height:42px;border-radius:12px;background:rgba(255,255,255,.035);display:flex;align-items:center;justify-content:center;border:1px solid transparent;font-size:13px}.day.free{background:#0e2435}.day.busy{color:#66798b;background:#101a22}.day.selected{background:var(--blue);font-weight:800}.day.disabled{opacity:.25}.times{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.time{padding:12px 4px;border-radius:12px;background:rgba(255,255,255,.05);border:1px solid var(--line);font-size:13px}.time.selected{background:var(--blue);font-weight:800}.summary{margin-top:14px;padding:17px;border-radius:20px;background:linear-gradient(145deg,#102b40,#0b1b29);border:1px solid rgba(62,159,255,.25)}.summary .big{font-size:28px;font-weight:900;margin-top:4px}.hint{color:var(--amber);font-size:12px;line-height:1.4;margin-top:7px}.field{margin:10px 0}.field label{display:block;color:var(--muted);font-size:12px;margin:0 0 6px}.field input,.field textarea{width:100%;border:1px solid var(--line);background:#091824;color:#fff;border-radius:14px;padding:13px;font:inherit;outline:none}.field textarea{min-height:88px;resize:vertical}.bookingCard{padding:17px;border-radius:20px;background:linear-gradient(145deg,#102638,#0a1926);border:1px solid var(--line);margin:12px 0}.status{display:inline-flex;padding:6px 9px;border-radius:999px;background:rgba(255,255,255,.07);font-size:11px}.ok{color:#74f0aa}.warn{color:#ffd278}.danger{color:#ff8d98}.toast{position:fixed;left:16px;right:16px;bottom:calc(18px + env(safe-area-inset-bottom));z-index:20;padding:13px 15px;border-radius:16px;background:#122637;border:1px solid var(--line);box-shadow:0 16px 40px #0008;display:none}.toast.show{display:block;animation:in .2s ease}.empty{text-align:center;padding:40px 20px;color:var(--muted)}
-@media(min-width:650px){.hero h1{font-size:38px}.car{display:grid;grid-template-columns:1.2fr 1fr}.car img{height:100%;aspect-ratio:auto}.carbody{display:flex;flex-direction:column;justify-content:center}}
-
-html.light{--bg:#f4f7fa;--panel:#ffffff;--panel2:#eef3f7;--line:rgba(20,42,60,.12);--text:#142331;--muted:#607487}
-html.light body{background:linear-gradient(180deg,#f8fafc 0,#eef3f7 100%);color:var(--text)}
-html.light .top{background:linear-gradient(#f4f7fa 70%,transparent)}
-html.light .brand{color:#142331}
-html.light .topbtn{background:rgba(20,42,60,.06);border-color:var(--line);color:#142331}
-html.light .hero{background:#fff;box-shadow:0 18px 50px rgba(25,55,80,.12)}
-html.light .heroShade{background:linear-gradient(180deg,rgba(0,0,0,.01) 25%,rgba(2,10,16,.72) 100%)}
-html.light .hero p{color:#eef5fa}
-html.light .navcard{background:linear-gradient(145deg,#fff,#f1f5f8);box-shadow:0 10px 28px rgba(25,55,80,.09);border-color:var(--line)}
-html.light .navcard strong{color:#142331}
-html.light .navcard small{color:#607487}
-html.light .car{background:linear-gradient(145deg,#fff,#f2f6f9);box-shadow:0 12px 34px rgba(25,55,80,.10);border-color:var(--line)}
-html.light .carname,html.light .detailTitle{color:#142331}
-html.light .from{color:#1675d1}
-html.light .from b{color:#142331}
-html.light .chip{background:#eaf0f4;color:#42596b}
-html.light .secondary{background:#fff;border-color:#cbd8e2;color:#173044}
-html.light .back{color:#1675d1}
-html.light .facts .fact{background:#f1f5f8;border-color:#d8e2e9;color:#607487}
-html.light .fact b{color:#142331}
-html.light .block{background:#fff;border-color:#d8e2e9}
-html.light .block h3{color:#142331}
-html.light .tariff{background:#f1f5f8;border-color:#d8e2e9}
-html.light .tariff b{color:#142331}
-html.light .calendar{background:#fff;border-color:#d8e2e9}
-html.light .calhead button{background:#eef3f7;color:#173044}
-html.light .day{background:#f2f5f7;color:#344b5d}
-html.light .day.free{background:#e7f1f8}
-html.light .day.busy{color:#9aa8b3;background:#f0f2f4}
-html.light .day.selected{background:#1683ff;color:#fff}
-html.light .time{background:#f2f5f7;border-color:#d8e2e9;color:#253b4d}
-html.light .time:disabled{color:#a0adb7;background:#edf0f2}
-html.light .time.selected{background:#1683ff;color:#fff}
-html.light .summary{background:linear-gradient(145deg,#f4f9fd,#fff);border-color:#cfe1ef}
-html.light .summary .big{color:#142331}
-html.light .field input,html.light .field textarea{background:#fff;color:#142331;border-color:#ccd9e2}
-html.light .bookingCard{background:linear-gradient(145deg,#fff,#f1f5f8);border-color:#d8e2e9}
-html.light .status{background:#eaf0f4;color:#42596b}
-html.light .toast{background:#173044;color:#fff}
-html.light .empty{color:#607487}
-html.light .galleryCount{background:rgba(20,35,49,.72);color:#fff}
-
-
-/* CABINET 2.0 */
-.bookingHero{padding:16px;border-radius:22px;background:linear-gradient(135deg,rgba(22,131,255,.10),rgba(43,213,118,.08));border:1px solid rgba(22,131,255,.20);margin:14px 0}
-.bookingHero .heroLine{display:flex;justify-content:space-between;gap:10px;align-items:center}
-.bookingHero .heroTitle{font-size:18px;font-weight:900}
-.bookingHero .countdown{margin-top:10px;font-size:15px;font-weight:800}
-.bookingHero .countdown small{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-top:3px}
-.bookingCardTop{display:flex;gap:12px;align-items:flex-start}
-.bookingCarThumb{width:88px;height:62px;border-radius:14px;object-fit:cover;background:#e9eef3;flex:0 0 88px;border:1px solid var(--line)}
-.bookingCardInfo{min-width:0;flex:1}.bookingCardInfo b{display:block;font-size:17px;line-height:1.2}
-.bookingNo{font-size:11px;color:var(--muted);margin-bottom:4px}
-.bookingFacts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
-.bookingFact{padding:10px 11px;border-radius:14px;background:rgba(20,40,60,.045);border:1px solid #dfe5eb}
-.bookingFact span{display:block;font-size:10px;color:#687585}.bookingFact b{font-size:13px;margin-top:4px}
-.bookingStatusBox{margin-top:12px;padding:12px 14px;border-radius:15px;background:#f4f7fa;border:1px solid #d7e0e8;line-height:1.4}
-.bookingStatusBox.confirmed{background:#edf9f2;border-color:#c9ead8}.bookingStatusBox.completed{background:#f0f3f5}
-html.dark .bookingHero{background:linear-gradient(135deg,rgba(22,131,255,.13),rgba(43,213,118,.08));border-color:rgba(62,159,255,.25)}
-html.dark .bookingCarThumb{background:#142636}
-html.dark .bookingFact{background:#142636;border-color:#2a3a48}
-html.dark .bookingFact span{color:#9fb0bf}
-html.dark .bookingFact b{color:#f2f6fa}
-html.dark .bookingStatusBox{background:#142636;border-color:#2a3a48;color:#b7c4cf}
-html.dark .bookingStatusBox.confirmed{background:#123127;border-color:#285c46}
-@media(max-width:380px){.bookingCarThumb{width:76px;height:56px;flex-basis:76px}.bookingFacts{gap:6px}}
-
-
-.carGallery,.detailGallery{position:relative;width:100%;overflow:hidden;border-radius:24px;background:#fff;border:1px solid var(--line);touch-action:pan-y}
-.carGallery{border-radius:24px 24px 0 0;border-left:0;border-right:0;border-top:0}
-.galleryImg{width:100%;aspect-ratio:3/2;object-fit:contain;display:block;background:#fff;user-select:none;-webkit-user-drag:none}
-.detailGallery .galleryImg{aspect-ratio:3/2}
-.galleryBtn{position:absolute;top:50%;transform:translateY(-50%);width:40px;height:40px;border-radius:50%;border:1px solid rgba(20,35,49,.18);background:rgba(255,255,255,.88);color:#17212b;font-size:29px;line-height:1;display:flex;align-items:center;justify-content:center;z-index:3;padding:0;box-shadow:0 5px 18px rgba(20,40,60,.12)}
-.galleryBtn.prev{left:10px}.galleryBtn.next{right:10px}
-.galleryDots{position:absolute;left:0;right:0;bottom:10px;display:flex;justify-content:center;gap:6px;z-index:3}
-.galleryDot{width:7px;height:7px;border-radius:50%;background:rgba(23,33,43,.30);border:0;padding:0}.galleryDot.active{background:#1683ff;transform:scale(1.15)}
-.galleryCount{position:absolute;right:10px;top:10px;padding:5px 8px;border-radius:10px;background:rgba(20,35,49,.72);color:#fff;font-size:11px;font-weight:700;z-index:3}
-.detailGallery{margin-bottom:14px}
-.locationPicker{display:grid;gap:9px;margin-top:10px}
-.locationOption{display:flex;align-items:center;gap:11px;padding:12px 13px;border-radius:16px;border:1px solid #dfe5eb;background:#fff;text-align:left;color:#17212b}
-.locationOption input{accent-color:#1683ff;flex:0 0 auto}
-.locationOption .locIcon{font-size:22px;flex:0 0 28px;text-align:center}.locationOption .locMain{flex:1}.locationOption .locMain b{display:block;font-size:14px}.locationOption .locMain span{display:block;color:#687585;font-size:12px;margin-top:3px}.locationFree{color:#198754;font-weight:850;font-size:12px;white-space:nowrap}
-.locationOption.selected{border-color:#1683ff;box-shadow:0 0 0 2px rgba(22,131,255,.10)}
-.locationRequest{margin-top:10px}
-.locationNotice{margin-top:10px;padding:11px 12px;border-radius:14px;background:#eef6fc;border:1px solid #d7e9f6;color:#36546b;font-size:12px;line-height:1.45}
-.locationCost{padding:13px 14px;border-radius:15px;background:#f7f9fb;border:1px solid #dfe5eb;margin-top:10px}
-.locationCost .priceRow{margin:4px 0}
-html.dark .carGallery,html.dark .detailGallery{background:#fff}
-html.dark .galleryBtn{background:rgba(12,29,43,.88);border-color:rgba(255,255,255,.16);color:#fff}
-html.dark .galleryDot{background:rgba(255,255,255,.38)}html.dark .galleryDot.active{background:#1683ff}
-html.dark .locationOption{background:#102638;border-color:rgba(255,255,255,.09);color:#f5f8fb}.dark .locationOption .locMain span{color:#91a3b5}.dark .locationNotice{background:#112b3c;border-color:#24475c;color:#b7c4cf}.dark .locationCost{background:#142636;border-color:#2a3a48}
-
-/* BALTICAR WHITE FLEET — visual match to approved mockup */
-.carlistGrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
-.carlistGrid .car{margin:0;border-radius:20px;background:#fff;border-color:#dfe7ed;box-shadow:0 10px 26px rgba(25,55,80,.09)}
-.carlistGrid .carGallery{border-radius:20px 20px 0 0;border:0}
-.carlistGrid .galleryImg{aspect-ratio:3/2;background:#fff;object-fit:contain}
-.carlistGrid .carbody{padding:12px}
-.carlistGrid .carname{font-size:15px;color:#142331}
-.carTop{display:flex;gap:7px;align-items:flex-start;justify-content:space-between}
-.onlineLabel{font-size:9px;line-height:1.2;color:#198754;background:#e7f8ee;border-radius:999px;padding:5px 6px;white-space:nowrap;font-weight:800}
-.carDescription{font-size:11px;color:#607487;line-height:1.35;margin-top:6px;min-height:30px}
-.carlistGrid .chips{gap:5px;margin:8px 0}
-.carlistGrid .chip{font-size:10px;padding:5px 6px;background:#edf2f5;color:#42596b}
-.carPrice{padding:9px 10px;border-radius:13px;background:#f5f8fa;margin:8px 0 9px}
-.carPrice .label{display:block;font-size:9px;color:#718394;line-height:1.25}
-.carPrice b{font-size:17px;color:#142331}
-.carPrice small{font-size:9px;color:#718394}
-.carActions{display:grid;grid-template-columns:1fr 1fr;gap:7px}
-.carActions button{padding:10px 7px;border-radius:12px;font-size:11px}
-.carActions .primary{box-shadow:none}
-.depositBox{margin:10px 0;padding:10px 12px;border-radius:14px;background:#fff8e7;border:1px solid #f3d48a;color:#765a00;font-size:12px}
-.locationCard{margin:12px 0;padding:14px 15px;border-radius:18px;background:#eef7ff;border:1px solid #cfe4f7}
-.locationTitle{font-size:15px;font-weight:900;color:#142331}.locationText{margin-top:6px;color:#4d6678;font-size:12px;line-height:1.5}
-.locationPicker{display:grid;gap:8px;margin-top:12px}.locationOption{width:100%}
-.locationNotice{margin-top:10px;padding:10px 12px;border-radius:13px;background:#eef7ff;border:1px solid #cfe4f7;color:#4d6678;font-size:11px;line-height:1.4}
-.locationCost{margin-top:9px;padding:10px 12px;border-radius:13px;background:#f5f8fa;border:1px solid #dce6ec;color:#253b4d;font-size:12px;font-weight:800}
-.priceBreak{margin-top:12px;padding:11px 12px;border-radius:15px;background:#f5f8fa;border:1px solid #dce5eb}.priceRow{display:flex;justify-content:space-between;gap:10px;padding:4px 0;font-size:12px}.priceRow b{font-weight:850}
-html.light .carlistGrid .car{background:#fff}
-html.dark .carlistGrid .car{background:#fff;color:#142331}
-html.dark .carlistGrid .carname,html.dark .carlistGrid .carPrice b{color:#142331}
-html.dark .carlistGrid .carDescription,html.dark .carlistGrid .chip{color:#42596b}
-html.dark .carPrice{background:#f5f8fa}
-html.dark .locationCard{background:#eef7ff;border-color:#cfe4f7}
-html.dark .locationTitle{color:#142331}.locationText{color:#4d6678}
-@media(max-width:430px){.carlistGrid{gap:9px}.carlistGrid .carbody{padding:10px}.carlistGrid .carname{font-size:14px}.onlineLabel{font-size:8px;padding:4px 5px}.carDescription{font-size:10px}.carPrice b{font-size:15px}.carActions{grid-template-columns:1fr}.carActions .secondary{display:none}}
+:root{
+  --bg:#f5f7fa; --surface:#fff; --surface2:#eef2f6; --text:#13202b; --muted:#6f7f8d;
+  --line:#dfe6ec; --blue:#1677e8; --blue-dark:#0d5fc4; --green:#1aa866; --amber:#d98a00;
+  --shadow:0 12px 32px rgba(18,38,55,.08); --radius:22px;
+}
+html.dark{
+  --bg:#07111b; --surface:#0d1b27; --surface2:#132635; --text:#f5f8fb; --muted:#91a3b5;
+  --line:rgba(255,255,255,.09); --blue:#1683ff; --blue-dark:#0b63d9; --green:#2bd576; --amber:#ffb62b;
+  --shadow:0 16px 40px rgba(0,0,0,.24);
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+body{background:linear-gradient(180deg,var(--bg) 0,var(--bg) 100%)}
+button,input,textarea{font:inherit;color:inherit}
+button{border:0;cursor:pointer}
+#app{max-width:760px;margin:auto;padding:env(safe-area-inset-top) 14px calc(28px + env(safe-area-inset-bottom))}
+.top{height:58px;display:grid;grid-template-columns:44px 1fr 44px;align-items:center;position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 90%,transparent);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+.brand{text-align:center;font-size:17px;font-weight:900;letter-spacing:.12em}
+.topbtn{width:40px;height:40px;border-radius:13px;background:var(--surface);border:1px solid var(--line);box-shadow:0 4px 14px rgba(0,0,0,.05);font-size:22px}
+.screen{display:none}.screen.active{display:block;animation:fadeUp .22s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.eyebrow{font-size:11px;font-weight:800;letter-spacing:.12em;color:var(--blue);text-transform:uppercase}
+.sectionTitle{font-size:26px;line-height:1.12;font-weight:900;margin:20px 2px 7px}
+.sub{font-size:14px;line-height:1.5;color:var(--muted)}
+.row{display:flex;gap:10px}.row>*{flex:1;min-width:0}
+.heroHome{position:relative;overflow:hidden;border-radius:28px;background:#0c1b27;min-height:330px;box-shadow:var(--shadow);margin:8px 0 18px}
+.heroHome img{width:100%;height:100%;min-height:330px;object-fit:cover;display:block}
+.heroHome:after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(4,10,15,.02) 22%,rgba(4,10,15,.9) 100%)}
+.heroHomeCopy{position:absolute;z-index:1;left:22px;right:22px;bottom:22px;color:#fff}
+.heroHomeCopy h1{font-size:35px;line-height:1.02;margin:7px 0 7px;letter-spacing:-.03em}
+.heroHomeCopy p{margin:0;color:#d9e5ee;font-size:15px}
+.heroBadge{display:inline-flex;align-items:center;gap:7px;padding:7px 10px;border-radius:999px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);font-size:11px;font-weight:800}
+.homeCta{width:100%;margin-top:14px;padding:16px 18px;border-radius:16px;background:#fff;color:#12202c;font-weight:900;box-shadow:0 10px 26px rgba(0,0,0,.16)}
+.homeQuick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.quick{padding:16px;border-radius:18px;background:var(--surface);border:1px solid var(--line);text-align:left;box-shadow:var(--shadow)}
+.quickIcon{font-size:22px}.quick b{display:block;margin-top:8px;font-size:15px}.quick span{display:block;margin-top:3px;font-size:12px;color:var(--muted)}
+.primary{width:100%;padding:15px 17px;border-radius:15px;background:linear-gradient(135deg,var(--blue),var(--blue-dark));color:#fff;font-weight:850;box-shadow:0 9px 22px rgba(22,131,255,.22)}
+.secondary{width:100%;padding:14px 16px;border-radius:15px;background:var(--surface);border:1px solid var(--line);font-weight:750}
+.back{margin:7px 0 12px;padding:7px 0;background:none;color:var(--blue);font-weight:800}
+.carlistGrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
+.car{overflow:hidden;background:var(--surface);border:1px solid var(--line);border-radius:22px;box-shadow:var(--shadow);margin:0;min-width:0}
+.carGallery{border:0!important;border-radius:0!important}
+.carbody{padding:13px}
+.carTop{display:block}.carname{font-size:17px;font-weight:900;line-height:1.18}
+.onlineLabel{display:inline-block;margin-top:6px;font-size:10px;font-weight:800;color:var(--green)}
+.carDescription{display:none}
+.chips{display:flex;flex-wrap:wrap;gap:5px;margin:10px 0}
+.chip{padding:6px 7px;border-radius:9px;background:var(--surface2);color:var(--muted);font-size:10px;white-space:nowrap}
+.carPrice{padding:10px 0 11px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.carPrice .label{display:block;color:var(--muted);font-size:9px;line-height:1.25}.carPrice b{font-size:18px}.carPrice small{font-size:10px;color:var(--muted)}
+.carActions{display:grid;gap:7px;margin-top:10px}.carActions .secondary{padding:11px;font-size:12px}.carActions .primary{padding:11px;font-size:12px}
+.gallery{position:relative;width:100%;overflow:hidden;background:#dfe5ea;touch-action:pan-y}
+.carGallery{aspect-ratio:1.25}.detailGallery{aspect-ratio:1.35;border-radius:24px;border:1px solid var(--line)}
+.galleryImg{width:100%;height:100%;object-fit:cover;display:block}
+.galleryBtn{position:absolute;top:50%;transform:translateY(-50%);width:34px;height:34px;border-radius:50%;background:rgba(8,16,23,.58);color:#fff;font-size:24px;line-height:1;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px)}
+.galleryBtn.prev{left:9px}.galleryBtn.next{right:9px}
+.galleryCount{position:absolute;right:10px;top:10px;padding:5px 8px;border-radius:999px;background:rgba(8,16,23,.62);color:#fff;font-size:10px;font-weight:800}
+.galleryDots{position:absolute;left:0;right:0;bottom:9px;display:flex;justify-content:center;gap:5px}
+.galleryDot{width:6px;height:6px;border-radius:50%;padding:0;background:rgba(255,255,255,.55)}
+.galleryDot.active{width:18px;border-radius:5px;background:#fff}
+.detailTitle{font-size:29px;line-height:1.08;margin:16px 0 6px;letter-spacing:-.02em}
+.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:15px 0}.fact{padding:12px;border-radius:16px;background:var(--surface);border:1px solid var(--line);font-size:11px;color:var(--muted)}.fact b{display:block;margin-top:5px;font-size:13px;color:var(--text)}
+.block{padding:16px;border-radius:19px;background:var(--surface);border:1px solid var(--line);box-shadow:0 6px 20px rgba(18,38,55,.04);margin:12px 0}.block h3{margin:0 0 8px;font-size:16px}
+.tariffs{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.tariff{padding:12px;border-radius:14px;background:var(--surface2);border:1px solid var(--line)}.tariff span{display:block;font-size:10px;color:var(--muted)}.tariff b{display:block;margin-top:5px;font-size:14px}
+.depositBox{margin:12px 0;padding:14px 16px;border-radius:17px;background:linear-gradient(135deg,rgba(22,131,255,.08),rgba(43,213,118,.07));border:1px solid rgba(22,131,255,.18)}
+.locationCard{padding:15px;border-radius:18px;background:var(--surface);border:1px solid var(--line);margin:12px 0}.locationTitle{font-weight:850}.locationText{font-size:13px;line-height:1.5;color:var(--muted);margin-top:7px}
+.calendar{background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:13px;box-shadow:var(--shadow)}
+.calhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.calhead b{text-transform:capitalize}.calhead button{width:40px;height:40px;border-radius:12px;background:var(--surface2);border:1px solid var(--line);font-size:21px}
+.week,.days{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}.week div{text-align:center;font-size:10px;color:var(--muted);padding:4px 0}.day{min-height:42px;border-radius:11px;background:var(--surface2);border:1px solid transparent;font-size:12px}.day.free{border-color:rgba(22,131,255,.12)}.day.busy{color:#9ca9b4;opacity:.55}.day.selected{background:var(--blue);color:#fff;font-weight:900}.day.disabled{opacity:.28}
+.times{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:8px}.time{padding:12px 3px;border-radius:12px;background:var(--surface2);border:1px solid var(--line);font-size:12px}.time.selected{background:var(--blue);color:#fff;font-weight:900}.time:disabled{opacity:.35}
+.summary{margin-top:13px;padding:17px;border-radius:20px;background:var(--surface);border:1px solid rgba(22,131,255,.22);box-shadow:var(--shadow)}.summary .big,.big{font-size:24px;font-weight:950;margin-top:4px}.hint{font-size:12px;line-height:1.4;color:var(--amber);margin-top:7px}
+.field{margin:11px 0}.field label{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:0 0 6px}.field input,.field textarea{width:100%;padding:13px;border-radius:14px;border:1px solid var(--line);background:var(--surface);outline:none}.field textarea{min-height:90px;resize:vertical}
+.locationPicker{display:grid;gap:8px;margin-top:12px}.locationOption{width:100%;display:grid;grid-template-columns:32px 1fr auto;gap:9px;align-items:center;text-align:left;padding:12px;border-radius:15px;background:var(--surface2);border:1px solid var(--line)}.locationOption.selected{border-color:var(--blue);box-shadow:inset 0 0 0 1px var(--blue);background:color-mix(in srgb,var(--blue) 7%,var(--surface2))}.locIcon{font-size:19px;text-align:center}.locMain b{display:block;font-size:13px}.locMain span{display:block;font-size:10px;color:var(--muted);margin-top:2px}.locationFree{font-size:9px;font-weight:900;color:var(--green)}.locationRequest{margin-top:8px}.locationCost{margin-top:10px}.priceBreak{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}.priceRow{display:flex;justify-content:space-between;gap:12px;padding:5px 0;font-size:13px}.locationNotice{margin-top:10px;font-size:11px;line-height:1.45;color:var(--muted)}
+.bookingHero{padding:16px;border-radius:20px;background:linear-gradient(135deg,rgba(22,131,255,.10),rgba(43,213,118,.07));border:1px solid rgba(22,131,255,.18);margin:14px 0}.bookingHero .heroLine{display:flex;justify-content:space-between;gap:10px;align-items:center}.bookingHero .heroTitle{font-size:16px;font-weight:900}.bookingHero .countdown{margin-top:10px;font-size:15px;font-weight:850}.bookingHero .countdown small{display:block;font-size:11px;color:var(--muted);margin-top:4px}
+.bookingCard{padding:15px;border-radius:20px;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);margin:12px 0}.bookingCardTop{display:flex;gap:11px;align-items:flex-start}.bookingCarThumb{width:92px;height:64px;border-radius:13px;object-fit:cover;flex:0 0 92px}.bookingCardInfo{min-width:0;flex:1}.bookingCardInfo b{display:block;font-size:16px}.bookingNo{font-size:10px;color:var(--muted);margin-bottom:4px}.bookingFacts{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:11px}.bookingFact{padding:10px;border-radius:13px;background:var(--surface2);border:1px solid var(--line)}.bookingFact span{display:block;font-size:9px;color:var(--muted)}.bookingFact b{display:block;font-size:12px;margin-top:4px}.bookingStatusBox{margin-top:11px;padding:11px 12px;border-radius:14px;background:var(--surface2);border:1px solid var(--line);font-size:12px;line-height:1.4}.bookingStatusBox.confirmed{background:rgba(43,213,118,.08);border-color:rgba(43,213,118,.25)}.bookingStatusBox.completed{opacity:.75}
+.status{display:inline-flex;padding:5px 8px;border-radius:999px;background:var(--surface2);font-size:10px;font-weight:800}
+.detailActions{display:grid;gap:8px;margin-top:10px}
+.empty{text-align:center;padding:40px 20px;color:var(--muted)}
+.toast{position:fixed;z-index:50;left:14px;right:14px;bottom:calc(18px + env(safe-area-inset-bottom));padding:13px 15px;border-radius:15px;background:#132535;color:#fff;box-shadow:0 15px 35px rgba(0,0,0,.25);display:none}.toast.show{display:block;animation:fadeUp .2s ease}
+@media(max-width:520px){.carlistGrid{grid-template-columns:1fr 1fr}.heroHome,.heroHome img{min-height:310px}.heroHomeCopy h1{font-size:31px}}
+@media(max-width:370px){#app{padding-left:10px;padding-right:10px}.carlistGrid{gap:8px}.carbody{padding:10px}.carname{font-size:15px}.chips{gap:4px}.chip{font-size:9px;padding:5px 6px}.carPrice b{font-size:16px}.facts{gap:5px}.fact{padding:10px 8px}}
+@media(min-width:650px){.carlistGrid{grid-template-columns:repeat(2,1fr)}.heroHome,.heroHome img{min-height:390px}.heroHomeCopy h1{font-size:42px}}
 </style>
+<script>
+window.BALTICAR_applyTheme=function(){
+  const scheme=window.Telegram?.WebApp?.colorScheme || (window.matchMedia?.('(prefers-color-scheme: light)').matches?'light':'dark');
+  document.documentElement.classList.toggle('light',scheme==='light');
+  document.documentElement.classList.toggle('dark',scheme!=='light');
+  const meta=document.querySelector('meta[name="theme-color"]');
+  if(meta)meta.content=scheme==='light'?'#f5f7fa':'#07111b';
+};
+try{
+  Telegram?.WebApp?.onEvent?.('themeChanged',window.BALTICAR_applyTheme);
+  const mq=window.matchMedia?.('(prefers-color-scheme: light)');
+  mq?.addEventListener?.('change',window.BALTICAR_applyTheme);
+}catch(e){}
+window.BALTICAR_applyTheme();
+</script>
 </head>
 <body>
+
 <div id="app">
-<header class="top"><button class="topbtn" id="backBtn" onclick="goBack()">‹</button><div class="brand">BALTICAR</div><button class="topbtn" onclick="goHome()">⌂</button></header>
-<section id="home" class="screen active"></section>
-<section id="cars" class="screen"></section>
-<section id="car" class="screen"></section>
-<section id="calendar" class="screen"></section>
-<section id="form" class="screen"></section>
-<section id="done" class="screen"></section>
-<section id="bookings" class="screen"></section>
-<section id="reviews" class="screen"></section>
-<section id="why" class="screen"></section>
-<section id="terms" class="screen"></section>
-<div class="toast" id="toast"></div>
+  <header class="top">
+    <button class="topbtn" id="backBtn" onclick="goBack()">‹</button>
+    <div class="brand">BALTICAR</div>
+    <button class="topbtn" onclick="goHome()">⌂</button>
+  </header>
+
+  <main>
+    <section id="home" class="screen active"></section>
+    <section id="cars" class="screen"></section>
+    <section id="car" class="screen"></section>
+    <section id="calendar" class="screen"></section>
+    <section id="form" class="screen"></section>
+    <section id="done" class="screen"></section>
+    <section id="bookings" class="screen"></section>
+    <section id="reviews" class="screen"></section>
+    <section id="why" class="screen"></section>
+    <section id="terms" class="screen"></section>
+  </main>
 </div>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<div id="toast" class="toast"></div>
+
 <script>
-(function(){
-  function applyTheme(){
-    const tg=window.Telegram?.WebApp;
-    const scheme=tg?.colorScheme || (window.matchMedia?.('(prefers-color-scheme: light)').matches?'light':'dark');
-    document.documentElement.classList.toggle('light', scheme==='light');
-    document.documentElement.classList.toggle('dark', scheme!=='light');
-    const meta=document.querySelector('meta[name="theme-color"]');
-    if(meta) meta.content=scheme==='light'?'#f4f7fa':'#06101a';
-    try{
-      tg?.setHeaderColor?.(scheme==='light'?'#f4f7fa':'#06101a');
-      tg?.setBackgroundColor?.(scheme==='light'?'#f4f7fa':'#06101a');
-    }catch(e){}
-  }
-  window.BALTICAR_applyTheme=applyTheme;
-  applyTheme();
-  if(window.Telegram?.WebApp?.onEvent){
-    try{ window.Telegram.WebApp.onEvent('themeChanged', applyTheme); }catch(e){}
-  }
-  const mq=window.matchMedia?.('(prefers-color-scheme: light)');
-  try{mq?.addEventListener?.('change', applyTheme)}catch(e){}
-})();
-</script>
-<script>
-const tg=window.Telegram?.WebApp; try{tg?.ready();tg?.expand();window.BALTICAR_applyTheme?.()}catch(e){}
-const $=id=>document.getElementById(id); let current='home', history=[]; let cars=[],selectedCar=null,startDate=null,startTime=null,endDate=null,endTime=null,month=new Date(); let pickupLocation='airport'; let pickupLocationNote='';
+const tg=window.Telegram?.WebApp;
+try{tg?.ready();tg?.expand()}catch(e){}
+const $=id=>document.getElementById(id);
+let current='home', history=[];
+let cars=[],selectedCar=null,startDate=null,startTime=null,endDate=null,endTime=null,month=new Date();
+let pickupLocation='airport'; let pickupLocationNote='';
 const headers=()=>({'Content-Type':'application/json','X-Telegram-Init-Data':tg?.initData||''});
 async function api(url,opt={}){const r=await fetch(url,{...opt,headers:{...headers(),...(opt.headers||{})}});let d={};try{d=await r.json()}catch{} if(!r.ok)throw new Error(d.message||'Ошибка сервера');return d}
 function money(n){return new Intl.NumberFormat('ru-RU').format(n)+' ₽'}
 function toast(s){$('toast').textContent=s;$('toast').classList.add('show');setTimeout(()=>$('toast').classList.remove('show'),2800)}
 function show(id,push=true){document.querySelectorAll('.screen').forEach(x=>x.classList.remove('active'));$(id).classList.add('active');if(push&&current!==id)history.push(current);current=id;window.scrollTo({top:0,behavior:'smooth'});$('backBtn').style.visibility=id==='home'?'hidden':'visible'}
-function goBack(){const x=history.pop()||'home';show(x,false)} function goHome(){history=[];show('home',false);renderHome()}
+function goBack(){const x=history.pop()||'home';show(x,false)}
+function goHome(){history=[];show('home',false);renderHome()}
 function img(path){return path ? '/' + path.replace(/^\/+/, '') : '/photos/balticar_hero.jpg'}
-function renderHome(){ $('home').innerHTML=`<div class="hero"><img src="/photos/balticar_hero.jpg"><div class="heroShade"></div><div class="heroCopy"><div class="eyebrow">BALTICAR • RENT A CAR</div><h1>Аренда автомобилей</h1><p>Калининград и область</p></div></div><div class="sectionTitle">Выберите автомобиль</div><div class="sub">Чистые автомобили, прозрачные тарифы и онлайн-бронирование без лишних звонков.</div><div class="grid" style="margin-top:14px"><button class="navcard" onclick="openCars()"><span class="ico">🚗</span><strong>Автомобили</strong><small>Каталог и цены</small></button><button class="navcard" onclick="openBookings()"><span class="ico">📋</span><strong>Мои брони</strong><small>Статус и детали</small></button><button class="navcard" onclick="openReviews()"><span class="ico">⭐</span><strong>Отзывы</strong><small>Что говорят клиенты</small></button><button class="navcard" onclick="openWhy()"><span class="ico">✨</span><strong>Почему BALTICAR</strong><small>Наши преимущества</small></button></div><div class="row" style="margin-top:12px"><button class="secondary" onclick="openTerms()">ℹ️ Условия</button><button class="secondary" onclick="openContact()">📞 Связаться</button></div>`}
-async function openCars(){show('cars');$('cars').innerHTML='<div class="sectionTitle">Автомобили</div><div class="sub">Выберите автомобиль — далее покажем свободные даты и точную стоимость.</div><div id="carlist" class="carlistGrid">Загрузка…</div>';try{cars=(await api('/api/cars')).cars;renderCars()}catch(e){$('carlist').innerHTML='<div class="empty">Не удалось загрузить автомобили.<br>'+e.message+'</div>'}}
+function renderHome(){ $('home').innerHTML=`<div class="heroHome"><img src="/photos/balticar_hero.jpg" alt="BALTICAR"><div class="heroHomeCopy"><span class="heroBadge">● BALTICAR · КАЛИНИНГРАД</span><h1>Автомобиль<br>на ваши даты.</h1><p>Чистые машины · прозрачные тарифы · удобная подача</p><button class="homeCta" onclick="openCars()">Выбрать автомобиль →</button></div></div><div class="sectionTitle">Всё в одном приложении</div><div class="sub">Выберите машину, проверьте свободные даты и отправьте заявку онлайн.</div><div class="homeQuick"><button class="quick" onclick="openBookings()"><span class="quickIcon">📋</span><b>Мои брони</b><span>Статус и детали</span></button><button class="quick" onclick="openReviews()"><span class="quickIcon">⭐</span><b>Отзывы</b><span>Что говорят клиенты</span></button><button class="quick" onclick="openWhy()"><span class="quickIcon">✨</span><b>Почему BALTICAR</b><span>Наши преимущества</span></button><button class="quick" onclick="openTerms()"><span class="quickIcon">ℹ️</span><b>Условия</b><span>Важная информация</span></button></div><div class="row" style="margin-top:10px"><button class="secondary" onclick="openContact()">💬 Связаться с менеджером</button></div>`}
+async function openCars(){show('cars');$('cars').innerHTML='<div class="sectionTitle">Автомобили</div><div class="sub">Выберите автомобиль — затем покажем свободные даты и точную стоимость.</div><div id="carlist" class="carlistGrid">Загрузка…</div>';try{cars=(await api('/api/cars')).cars;renderCars()}catch(e){$('carlist').innerHTML='<div class="empty">Не удалось загрузить автомобили.<br>'+e.message+'</div>'}}
 function galleryHTML(c,detail=false){const photos=(c.photos||[]).filter(Boolean);const id=(detail?'detail-':'card-')+c.id;return `<div class="${detail?'detailGallery':'carGallery'} gallery" data-gallery="${id}" data-index="0" data-photos='${JSON.stringify(photos)}' ontouchstart="galleryTouchStart(event,this)" ontouchend="galleryTouchEnd(event,this)"><img class="galleryImg" src="${img(photos[0])}" alt="${escapeHtml(c.name)}"><button class="galleryBtn prev" type="button" onclick="galleryMove(event,'${id}',-1)">‹</button><button class="galleryBtn next" type="button" onclick="galleryMove(event,'${id}',1)">›</button><div class="galleryCount">1 / ${photos.length}</div><div class="galleryDots">${photos.map((_,i)=>`<button class="galleryDot ${i===0?'active':''}" type="button" onclick="gallerySet(event,'${id}',${i})"></button>`).join('')}</div></div>`}
 function galleryData(id){return document.querySelector(`[data-gallery="${id}"]`)}
 function galleryRender(g,i){const photos=JSON.parse(g.dataset.photos||'[]');if(!photos.length)return;i=(i+photos.length)%photos.length;g.dataset.index=i;g.querySelector('.galleryImg').src=img(photos[i]);g.querySelector('.galleryCount').textContent=`${i+1} / ${photos.length}`;g.querySelectorAll('.galleryDot').forEach((d,n)=>d.classList.toggle('active',n===i))}
@@ -200,9 +154,9 @@ function galleryMove(ev,id,delta){ev.preventDefault();ev.stopPropagation();const
 function gallerySet(ev,id,i){ev.preventDefault();ev.stopPropagation();const g=galleryData(id);if(g)galleryRender(g,i)}
 function galleryTouchStart(ev,g){g._touchX=ev.changedTouches[0].clientX}
 function galleryTouchEnd(ev,g){const x=ev.changedTouches[0].clientX;const dx=x-(g._touchX||x);if(Math.abs(dx)<35)return;galleryRender(g,Number(g.dataset.index||0)+(dx<0?1:-1))}
-function renderCars(){ $('carlist').className='carlistGrid'; $('carlist').innerHTML=cars.map(c=>`<article class="car">${galleryHTML(c)}<div class="carbody"><div class="carTop"><div class="carname">${escapeHtml(c.name)}</div><span class="onlineLabel">● Онлайн-бронирование</span></div><div class="carDescription">${escapeHtml(c.description||'Подготовленный автомобиль для комфортных поездок.')}</div><div class="chips"><span class="chip">⚪ Белый</span><span class="chip">⚙️ ${escapeHtml(c.gear)}</span><span class="chip">⛽ ${escapeHtml(c.fuel)}</span><span class="chip">👥 ${c.seats} мест</span></div><div class="carPrice"><span class="label">Лучшая цена при аренде от 7 суток</span><b>${money(c.rates[2])}</b> <small>за сутки</small></div><div class="carActions"><button class="secondary" onclick="openCar('${c.id}')">Подробнее</button><button class="primary" onclick="openCar('${c.id}')">Забронировать →</button></div></div></article>`).join('')}
+function renderCars(){ $('carlist').className='carlistGrid'; $('carlist').innerHTML=cars.map(c=>`<article class="car">${galleryHTML(c)}<div class="carbody"><div class="carTop"><div class="carname">${escapeHtml(c.name)}</div><span class="onlineLabel">● Онлайн-бронирование</span></div><div class="carDescription">${escapeHtml(c.description||'Подготовленный автомобиль для комфортных поездок.')}</div><div class="chips"><span class="chip">⚪ Белый</span><span class="chip">⚙️ ${escapeHtml(c.gear)}</span><span class="chip">⛽ ${escapeHtml(c.fuel)}</span><span class="chip">👥 ${c.seats} мест</span></div><div class="carPrice"><span class="label">От 7 суток</span><b>${money(c.rates[2])}</b> <small>за сутки</small></div><div class="carActions"><button class="secondary" onclick="openCar('${c.id}')">Подробнее</button><button class="primary" onclick="openCar('${c.id}')">Забронировать</button></div></div></article>`).join('')}
 function openCar(id){selectedCar=cars.find(x=>x.id===id);show('car');renderCar()}
-function renderCar(){const c=selectedCar;$('car').innerHTML=`<button class="back" onclick="openCars()">← К автомобилям</button>${galleryHTML(c,true)}<h1 class="detailTitle">${escapeHtml(c.name)}</h1><div class="sub">${escapeHtml(c.description||'')}</div><div class="facts"><div class="fact">Цвет<b>Белый</b></div><div class="fact">Коробка<b>${escapeHtml(c.gear)}</b></div><div class="fact">Топливо<b>${escapeHtml(c.fuel)}</b></div></div><div class="block"><h3>✨ В стоимость входит</h3><div class="sub">✓ Подготовленный автомобиль<br>✓ Понятная стоимость без скрытых доплат<br>✓ Техническое обслуживание<br>✓ Поддержка менеджера</div></div><div class="block"><h3>💰 Тарифы</h3><div class="tariffs"><div class="tariff"><span>1–3 суток</span><b>${money(c.rates[0])}</b></div><div class="tariff"><span>4–6 суток</span><b>${money(c.rates[1])}</b></div><div class="tariff"><span>7+ суток</span><b>${money(c.rates[2])}</b></div></div></div><div class="depositBox">🔐 Залог: <b>10 000 ₽</b></div><div class="locationCard"><div class="locationTitle">📍 Место подачи автомобиля</div><div class="locationText">✈️ Аэропорт Храброво и 🚆 Южный вокзал — <b>БЕСПЛАТНО</b>.<br>Калининград и область — <b>от 1 000 ₽</b>, точная стоимость зависит от адреса.</div></div><div class="block"><h3>🕐 Выдача и возврат</h3><div class="sub">08:00–20:00<br>Технический интервал между арендами — 2 часа.</div></div><button class="primary" onclick="startBooking()">📅 Забронировать</button><div class="row" style="margin-top:10px"><button class="secondary" onclick="openBookings()">📋 Мои брони</button><button class="secondary" onclick="goHome()">⌂ Главное</button></div>`}
+function renderCar(){const c=selectedCar;$('car').innerHTML=`<button class="back" onclick="openCars()">← К автомобилям</button>${galleryHTML(c,true)}<h1 class="detailTitle">${escapeHtml(c.name)}</h1><div class="sub">${escapeHtml(c.description||'')}</div><div class="facts"><div class="fact">Цвет<b>Белый</b></div><div class="fact">Коробка<b>${escapeHtml(c.gear)}</b></div><div class="fact">Топливо<b>${escapeHtml(c.fuel)}</b></div></div><div class="block"><h3>✨ В стоимость входит</h3><div class="sub">✓ Подготовленный автомобиль<br>✓ Понятная стоимость без скрытых доплат<br>✓ Техническое обслуживание<br>✓ Поддержка менеджера</div></div><div class="block"><h3>💰 Тарифы</h3><div class="tariffs"><div class="tariff"><span>1–3 суток</span><b>${money(c.rates[0])}</b></div><div class="tariff"><span>4–6 суток</span><b>${money(c.rates[1])}</b></div><div class="tariff"><span>7+ суток</span><b>${money(c.rates[2])}</b></div></div></div><div class="depositBox">🔐 Залог: <b>10 000 ₽</b></div><div class="locationCard"><div class="locationTitle">📍 Место подачи</div><div class="locationText">✈️ Аэропорт Храброво и 🚆 Южный вокзал — <b>БЕСПЛАТНО</b>.<br>Калининград и область — <b>от 1 000 ₽</b>.</div></div><div class="block"><h3>🕐 Выдача и возврат</h3><div class="sub">08:00–20:00<br>Технический интервал между арендами — 2 часа.</div></div><button class="primary" onclick="startBooking()">📅 Забронировать</button><div class="row" style="margin-top:10px"><button class="secondary" onclick="openBookings()">📋 Мои брони</button><button class="secondary" onclick="goHome()">⌂ Главное</button></div>`}
 function startBooking(){startDate=startTime=endDate=endTime=null;pickupLocation='airport';pickupLocationNote='';month=new Date();show('calendar');renderCalendar('start')}
 async function getAvail(){return api(`/api/availability?car_id=${encodeURIComponent(selectedCar.id)}&year=${month.getFullYear()}&month=${month.getMonth()+1}`)}
 function fmtDate(d){return d.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric'})}
@@ -210,141 +164,36 @@ function localIso(d,h){const z=n=>String(n).padStart(2,'0');return `${d.getFullY
 let currentAvail={bookings:[],maintenance:[]};
 const BUFFER_MS=2*60*60*1000;
 function blocks(){return [...(currentAvail.bookings||[]),...(currentAvail.maintenance||[])]}
-function intervalFree(a,b){
-  if(!(a instanceof Date)||!(b instanceof Date)||b<=a)return false;
-  return !blocks().some(x=>{
-    const bs=new Date(x.start_at).getTime()-BUFFER_MS;
-    const be=new Date(x.end_at).getTime()+BUFFER_MS;
-    return a.getTime()<be && b.getTime()>bs;
-  });
-}
-function candidateStartFree(d,h){
-  const a=new Date(d); a.setHours(h,0,0,0);
-  const b=new Date(a); b.setDate(b.getDate()+1);
-  return intervalFree(a,b);
-}
-function candidateEndFree(d,h){
-  if(!startDate||startTime==null)return false;
-  const a=new Date(startDate); a.setHours(startTime,0,0,0);
-  const b=new Date(d); b.setHours(h,0,0,0);
-  return b>a && intervalFree(a,b);
-}
-function dayHasAvailableTime(d,mode){
-  for(let h=8;h<=20;h++) if(mode==='start'?candidateStartFree(d,h):candidateEndFree(d,h)) return true;
-  return false;
-}
-async function renderCalendar(mode){
-  $('calendar').innerHTML=`
-    <div class="sectionTitle">${mode==='start'?'Дата и время получения':'Дата и время возврата'}</div>
-    <div class="sub">${mode==='start'?'Выберите дату и время получения автомобиля.':'Выберите дату и время возврата автомобиля.'}</div>
-    <div class="calendar" style="margin-top:14px">
-      <div class="calhead">
-        <button onclick="shiftMonth(-1,'${mode}')">‹</button>
-        <b>${month.toLocaleDateString('ru-RU',{month:'long',year:'numeric'})}</b>
-        <button onclick="shiftMonth(1,'${mode}')">›</button>
-      </div>
-      <div class="week">${['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(x=>`<div>${x}</div>`).join('')}</div>
-      <div id="days" class="days"></div>
-      <div id="times"></div>
-    </div>
-    <div id="calSummary"></div>`;
-  try{currentAvail=await getAvail();drawDays(currentAvail,mode)}catch(e){toast(e.message)}
-}
+function intervalFree(a,b){if(!(a instanceof Date)||!(b instanceof Date)||b<=a)return false;return !blocks().some(x=>{const bs=new Date(x.start_at).getTime()-BUFFER_MS;const be=new Date(x.end_at).getTime()+BUFFER_MS;return a.getTime()<be&&b.getTime()>bs})}
+function candidateStartFree(d,h){const a=new Date(d);a.setHours(h,0,0,0);const b=new Date(a);b.setDate(b.getDate()+1);return intervalFree(a,b)}
+function candidateEndFree(d,h){if(!startDate||startTime==null)return false;const a=new Date(startDate);a.setHours(startTime,0,0,0);const b=new Date(d);b.setHours(h,0,0,0);return b>a&&intervalFree(a,b)}
+function dayHasAvailableTime(d,mode){for(let h=8;h<=20;h++)if(mode==='start'?candidateStartFree(d,h):candidateEndFree(d,h))return true;return false}
+async function renderCalendar(mode){$('calendar').innerHTML=`<div class="sectionTitle">${mode==='start'?'Дата получения':'Дата возврата'}</div><div class="sub">${mode==='start'?'Сначала выберите день и время получения автомобиля.':'Теперь выберите день и время возврата автомобиля.'}</div><div class="calendar" style="margin-top:14px"><div class="calhead"><button onclick="shiftMonth(-1,'${mode}')">‹</button><b>${month.toLocaleDateString('ru-RU',{month:'long',year:'numeric'})}</b><button onclick="shiftMonth(1,'${mode}')">›</button></div><div class="week">${['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(x=>`<div>${x}</div>`).join('')}</div><div id="days" class="days"></div><div id="times"></div></div><div id="calSummary"></div>`;try{currentAvail=await getAvail();drawDays(currentAvail,mode)}catch(e){toast(e.message)}}
 async function shiftMonth(delta,mode){month.setMonth(month.getMonth()+delta);await renderCalendar(mode)}
-function drawDays(av,mode){
-  currentAvail=av||{bookings:[],maintenance:[]};
-  const y=month.getFullYear(),m=month.getMonth(),first=new Date(y,m,1),last=new Date(y,m+1,0),today=new Date();
-  today.setHours(0,0,0,0);
-  let html='';
-  const offset=first.getDay()===0?6:first.getDay()-1;
-  for(let i=0;i<offset;i++)html+='<div></div>';
-  for(let n=1;n<=last.getDate();n++){
-    const d=new Date(y,m,n);
-    const hasTime=dayHasAvailableTime(d,mode);
-    const dis=d<today || (mode==='end'&&startDate&&d<=startDate) || !hasTime;
-    const sel=(mode==='start'&&startDate&&d.toDateString()===startDate.toDateString())||(mode==='end'&&endDate&&d.toDateString()===endDate.toDateString());
-    html+=`<button class="day ${hasTime?'free':'busy'} ${dis?'disabled':''} ${sel?'selected':''}" ${dis?'disabled':''} onclick="chooseDay(${n},'${mode}')">${n}</button>`;
-  }
-  $('days').innerHTML=html;
-  if(mode==='start'&&startDate)drawTimes('start');
-  if(mode==='end'&&endDate)drawTimes('end');
-}
-async function chooseDay(n,mode){
-  const d=new Date(month.getFullYear(),month.getMonth(),n);
-  if(mode==='end'&&startDate&&d<=startDate)return;
-  if(!dayHasAvailableTime(d,mode))return;
-  if(mode==='start')startDate=d;else endDate=d;
-  drawTimes(mode);
-}
-function drawTimes(mode){
-  const box=$('times');
-  const d=mode==='start'?startDate:endDate;
-  let html='<div class="sub" style="margin:14px 0 8px">'+fmtDate(d)+'</div><div class="times">';
-  for(let h=8;h<=20;h++){
-    const ok=mode==='start'?candidateStartFree(d,h):candidateEndFree(d,h);
-    const selected=(mode==='start'?startTime:endTime)===h;
-    html+=`<button class="time ${selected?'selected':''}" ${ok?'':'disabled'} onclick="chooseTime(${h},'${mode}')">${String(h).padStart(2,'0')}:00</button>`;
-  }
-  html+='</div>';
-  box.innerHTML=html;
-  renderCalSummary();
-}
-function chooseTime(h,mode){
-  const d=mode==='start'?startDate:endDate;
-  const ok=mode==='start'?candidateStartFree(d,h):candidateEndFree(d,h);
-  if(!ok){toast('Это время недоступно для выбранного периода');return}
-  if(mode==='start')startTime=h;else endTime=h;
-  drawTimes(mode);
-  if(mode==='start'&&startDate&&startTime!=null){
-    endDate=new Date(startDate);endDate.setDate(endDate.getDate()+1);endTime=startTime;
-    renderCalendar('end');
-  } else renderCalSummary();
-}
+function drawDays(av,mode){currentAvail=av||{bookings:[],maintenance:[]};const y=month.getFullYear(),m=month.getMonth(),first=new Date(y,m,1),last=new Date(y,m+1,0),today=new Date();today.setHours(0,0,0,0);let html='';const offset=first.getDay()===0?6:first.getDay()-1;for(let i=0;i<offset;i++)html+='<div></div>';for(let n=1;n<=last.getDate();n++){const d=new Date(y,m,n),hasTime=dayHasAvailableTime(d,mode),dis=d<today||(mode==='end'&&startDate&&d<=startDate)||!hasTime,sel=(mode==='start'&&startDate&&d.toDateString()===startDate.toDateString())||(mode==='end'&&endDate&&d.toDateString()===endDate.toDateString());html+=`<button class="day ${hasTime?'free':'busy'} ${dis?'disabled':''} ${sel?'selected':''}" ${dis?'disabled':''} onclick="chooseDay(${n},'${mode}')">${n}</button>`}$('days').innerHTML=html;if(mode==='start'&&startDate)drawTimes('start');if(mode==='end'&&endDate)drawTimes('end')}
+async function chooseDay(n,mode){const d=new Date(month.getFullYear(),month.getMonth(),n);if(mode==='end'&&startDate&&d<=startDate)return;if(!dayHasAvailableTime(d,mode))return;if(mode==='start')startDate=d;else endDate=d;drawTimes(mode)}
+function drawTimes(mode){const box=$('times'),d=mode==='start'?startDate:endDate;let html='<div class="sub" style="margin:14px 0 8px">'+fmtDate(d)+'</div><div class="times">';for(let h=8;h<=20;h++){const ok=mode==='start'?candidateStartFree(d,h):candidateEndFree(d,h),selected=(mode==='start'?startTime:endTime)===h;html+=`<button class="time ${selected?'selected':''}" ${ok?'':'disabled'} onclick="chooseTime(${h},'${mode}')">${String(h).padStart(2,'0')}:00</button>`}html+='</div>';box.innerHTML=html;renderCalSummary()}
+function chooseTime(h,mode){const d=mode==='start'?startDate:endDate,ok=mode==='start'?candidateStartFree(d,h):candidateEndFree(d,h);if(!ok){toast('Это время недоступно для выбранного периода');return}if(mode==='start')startTime=h;else endTime=h;drawTimes(mode);if(mode==='start'&&startDate&&startTime!=null){endDate=new Date(startDate);endDate.setDate(endDate.getDate()+1);endTime=startTime;renderCalendar('end')}else renderCalSummary()}
 function rentalDays(){if(!startDate||startTime==null||!endDate||endTime==null)return null;const a=new Date(startDate);a.setHours(startTime);const b=new Date(endDate);b.setHours(endTime);return Math.max(1,Math.ceil((b-a)/86400000))}
 function rate(){const d=rentalDays();return d<=3?selectedCar.rates[0]:d<=6?selectedCar.rates[1]:selectedCar.rates[2]}
-function renderCalSummary(){const d=rentalDays();if(!d)return;$('calSummary').innerHTML=`<div class="summary"><div class="sub">${fmtDate(startDate)} ${String(startTime).padStart(2,'0')}:00 → ${fmtDate(endDate)} ${String(endTime).padStart(2,'0')}:00</div><div class="big">${d} ${d===1?'сутки':d<5?'суток':'суток'} · ${money(d*rate())}</div>${endTime>startTime&&fmtDate(startDate)!==fmtDate(endDate)?'<div class="hint">⚠️ Возврат позже времени получения — оплачивается дополнительное сутки.</div>':''}<button class="primary" style="margin-top:12px" onclick="goForm()">Продолжить →</button></div>`}
+function renderCalSummary(){const d=rentalDays();if(!d)return;$('calSummary').innerHTML=`<div class="summary"><div class="sub">${fmtDate(startDate)} ${String(startTime).padStart(2,'0')}:00 → ${fmtDate(endDate)} ${String(endTime).padStart(2,'0')}:00</div><div class="big">${d} суток · ${money(d*rate())}</div>${endTime>startTime&&fmtDate(startDate)!==fmtDate(endDate)?'<div class="hint">⚠️ Возврат позже времени получения — оплачивается дополнительное сутки.</div>':''}<button class="primary" style="margin-top:12px" onclick="goForm()">Продолжить →</button></div>`}
 function goForm(){if(!rentalDays()){toast('Выберите дату и время возврата');return}show('form');renderForm()}
 function selectPickupLocation(v){pickupLocation=v;document.querySelectorAll('.locationOption').forEach(x=>x.classList.toggle('selected',x.dataset.location===v));const req=$('pickupRequest');if(req)req.style.display=v==='other'?'block':'none';const note=$('pickupLocationNote');if(note)pickupLocationNote=note.value.trim();renderLocationCost()}
 function renderLocationCost(){const box=$('locationCost');if(!box)return;const label=pickupLocation==='airport'?'Аэропорт Храброво':pickupLocation==='station'?'Южный вокзал':pickupLocation==='city'?'Калининград':pickupLocation==='region'?'Калининградская область':'Другое место';const fee=pickupLocation==='airport'||pickupLocation==='station'?0:null;box.innerHTML=fee===0?`<div class="priceRow"><span>Подача: ${label}</span><b>БЕСПЛАТНО</b></div>`:`<div class="priceRow"><span>Подача: ${label}</span><b>от 1 000 ₽</b></div><div class="sub" style="margin-top:4px">Точная стоимость согласует менеджер по адресу.</div>`}
-function renderForm(){const days=rentalDays(),rentTotal=days*rate();$('form').innerHTML=`<button class="back" onclick="startBooking()">← Изменить период</button><div class="sectionTitle">Проверьте заявку</div><div class="block"><b>${escapeHtml(selectedCar.name)}</b><div class="sub" style="margin-top:7px">${fmtDate(startDate)} ${String(startTime).padStart(2,'0')}:00 → ${fmtDate(endDate)} ${String(endTime).padStart(2,'0')}:00<br>${days} ${days===1?'сутки':'суток'}</div><div class="big" style="margin-top:8px">${money(rentTotal)}</div></div><div class="block"><h3>📍 Место подачи автомобиля</h3><div class="sub">Выберите удобный вариант. Аэропорт и Южный вокзал — наша бесплатная фишка.</div><div class="locationPicker"><button type="button" class="locationOption ${pickupLocation==='airport'?'selected':''}" data-location="airport" onclick="selectPickupLocation('airport')"><span class="locIcon">✈️</span><span class="locMain"><b>Аэропорт Храброво</b><span>Бесплатная подача</span></span><span class="locationFree">БЕСПЛАТНО</span></button><button type="button" class="locationOption ${pickupLocation==='station'?'selected':''}" data-location="station" onclick="selectPickupLocation('station')"><span class="locIcon">🚆</span><span class="locMain"><b>Южный вокзал</b><span>Бесплатная подача</span></span><span class="locationFree">БЕСПЛАТНО</span></button><button type="button" class="locationOption ${pickupLocation==='city'?'selected':''}" data-location="city" onclick="selectPickupLocation('city')"><span class="locIcon">📍</span><span class="locMain"><b>Калининград</b><span>От 1 000 ₽</span></span></button><button type="button" class="locationOption ${pickupLocation==='region'?'selected':''}" data-location="region" onclick="selectPickupLocation('region')"><span class="locIcon">🗺️</span><span class="locMain"><b>Калининградская область</b><span>От 1 000 ₽</span></span></button><button type="button" class="locationOption ${pickupLocation==='other'?'selected':''}" data-location="other" onclick="selectPickupLocation('other')"><span class="locIcon">📌</span><span class="locMain"><b>Другое место</b><span>По запросу</span></span></button></div><div id="pickupRequest" class="locationRequest" style="display:${pickupLocation==='other'?'block':'none'}"><div class="field"><label>Адрес или описание места</label><input id="pickupLocationNote" placeholder="Например: Светлогорск, ул. Ленина, 10" value="${escapeHtml(pickupLocationNote)}" oninput="pickupLocationNote=this.value"></div></div><div id="locationCost" class="locationCost"></div><div class="locationNotice">Аэропорт Храброво и Южный вокзал — <b>0 ₽</b>. Подача по Калининграду и области — <b>от 1 000 ₽</b>; точная сумма определяется по адресу и согласуется менеджером.</div></div><div class="field"><label>Ваше имя</label><input id="name" placeholder="Имя"></div><div class="field"><label>Телефон</label><input id="phone" type="tel" placeholder="+7 ..."></div><div class="field"><label>Дополнительные пожелания</label><textarea id="comment" placeholder="Детское кресло и другие пожелания (необязательно)"></textarea></div><button class="primary" onclick="submitBooking()">✓ Отправить заявку</button>`;renderLocationCost()}
-async function submitBooking(){const name=$('name').value.trim(),phone=$('phone').value.trim(),comment=$('comment').value.trim();if(!name||phone.length<7){toast('Введите имя и корректный телефон');return}if(pickupLocation==='other'&&!$('pickupLocationNote').value.trim()){toast('Укажите адрес или описание места подачи');return}pickupLocationNote=$('pickupLocationNote')?.value.trim()||pickupLocationNote;const a=localIso(startDate,startTime),b=localIso(endDate,endTime);const locationLabel=pickupLocation==='airport'?'Аэропорт Храброво':pickupLocation==='station'?'Южный вокзал':pickupLocation==='city'?'Калининград':pickupLocation==='region'?'Калининградская область':'Другое место';try{const r=await api('/api/bookings',{method:'POST',body:JSON.stringify({car_id:selectedCar.id,start_at:a,end_at:b,name,phone,comment,pickup_location:locationLabel,pickup_location_type:pickupLocation,pickup_location_note:pickupLocationNote})});const pickupCost=r.pickup_fee===0?'БЕСПЛАТНО':(r.pickup_fee?money(r.pickup_fee):'от 1 000 ₽ · уточняется');$('done').innerHTML=`<div class="hero" style="padding:24px"><div class="eyebrow">ЗАЯВКА ОТПРАВЛЕНА</div><h1>Спасибо, ${escapeHtml(name)}!</h1><p>Заявка №${r.id} принята менеджером.</p></div><div class="summary"><div class="sub">${escapeHtml(selectedCar.name)}</div><div style="margin-top:8px">${fmtDate(startDate)} ${String(startTime).padStart(2,'0')}:00 → ${fmtDate(endDate)} ${String(endTime).padStart(2,'0')}:00</div><div class="priceBreak"><div class="priceRow"><span>Аренда</span><b>${money(r.total)}</b></div><div class="priceRow"><span>Подача · ${escapeHtml(locationLabel)}</span><b>${pickupCost}</b></div><div class="priceRow"><span>Залог</span><b>10 000 ₽</b></div></div><div class="big" style="margin-top:8px">${r.pickup_fee===0?money(r.total):'Аренда + подача от 1 000 ₽'}</div><div class="sub">${r.days} суток · удержание заявки до ${r.expires}</div></div><button class="primary" style="margin-top:12px" onclick="openBookings()">📋 Мои брони</button><button class="secondary" style="margin-top:10px" onclick="goHome()">⌂ Главное меню</button>`;show('done');tg?.HapticFeedback?.notificationOccurred('success')}catch(e){toast(e.message)}}
-async function openBookings(){
-  show('bookings');
-  $('bookings').innerHTML='<div class="sectionTitle">Личный кабинет</div><div class="sub">Все ваши заявки, подтверждённые брони и завершённые аренды — в одном месте.</div><div id="bhero"></div><div id="blist">Загрузка…</div>';
-  try{
-    const d=await api('/api/mybookings');
-    if(!cars.length){try{cars=(await api('/api/cars')).cars||[]}catch(e){}}
-    if(!d.bookings.length){
-      $('blist').innerHTML='<div class="empty">Пока нет бронирований.<br><button class="primary" style="margin-top:16px" onclick="openCars()">Выбрать автомобиль</button></div>';return
-    }
-    const active=d.bookings.filter(b=>['pending','confirmed'].includes(b.status)&&!b.past);
-    const next=active.slice().sort((a,b)=>new Date(a.start_at)-new Date(b.start_at))[0];
-    if(next){
-      $('bhero').innerHTML=`<div class="bookingHero"><div class="heroLine"><div class="heroTitle">${next.status==='confirmed'?'🟢 Ближайшая подтверждённая бронь':'🟡 Ближайшая заявка'}</div><span class="status">№${next.id}</span></div><div class="countdown" id="countdown-${next.id}">До получения автомобиля — считаем…<small>${escapeHtml(next.car_name)} · ${escapeHtml(next.start_at)}</small></div></div>`;
-      startCountdown(next.id,next.start_at);
-    }
-    $('blist').innerHTML=d.bookings.map(b=>{
-      const c=cars.find(x=>x.id===b.car_id);
-      const canReview=(b.status==='confirmed'||b.status==='completed')&&b.past&&!b.reviewed;
-      const completed=(b.status==='completed')||(b.status==='confirmed'&&b.past);
-      const shownStatus=completed?'completed':b.status;
-      const guide=completed?'✓ Аренда завершена. Спасибо, что выбрали BALTICAR.':b.status==='confirmed'?'✓ Бронь подтверждена. Менеджер согласует точную точку встречи.':b.status==='pending'?'⏳ Заявка ожидает подтверждения. После подтверждения менеджер свяжется с вами.':b.status==='cancelled'?'Бронь отменена.':'Статус заявки обновлён.';
-      return `<div class="bookingCard"><div class="bookingCardTop">${c?`<img class="bookingCarThumb" src="${img(c.photos?.[0])}" alt="">`:''}<div class="bookingCardInfo"><div class="bookingNo">Бронирование №${b.id}</div><b>${escapeHtml(b.car_name)}</b><div style="margin-top:6px"><span class="status">${status(shownStatus)}</span></div></div></div><div class="bookingFacts"><div class="bookingFact"><span>Получение</span><b>${escapeHtml(b.start_at)}</b></div><div class="bookingFact"><span>Возврат</span><b>${escapeHtml(b.end_at)}</b></div></div><div class="priceBreak"><div class="priceRow"><span>Стоимость аренды</span><b>${money(b.total)}</b></div><div class="priceRow"><span>Залог</span><b>10 000 ₽</b></div><div class="priceRow"><span>Место подачи</span><span>${escapeHtml(b.pickup_location||'Калининград')}</span></div>${b.pickup_location_fee===0?'<div class="priceRow"><span>Подача</span><b>БЕСПЛАТНО</b></div>':b.pickup_location_fee!=null?`<div class="priceRow"><span>Подача</span><b>от 1 000 ₽</b></div>`:''}</div>${b.comment?`<div class="sub" style="margin-top:10px">📝 ${escapeHtml(b.comment)}</div>`:''}<div class="bookingStatusBox ${shownStatus==='confirmed'?'confirmed':''} ${completed?'completed':''}">${guide}</div><div class="detailActions">${canReview?`<button class="primary" onclick="openReviewForm(${b.id})">⭐ Оставить отзыв</button>`:''}${['pending','confirmed'].includes(b.status)&&!b.past?`<button class="secondary" onclick="cancelBooking(${b.id})">Отменить бронь</button>`:''}<div class="row"><button class="secondary" onclick="openMap()">🗺 Карта</button><button class="secondary" onclick="openContact()">💬 Менеджер</button></div></div></div>`
-    }).join('');
-  }catch(e){$('blist').innerHTML='<div class="empty">'+escapeHtml(e.message)+'</div>'}
-}
-function startCountdown(id,value){
-  const el=$('countdown-'+id);if(!el)return;
-  const tick=()=>{const d=new Date(value);const ms=d.getTime()-Date.now();if(!Number.isFinite(ms)){el.firstChild.textContent='Ближайшее получение: '+value;return}if(ms<=0){el.firstChild.textContent='Автомобиль уже должен быть выдан';return}const days=Math.floor(ms/86400000),hrs=Math.floor(ms%86400000/3600000),mins=Math.floor(ms%3600000/60000);el.firstChild.textContent=days?`До получения — ${days} дн. ${hrs} ч.`:`До получения — ${hrs} ч. ${mins} мин.`};tick();setInterval(tick,60000)
-}
-
+function renderForm(){const days=rentalDays(),rentTotal=days*rate();$('form').innerHTML=`<button class="back" onclick="startBooking()">← Изменить период</button><div class="sectionTitle">Проверьте заявку</div><div class="block"><b>${escapeHtml(selectedCar.name)}</b><div class="sub" style="margin-top:7px">${fmtDate(startDate)} ${String(startTime).padStart(2,'0')}:00 → ${fmtDate(endDate)} ${String(endTime).padStart(2,'0')}:00<br>${days} суток</div><div class="big" style="margin-top:8px">${money(rentTotal)}</div></div><div class="block"><h3>📍 Место подачи автомобиля</h3><div class="sub">Аэропорт и Южный вокзал — бесплатно.</div><div class="locationPicker"><button type="button" class="locationOption ${pickupLocation==='airport'?'selected':''}" data-location="airport" onclick="selectPickupLocation('airport')"><span class="locIcon">✈️</span><span class="locMain"><b>Аэропорт Храброво</b><span>Бесплатная подача</span></span><span class="locationFree">БЕСПЛАТНО</span></button><button type="button" class="locationOption ${pickupLocation==='station'?'selected':''}" data-location="station" onclick="selectPickupLocation('station')"><span class="locIcon">🚆</span><span class="locMain"><b>Южный вокзал</b><span>Бесплатная подача</span></span><span class="locationFree">БЕСПЛАТНО</span></button><button type="button" class="locationOption ${pickupLocation==='city'?'selected':''}" data-location="city" onclick="selectPickupLocation('city')"><span class="locIcon">📍</span><span class="locMain"><b>Калининград</b><span>От 1 000 ₽</span></span></button><button type="button" class="locationOption ${pickupLocation==='region'?'selected':''}" data-location="region" onclick="selectPickupLocation('region')"><span class="locIcon">🗺️</span><span class="locMain"><b>Калининградская область</b><span>От 1 000 ₽</span></span></button><button type="button" class="locationOption ${pickupLocation==='other'?'selected':''}" data-location="other" onclick="selectPickupLocation('other')"><span class="locIcon">📌</span><span class="locMain"><b>Другое место</b><span>По запросу</span></span></button></div><div id="pickupRequest" class="locationRequest" style="display:${pickupLocation==='other'?'block':'none'}"><div class="field"><label>Адрес или описание места</label><input id="pickupLocationNote" placeholder="Например: Светлогорск, ул. Ленина, 10" value="${escapeHtml(pickupLocationNote)}" oninput="pickupLocationNote=this.value"></div></div><div id="locationCost" class="locationCost"></div><div class="locationNotice">Аэропорт Храброво и Южный вокзал — <b>0 ₽</b>. Подача по Калининграду и области — <b>от 1 000 ₽</b>; точная сумма определяется по адресу.</div></div><div class="field"><label>Ваше имя</label><input id="name" placeholder="Имя"></div><div class="field"><label>Телефон</label><input id="phone" type="tel" placeholder="+7 ..."></div><div class="field"><label>Дополнительные пожелания</label><textarea id="comment" placeholder="Детское кресло и другие пожелания (необязательно)"></textarea></div><button class="primary" onclick="submitBooking()">✓ Отправить заявку</button>`;renderLocationCost()}
+async function submitBooking(){const name=$('name').value.trim(),phone=$('phone').value.trim(),comment=$('comment').value.trim();if(!name||phone.length<7){toast('Введите имя и корректный телефон');return}if(pickupLocation==='other'&&!$('pickupLocationNote').value.trim()){toast('Укажите адрес или описание места подачи');return}pickupLocationNote=$('pickupLocationNote')?.value.trim()||pickupLocationNote;const a=localIso(startDate,startTime),b=localIso(endDate,endTime);const locationLabel=pickupLocation==='airport'?'Аэропорт Храброво':pickupLocation==='station'?'Южный вокзал':pickupLocation==='city'?'Калининград':pickupLocation==='region'?'Калининградская область':'Другое место';try{const r=await api('/api/bookings',{method:'POST',body:JSON.stringify({car_id:selectedCar.id,start_at:a,end_at:b,name,phone,comment,pickup_location:locationLabel,pickup_location_type:pickupLocation,pickup_location_note:pickupLocationNote})});const pickupCost=r.pickup_fee===0?'БЕСПЛАТНО':(r.pickup_fee?money(r.pickup_fee):'от 1 000 ₽ · уточняется');$('done').innerHTML=`<div class="heroHome" style="min-height:auto;padding:24px"><div class="heroHomeCopy" style="position:relative;left:auto;right:auto;bottom:auto"><span class="heroBadge">✓ ЗАЯВКА ОТПРАВЛЕНА</span><h1>Спасибо, ${escapeHtml(name)}!</h1><p>Заявка №${r.id} принята менеджером.</p></div></div><div class="summary"><div class="sub">${escapeHtml(selectedCar.name)}</div><div style="margin-top:8px">${fmtDate(startDate)} ${String(startTime).padStart(2,'0')}:00 → ${fmtDate(endDate)} ${String(endTime).padStart(2,'0')}:00</div><div class="priceBreak"><div class="priceRow"><span>Аренда</span><b>${money(r.total)}</b></div><div class="priceRow"><span>Подача · ${escapeHtml(locationLabel)}</span><b>${pickupCost}</b></div><div class="priceRow"><span>Залог</span><b>10 000 ₽</b></div></div><div class="big" style="margin-top:8px">${r.pickup_fee===0?money(r.total):'Аренда + подача от 1 000 ₽'}</div><div class="sub">${r.days} суток · удержание заявки до ${r.expires}</div></div><button class="primary" style="margin-top:12px" onclick="openBookings()">📋 Мои брони</button><button class="secondary" style="margin-top:10px" onclick="goHome()">⌂ Главное меню</button>`;show('done');tg?.HapticFeedback?.notificationOccurred('success')}catch(e){toast(e.message)}}
+async function openBookings(){show('bookings');$('bookings').innerHTML='<div class="sectionTitle">Личный кабинет</div><div class="sub">Все ваши заявки, подтверждённые брони и завершённые аренды — в одном месте.</div><div id="bhero"></div><div id="blist">Загрузка…</div>';try{const d=await api('/api/mybookings');if(!cars.length){try{cars=(await api('/api/cars')).cars||[]}catch(e){}}if(!d.bookings.length){$('blist').innerHTML='<div class="empty">Пока нет бронирований.<br><button class="primary" style="margin-top:16px" onclick="openCars()">Выбрать автомобиль</button></div>';return}const active=d.bookings.filter(b=>['pending','confirmed'].includes(b.status)&&!b.past),next=active.slice().sort((a,b)=>new Date(a.start_at)-new Date(b.start_at))[0];if(next){$('bhero').innerHTML=`<div class="bookingHero"><div class="heroLine"><div class="heroTitle">${next.status==='confirmed'?'🟢 Ближайшая подтверждённая бронь':'🟡 Ближайшая заявка'}</div><span class="status">№${next.id}</span></div><div class="countdown" id="countdown-${next.id}">До получения автомобиля — считаем…<small>${escapeHtml(next.car_name)} · ${escapeHtml(next.start_at)}</small></div></div>`;startCountdown(next.id,next.start_at)}$('blist').innerHTML=d.bookings.map(b=>{const c=cars.find(x=>x.id===b.car_id),canReview=(b.status==='confirmed'||b.status==='completed')&&b.past&&!b.reviewed,completed=(b.status==='completed')||(b.status==='confirmed'&&b.past),shownStatus=completed?'completed':b.status,guide=completed?'✓ Аренда завершена. Спасибо, что выбрали BALTICAR.':b.status==='confirmed'?'✓ Бронь подтверждена. Менеджер согласует точную точку встречи.':b.status==='pending'?'⏳ Заявка ожидает подтверждения. После подтверждения менеджер свяжется с вами.':b.status==='cancelled'?'Бронь отменена.':'Статус заявки обновлён.';return `<div class="bookingCard"><div class="bookingCardTop">${c?`<img class="bookingCarThumb" src="${img(c.photos?.[0])}" alt="">`:''}<div class="bookingCardInfo"><div class="bookingNo">Бронирование №${b.id}</div><b>${escapeHtml(b.car_name)}</b><div style="margin-top:6px"><span class="status">${status(shownStatus)}</span></div></div></div><div class="bookingFacts"><div class="bookingFact"><span>Получение</span><b>${escapeHtml(b.start_at)}</b></div><div class="bookingFact"><span>Возврат</span><b>${escapeHtml(b.end_at)}</b></div></div><div class="priceBreak"><div class="priceRow"><span>Стоимость аренды</span><b>${money(b.total)}</b></div><div class="priceRow"><span>Залог</span><b>10 000 ₽</b></div><div class="priceRow"><span>Место подачи</span><span>${escapeHtml(b.pickup_location||'Калининград')}</span></div>${b.pickup_location_fee===0?'<div class="priceRow"><span>Подача</span><b>БЕСПЛАТНО</b></div>':b.pickup_location_fee!=null?`<div class="priceRow"><span>Подача</span><b>от 1 000 ₽</b></div>`:''}</div>${b.comment?`<div class="sub" style="margin-top:10px">📝 ${escapeHtml(b.comment)}</div>`:''}<div class="bookingStatusBox ${shownStatus==='confirmed'?'confirmed':''} ${completed?'completed':''}">${guide}</div><div class="detailActions">${canReview?`<button class="primary" onclick="openReviewForm(${b.id})">⭐ Оставить отзыв</button>`:''}${['pending','confirmed'].includes(b.status)&&!b.past?`<button class="secondary" onclick="cancelBooking(${b.id})">Отменить бронь</button>`:''}<div class="row"><button class="secondary" onclick="openMap()">🗺 Карта</button><button class="secondary" onclick="openContact()">💬 Менеджер</button></div></div></div>`}).join('')}catch(e){$('blist').innerHTML='<div class="empty">'+escapeHtml(e.message)+'</div>'}}
+function startCountdown(id,value){const el=$('countdown-'+id);if(!el)return;const tick=()=>{const d=new Date(value),ms=d.getTime()-Date.now();if(!Number.isFinite(ms)){el.firstChild.textContent='Ближайшее получение: '+value;return}if(ms<=0){el.firstChild.textContent='Автомобиль уже должен быть выдан';return}const days=Math.floor(ms/86400000),hrs=Math.floor(ms%86400000/3600000),mins=Math.floor(ms%3600000/60000);el.firstChild.textContent=days?`До получения — ${days} дн. ${hrs} ч.`:`До получения — ${hrs} ч. ${mins} мин.`};tick();setInterval(tick,60000)}
 function status(s){return ({pending:'🟡 Ожидает',confirmed:'🟢 Подтверждена',completed:'🔵 Завершена',cancelled:'⚫ Отменена',rejected:'🔴 Отклонена',expired:'⚪ Истекла'})[s]||s}
 async function cancelBooking(id){if(!confirm('Отменить бронирование №'+id+'?'))return;try{await api('/api/bookings/cancel',{method:'POST',body:JSON.stringify({id})});toast('Бронирование отменено');openBookings()}catch(e){toast(e.message)}}
 async function openReviews(){show('reviews');$('reviews').innerHTML='<div class="sectionTitle">Отзывы клиентов</div><div class="sub">Реальные впечатления о BALTICAR.</div><div id="rlist">Загрузка…</div>';try{const d=await api('/api/reviews');$('rlist').innerHTML=d.reviews.length?d.reviews.map(r=>`<div class="bookingCard"><div style="font-size:20px">${'★'.repeat(r.rating)}${'☆'.repeat(5-r.rating)}</div><div style="margin-top:8px">${escapeHtml(r.text)||'Без текста'}</div><div class="sub" style="margin-top:8px">${escapeHtml(r.name)} · ${escapeHtml(r.car_name)} · ${r.created_at}</div></div>`).join(''):'<div class="empty">Пока нет отзывов.</div>'}catch(e){$('rlist').innerHTML='<div class="empty">'+e.message+'</div>'}}
 function openWhy(){show('why');$('why').innerHTML='<div class="sectionTitle">Почему BALTICAR</div><div class="sub">Сервис, который хочется рекомендовать.</div>'+[['🛡','Проверенные автомобили','Следим за состоянием, чистотой и обслуживанием.'],['💰','Прозрачные тарифы','Цена зависит от срока и видна до отправки заявки.'],['⚡','Быстрое подтверждение','Менеджер получает заявку сразу после отправки.'],['📅','Удобное бронирование','Весь путь от автомобиля до заявки — в одном окне.'],['🔔','Напоминания','Бот напомнит о предстоящей аренде заранее.']].map(x=>`<div class="block"><div style="font-size:25px">${x[0]}</div><h3>${x[1]}</h3><div class="sub">${x[2]}</div></div>`).join('')}
 function openTerms(){show('terms');$('terms').innerHTML='<div class="sectionTitle">Условия аренды</div><div class="block"><h3>🕐 Время</h3><div class="sub">Выдача и возврат: 08:00–20:00.</div></div><div class="block"><h3>🔧 Технический интервал</h3><div class="sub">Между бронированиями закладывается 2 часа.</div></div><div class="block"><h3>💰 Оплата</h3><div class="sub">Тариф определяется количеством оплачиваемых суток: 1–3, 4–6 или 7+.</div></div><div class="block"><h3>📌 Важно</h3><div class="sub">Если возврат происходит позже полного количества суток, добавляется ещё одни оплачиваемые сутки.</div></div>'}
 function openContact(){tg?.openTelegramLink?.('https://t.me/Balticar_kgd')||toast('Откройте канал BALTICAR для связи')}
+function openMap(){tg?.openTelegramLink?.('https://t.me/Balticar_kgd')||toast('Свяжитесь с менеджером для уточнения точки встречи')}
+function openReviewForm(id){toast('Форма отзыва будет открыта менеджером')}
 function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
 renderHome();$('backBtn').style.visibility='hidden';
 </script>
-</body></html>
+</body>
+</html>
