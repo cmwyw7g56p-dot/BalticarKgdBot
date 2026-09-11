@@ -278,6 +278,11 @@ def init_db():
                 """
             )
 
+            cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_location TEXT")
+            cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_location_type TEXT")
+            cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_location_note TEXT")
+            cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_location_fee INTEGER")
+
             cur.execute(
                 """
                 UPDATE bookings
@@ -442,7 +447,7 @@ def load_car_settings():
             CARS[cid]["description"] = row.get("description") or CARS[cid].get("description", "")
             base_photos = list(CARS[cid].get("photos") or ["photos/i30_1_front.jpg", "photos/i30_2_rear.jpg", "photos/i30_3_interior.jpg"])
             custom_photo = row.get("photo_path")
-            if custom_photo and custom_photo not in base_photos:
+            if custom_photo and custom_photo != "photos/i30_hero.jpg" and custom_photo not in base_photos and os.path.exists(custom_photo):
                 base_photos = [custom_photo] + base_photos
             CARS[cid]["photos"] = base_photos
             CARS[cid]["active"] = bool(row["active"]) and not bool(row.get("deleted", False))
@@ -3273,7 +3278,10 @@ def create_booking_sync(
     end_at,
     name,
     phone,
-    comment
+    comment,
+    pickup_location=None,
+    pickup_location_type=None,
+    pickup_location_note=None
 ):
     """
     Полностью синхронная транзакция PostgreSQL.
@@ -3409,6 +3417,10 @@ def create_booking_sync(
                     name,
                     phone,
                     comment,
+                    pickup_location,
+                    pickup_location_type,
+                    pickup_location_note,
+                    pickup_location_fee,
                     total,
                     status,
                     created_at,
@@ -3417,6 +3429,7 @@ def create_booking_sync(
                 VALUES (
                     %s, %s, %s, %s, %s,
                     %s, %s,
+                    %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     'pending', %s, %s
                 )
@@ -3433,6 +3446,10 @@ def create_booking_sync(
                     name,
                     phone,
                     comment,
+                    pickup_location,
+                    pickup_location_type,
+                    pickup_location_note,
+                    0 if pickup_location_type in ("airport", "station") else None,
                     total,
                     created_at,
                     expires
@@ -4104,6 +4121,9 @@ async def admin_day(
             f"📞 {row['phone']}\n"
             f"💰 {money(row['total'])}\n"
         )
+        if row.get("pickup_location"):
+            out.append(f"📍 Подача: {row['pickup_location']}" + (f" — {row['pickup_location_note']}" if row.get('pickup_location_note') else ""))
+
         if row["status"] in ("pending", "confirmed"):
             keyboard.append([InlineKeyboardButton(text=f"✏️ Изменить даты №{row['id']}", callback_data=f"adminedit:{row['id']}")])
             keyboard.append([InlineKeyboardButton(text=f"🚫 Отменить бронь №{row['id']}", callback_data=f"cancel:{row['id']}")])
@@ -6369,7 +6389,7 @@ async def main():
         try:
             with con.cursor() as cur:
                 rows=cur.execute("""
-                    SELECT b.id,b.car_id,b.start_at,b.end_at,b.total,b.status,b.created_at,b.comment,
+                    SELECT b.id,b.car_id,b.start_at,b.end_at,b.total,b.status,b.created_at,b.comment,b.pickup_location,b.pickup_location_type,b.pickup_location_note,b.pickup_location_fee,
                            EXISTS(SELECT 1 FROM reviews rv WHERE rv.booking_id=b.id) AS reviewed
                     FROM bookings b WHERE b.user_id=%s ORDER BY b.id DESC LIMIT 20
                 """, (user_id,)).fetchall()
@@ -6379,6 +6399,10 @@ async def main():
                     "start_at":format_date_time(r["start_at"]),"end_at":format_date_time(r["end_at"]),
                     "start_iso":ensure_tz(r["start_at"]).isoformat(),"end_iso":ensure_tz(r["end_at"]).isoformat(),
                     "total":r["total"],"status":r["status"],"comment":r["comment"] or "",
+                    "pickup_location":r.get("pickup_location") or "Калининград",
+                    "pickup_location_type":r.get("pickup_location_type") or "city",
+                    "pickup_location_note":r.get("pickup_location_note") or "",
+                    "pickup_location_fee":r.get("pickup_location_fee"),
                     "past":ensure_tz(r["end_at"]) < now,"reviewed":bool(r["reviewed"]),
                 } for r in rows]
         finally:
@@ -6470,12 +6494,22 @@ async def main():
             name=str(payload.get("name","")).strip()
             phone=str(payload.get("phone","")).strip()
             comment=str(payload.get("comment","")).strip()
+            pickup_location=str(payload.get("pickup_location","")).strip() or "Аэропорт Храброво"
+            pickup_location_type=str(payload.get("pickup_location_type","")).strip() or "airport"
+            pickup_location_note=str(payload.get("pickup_location_note","")).strip()
+            allowed_locations={"airport":"Аэропорт Храброво","station":"Южный вокзал","city":"Калининград","region":"Калининградская область","other":"Другое место"}
+            if pickup_location_type not in allowed_locations:
+                return mini_json({"ok":False,"message":"Выберите корректное место подачи."},400)
+            pickup_location=allowed_locations[pickup_location_type]
+            if pickup_location_type=="other" and not pickup_location_note:
+                return mini_json({"ok":False,"message":"Укажите адрес или описание места подачи."},400)
+            pickup_fee=0 if pickup_location_type in ("airport","station") else None
             if cid not in CARS or not CARS[cid].get("active",True):
                 return mini_json({"ok":False,"message":"Автомобиль сейчас недоступен."},400)
             if not name or len(phone)<7 or end_at<=start_at:
                 return mini_json({"ok":False,"message":"Проверьте имя, телефон и даты."},400)
             await asyncio.to_thread(load_car_settings)
-            result=await asyncio.to_thread(create_booking_sync,int(user["id"]),str(user.get("username","") or ""),cid,start_at,end_at,name,phone,comment)
+            result=await asyncio.to_thread(create_booking_sync,int(user["id"]),str(user.get("username","") or ""),cid,start_at,end_at,name,phone,comment,pickup_location,pickup_location_type,pickup_location_note)
             if not result.get("ok"):
                 reason=result.get("reason")
                 msg="Автомобиль уже занят или не хватает технического интервала." if reason=="overlap" else "Автомобиль недоступен из-за технического обслуживания." if reason=="maintenance" else "Не удалось создать заявку. Проверьте период."
@@ -6484,8 +6518,8 @@ async def main():
             if ADMIN_ID:
                 uname=f"@{user.get('username')}" if user.get("username") else "без username"
                 await bot.send_message(ADMIN_ID,
-                    f"🔔 <b>Новая заявка №{bid}</b>\n\n🚗 {CARS[cid]['name']} ({CARS[cid]['gear']})\n📅 {format_date_time(start_at)} → {format_date_time(end_at)}\n⏱ {days} суток\n💰 <b>{money(total)}</b>\n👤 {name}\n📞 {phone}\nTelegram: {uname}\n📝 {comment or '—'}\n\n⏳ Ожидает подтверждения до {expires.strftime('%d.%m.%Y %H:%M')}", reply_markup=admin_buttons(bid))
-            return mini_json({"ok":True,"id":bid,"days":days,"total":total,"expires":expires.strftime("%d.%m.%Y %H:%M")})
+                    f"🔔 <b>Новая заявка №{bid}</b>\n\n🚗 {CARS[cid]['name']} ({CARS[cid]['gear']})\n📅 {format_date_time(start_at)} → {format_date_time(end_at)}\n⏱ {days} суток\n📍 Подача: <b>{pickup_location}</b>" + (f"\n📝 Адрес: {pickup_location_note}" if pickup_location_note else "") + ("\n💚 Подача БЕСПЛАТНО" if pickup_location_type in ("airport","station") else "\n💰 Подача: от 1 000 ₽, уточнить по адресу") + f"\n💰 <b>{money(total)}</b>\n👤 {name}\n📞 {phone}\nTelegram: {uname}\n📝 Пожелания: {comment or '—'}\n\n⏳ Ожидает подтверждения до {expires.strftime('%d.%m.%Y %H:%M')}", reply_markup=admin_buttons(bid))
+            return mini_json({"ok":True,"id":bid,"days":days,"total":total,"pickup_fee":pickup_fee,"pickup_location":pickup_location,"pickup_location_type":pickup_location_type,"pickup_location_note":pickup_location_note,"expires":expires.strftime("%d.%m.%Y %H:%M")})
         except Exception as exc:
             print(f"[MINIAPP] create booking error: {type(exc).__name__}: {exc}")
             return mini_json({"ok":False,"message":"Ошибка при создании заявки."},500)
