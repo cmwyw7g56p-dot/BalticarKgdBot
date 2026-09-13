@@ -155,6 +155,77 @@ button{-webkit-tap-highlight-color:transparent}
 .homePanel{padding:22px 18px 18px}.homePanel h1{font-size:35px;line-height:1.02;letter-spacing:-.045em;margin:8px 0 9px}.homePanel p{margin:0;color:var(--muted);font-size:14px;line-height:1.48;max-width:420px}
 .homeMainCta{display:flex;align-items:center;justify-content:space-between;width:100%;margin-top:17px;padding:16px 17px;border-radius:17px;background:linear-gradient(135deg,var(--blue),var(--blue-dark));color:#fff;font-weight:900;box-shadow:0 11px 24px rgba(22,131,255,.24)}.homeMainCta b{font-size:24px;line-height:1}.homeTrustRow{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:14px}.homeTrustRow div{min-width:0;padding:9px 8px;border-radius:13px;background:var(--surface2);font-size:9px;color:var(--muted);line-height:1.25}.homeTrustRow b{display:block;color:var(--green);font-size:13px;margin-bottom:3px}.homeShortcuts{display:grid;gap:8px}.homeBooking{display:grid;grid-template-columns:36px 1fr 18px;gap:10px;align-items:center;width:100%;padding:14px 15px;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:18px;box-shadow:0 8px 24px rgba(18,38,55,.05)}.shortcutIcon{width:36px;height:36px;display:grid;place-items:center;border-radius:12px;background:var(--surface2);font-size:18px}.homeBooking b{display:block;font-size:14px}.homeBooking small{display:block;margin-top:3px;color:var(--muted);font-size:11px}.homeBooking strong{font-size:23px;color:var(--muted);font-weight:500}.homeContact{padding:13px 15px;border-radius:16px;background:var(--surface);border:1px solid var(--line);font-weight:750}.homeFooterLinks{display:flex;justify-content:center;align-items:center;gap:9px;margin:14px 0 4px;color:var(--muted);font-size:11px}.homeFooterLinks button{background:none;padding:3px;color:var(--muted);font-size:11px}
 @media(max-width:370px){.homePhoto{height:215px}.homePanel{padding:19px 15px 15px}.homePanel h1{font-size:31px}.homeTrustRow{gap:5px}.homeTrustRow div{font-size:8px;padding:8px 6px}}
+
+/* V6 — BALTICAR clean visual system */
+:root{
+  --bg:#f7f9fb;
+  --surface:#ffffff;
+  --surface2:#f1f5f8;
+  --text:#10202d;
+  --muted:#526675;
+  --line:#d7e1e8;
+  --blue:#0877d9;
+  --blue-dark:#075aa5;
+  --green:#15945b;
+  --amber:#b96f00;
+  --shadow:0 10px 28px rgba(16,32,48,.07);
+}
+html.dark{
+  --bg:#07131d;
+  --surface:#0d1c28;
+  --surface2:#142735;
+  --text:#f2f6f9;
+  --muted:#a5b4c0;
+  --line:rgba(255,255,255,.11);
+  --blue:#2d91ee;
+  --blue-dark:#1470c8;
+  --green:#35d27e;
+  --amber:#ffc15a;
+}
+body{font-weight:520}
+.brand{font-weight:900;letter-spacing:.10em}
+.sectionTitle,.detailTitle{color:var(--text);font-weight:900}
+.sub{color:var(--muted);font-weight:520}
+.eyebrow{color:var(--blue);font-weight:850}
+.carname,.locationTitle,.block h3,.homeBooking b{color:var(--text)}
+.chip{color:#435867}
+html.dark .chip{color:#b9c7d1}
+.field label,.stepLabel{color:#435867}
+html.dark .field label,html.dark .stepLabel{color:#b5c3cd}
+.carPrice .label,.carPrice small,.locMain span,.locationNotice,.reviewLine span,.reviewTotal small{color:#526675}
+html.dark .carPrice .label,html.dark .carPrice small,html.dark .locMain span,html.dark .locationNotice,html.dark .reviewLine span,html.dark .reviewTotal small{color:#a5b4c0}
+
+/* Clean home: the hero photo contains no text or overlays. */
+.homePremium{margin:6px 0 14px;border-radius:24px;overflow:hidden;background:var(--surface);border:1px solid var(--line);box-shadow:0 12px 32px rgba(16,32,48,.08)}
+.homePhoto{height:235px;background:#dce5eb;position:relative;overflow:hidden}
+.homePhoto img{width:100%;height:100%;object-fit:cover;display:block}
+.homePhotoShade,.homePhotoTop{display:none}
+.homePanel{padding:20px 17px 17px}
+.homePanel .eyebrow{margin-bottom:7px}
+.homePanel h1{color:var(--text);font-size:34px;line-height:1.03;letter-spacing:-.035em;margin:0 0 9px;font-weight:900}
+.homePanel p{color:var(--muted);font-size:14px;line-height:1.45;margin:0;max-width:420px}
+.homeMainCta{margin-top:16px;min-height:50px;padding:14px 16px;border-radius:15px;background:#102f45;color:#fff;font-weight:850;box-shadow:0 8px 18px rgba(16,47,69,.16)}
+.homeMainCta b{font-size:22px}
+.homeTrustRow{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:12px}
+.homeTrustRow div{background:var(--surface2);border:1px solid var(--line);color:#526675;border-radius:12px;padding:8px 7px;font-size:9px;line-height:1.25}
+.homeTrustRow b{color:var(--green)}
+.homeShortcuts{gap:8px}
+.homeBooking{border-radius:17px;border:1px solid var(--line);box-shadow:0 7px 20px rgba(16,32,48,.045)}
+.homeBooking small{color:var(--muted)}
+.homeContact{border-radius:15px;border:1px solid var(--line);color:var(--text)}
+.homeFooterLinks button{color:#526675}
+html.dark .homeTrustRow div,html.dark .homeFooterLinks button{color:#a5b4c0}
+
+@media(max-width:520px){
+  .homePhoto{height:220px}
+  .homePanel{padding:18px 15px 15px}
+  .homePanel h1{font-size:32px}
+}
+@media(max-width:370px){
+  .homePhoto{height:205px}
+  .homePanel h1{font-size:30px}
+}
+
 </style>
 <script>
 window.BALTICAR_applyTheme=function(){
@@ -211,7 +282,29 @@ function show(id,push=true){document.querySelectorAll('.screen').forEach(x=>x.cl
 function goBack(){const x=history.pop()||'home';show(x,false)}
 function goHome(){history=[];show('home',false);renderHome()}
 function img(path){return path ? '/' + path.replace(/^\/+/, '') : '/photos/balticar_hero.jpg'}
-function renderHome(){ $('home').innerHTML=`<section class="homePremium"><div class="homePhoto"><img src="/photos/balticar_hero.jpg" alt="BALTICAR — аренда автомобилей"><div class="homePhotoShade"></div><div class="homePhotoTop"><span class="homeLogoMark">BALTICAR</span><span class="homeCity">КАЛИНИНГРАД</span></div></div><div class="homePanel"><div class="eyebrow">Аренда автомобилей</div><h1>Ваша машина<br>уже ждёт.</h1><p>Выберите автомобиль и даты — заявку оформим за несколько минут.</p><button class="homeMainCta" onclick="openCars()"><span>Выбрать автомобиль</span><b>→</b></button><div class="homeTrustRow"><div><b>✓</b><span>Без скрытых платежей</span></div><div><b>✓</b><span>Подача по городу</span></div><div><b>✓</b><span>Подтверждение менеджером</span></div></div></div></section><section class="homeShortcuts"><button class="homeBooking" onclick="openBookings()"><span class="shortcutIcon">📋</span><span><b>Мои бронирования</b><small>Статус, даты и детали</small></span><strong>›</strong></button><button class="homeContact" onclick="openContact()">💬 Связаться с менеджером</button></section><div class="homeFooterLinks"><button onclick="openTerms()">Условия аренды</button><span>•</span><button onclick="openReviews()">Отзывы</button></div>`}
+function renderHome(){
+  $('home').innerHTML=`<section class="homePremium">
+    <div class="homePhoto">
+      <img src="/photos/balticar_hero.jpg" alt="BALTICAR — аренда автомобилей">
+    </div>
+    <div class="homePanel">
+      <div class="eyebrow">BALTICAR · КАЛИНИНГРАД</div>
+      <h1>Свобода<br>в каждом маршруте.</h1>
+      <p>Аренда автомобилей в Калининграде и области. Выберите автомобиль и даты — заявку оформим за несколько минут.</p>
+      <button class="homeMainCta" onclick="openCars()"><span>Выбрать автомобиль</span><b>→</b></button>
+      <div class="homeTrustRow">
+        <div><b>✓</b><span>Без скрытых платежей</span></div>
+        <div><b>✓</b><span>Подача по городу</span></div>
+        <div><b>✓</b><span>Подтверждение менеджером</span></div>
+      </div>
+    </div>
+  </section>
+  <section class="homeShortcuts">
+    <button class="homeBooking" onclick="openBookings()"><span class="shortcutIcon">📋</span><span><b>Мои бронирования</b><small>Статус, даты и детали</small></span><strong>›</strong></button>
+    <button class="homeContact" onclick="openContact()">💬 Связаться с менеджером</button>
+  </section>
+  <div class="homeFooterLinks"><button onclick="openTerms()">Условия аренды</button><span>•</span><button onclick="openReviews()">Отзывы</button></div>`
+}
 async function openCars(push=true){show('cars',push);$('cars').innerHTML='<div class="sectionTitle">Автомобили</div><div class="sub">Выберите машину — увидите фото, тариф и сможете сразу перейти к датам.</div><div class="catalogLead"><div><b>🚗 Все автомобили доступны онлайн</b><span>Бронирование без звонка</span></div><span>08:00–20:00</span></div><div id="carlist" class="carlistGrid"><div class="loading"></div><div class="loading"></div></div>';try{cars=(await api('/api/cars')).cars;renderCars()}catch(e){$('carlist').innerHTML='<div class="empty">Не удалось загрузить автомобили.<br>'+e.message+'</div>'}}
 function galleryHTML(c,detail=false){const photos=(c.photos||[]).filter(Boolean);const id=(detail?'detail-':'card-')+c.id;return `<div class="${detail?'detailGallery':'carGallery'} gallery" data-gallery="${id}" data-index="0" data-photos='${JSON.stringify(photos)}' ontouchstart="galleryTouchStart(event,this)" ontouchend="galleryTouchEnd(event,this)"><img class="galleryImg" src="${img(photos[0])}" alt="${escapeHtml(c.name)}">${photos.length>1?`<button class="galleryBtn prev" type="button" aria-label="Предыдущее фото" onclick="galleryMove(event,'${id}',-1)">‹</button><button class="galleryBtn next" type="button" aria-label="Следующее фото" onclick="galleryMove(event,'${id}',1)">›</button>`:''}${photos.length>1?`<div class="galleryCount">1 / ${photos.length}</div><div class="galleryDots">${photos.map((_,i)=>`<button class="galleryDot ${i===0?'active':''}" type="button" aria-label="Фото ${i+1}" onclick="gallerySet(event,'${id}',${i})"></button>`).join('')}</div>`:''}</div>`}
 function galleryData(id){return document.querySelector(`[data-gallery="${id}"]`)}
