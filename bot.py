@@ -134,11 +134,10 @@ CARS = {
         "name": "Hyundai Solaris 2021",
         "gear": "АКПП",
         "rates": (2700, 2600, 2500),
-        "photos": [
-            "photos/solaris21_hero.jpg",
-            "photos/solaris21_1_front.jpg",
-            "photos/solaris21_3_interior.jpg",
-        ],
+        "photos": ["photos/solaris21_hero.jpg",
+        "photos/solaris21_3_interior.jpg",
+        "photos/solaris21_2_rear.jpg"
+    ],
         "fuel": "Бензин",
         "seats": 5,
         "description": (
@@ -151,11 +150,10 @@ CARS = {
         "name": "Hyundai Solaris 2020",
         "gear": "АКПП",
         "rates": (2700, 2600, 2500),
-        "photos": [
-            "photos/solaris20_hero.jpg",
-            "photos/solaris20_1_front.jpg",
-            "photos/solaris20_3_interior.jpg",
-        ],
+        "photos": ["photos/solaris20_hero.jpg",
+        "photos/solaris20_3_interior.jpg",
+        "photos/solaris20_2_rear.jpg"
+    ],
         "fuel": "Бензин",
         "seats": 5,
         "description": (
@@ -168,11 +166,10 @@ CARS = {
         "name": "Hyundai Solaris 2017",
         "gear": "АКПП",
         "rates": (2400, 2300, 2200),
-        "photos": [
-            "photos/solaris17_hero.jpg",
-            "photos/solaris17_1_front.jpg",
-            "photos/solaris17_3_interior.jpg",
-        ],
+        "photos": ["photos/solaris17_hero.jpg",
+        "photos/solaris17_3_interior.jpg",
+        "photos/solaris17_2_rear.jpg"
+    ],
         "fuel": "Бензин",
         "seats": 5,
         "description": (
@@ -185,11 +182,10 @@ CARS = {
         "name": "Hyundai i30 2014",
         "gear": "МКПП",
         "rates": (2300, 2200, 2100),
-        "photos": [
-            "photos/i30_hero.jpg",
-            "photos/i30_1_front.jpg",
-            "photos/i30_3_interior.jpg",
-        ],
+        "photos": ["photos/i30_hero.jpg",
+        "photos/i30_3_interior.jpg",
+        "photos/i30_2_rear.jpg"
+    ],
         "fuel": "Бензин",
         "seats": 5,
         "description": (
