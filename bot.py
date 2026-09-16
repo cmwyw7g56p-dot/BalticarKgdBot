@@ -6377,15 +6377,37 @@ async def mini_bookings(request):
         if not result["ok"]:
             messages={"car":"Автомобиль недоступен.","period":"Проверьте даты и время.","past":"Выбранное время уже прошло.","time":"Выдача и возврат доступны с 08:00 до 20:00.","location":"Выберите место подачи.","location_note":"Укажите адрес или комментарий для другого места.","maintenance":"Автомобиль недоступен в выбранный период.","overlap":"Эти даты или время уже заняты. Выберите другой вариант."}
             return mini_json({"message":messages.get(result["reason"],"Не удалось создать заявку.")},409)
-        # Notify admin in Telegram without changing existing /publish.
+        # Надёжное уведомление администратора.
+        # Не зависим от состояния глобального MINI_BOT: отправляем через
+        # отдельную Bot-сессию с тем же BOT_TOKEN.
         try:
             loc=result["location"]
-            loc_line=f"📍 Место подачи: <b>{loc}</b>"
-            if location_note: loc_line += f"\n📝 {escape_html(location_note)}"
-            if MINI_BOT is not None:
-                await MINI_BOT.send_message(ADMIN_ID, f"📥 <b>Новая заявка из Mini App №{result['bid']}</b>\n🚗 {escape_html(CARS[cid]['name'])}\n👤 {escape_html(name)}\n📞 {escape_html(phone)}\n📅 {mini_parse_local_iso(str(data.get('start_at'))).strftime('%d.%m.%Y %H:%M')} → {mini_parse_local_iso(str(data.get('end_at'))).strftime('%d.%m.%Y %H:%M')}\n{loc_line}\n💰 Аренда: <b>{money(result['rental_total'])}</b>\n🔐 Залог: <b>{money(DEPOSIT_AMOUNT)}</b>")
+            loc_line=f"📍 Место подачи: <b>{escape_html(loc)}</b>"
+            if location_note:
+                loc_line += f"\n📝 {escape_html(location_note)}"
+            admin_text=(
+                f"📥 <b>Новая заявка из Mini App №{result['bid']}</b>\n"
+                f"🚗 {escape_html(CARS[cid]['name'])}\n"
+                f"👤 {escape_html(name)}\n"
+                f"📞 {escape_html(phone)}\n"
+                f"📅 {mini_parse_local_iso(str(data.get('start_at'))).strftime('%d.%m.%Y %H:%M')} → "
+                f"{mini_parse_local_iso(str(data.get('end_at'))).strftime('%d.%m.%Y %H:%M')}\n"
+                f"{loc_line}\n"
+                f"💰 Аренда: <b>{money(result['rental_total'])}</b>\n"
+                f"🔐 Залог: <b>{money(DEPOSIT_AMOUNT)}</b>"
+            )
+            if not BOT_TOKEN:
+                raise RuntimeError("BOT_TOKEN is empty")
+            if not ADMIN_ID:
+                raise RuntimeError("ADMIN_ID is empty or 0")
+            notify_bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+            try:
+                await notify_bot.send_message(ADMIN_ID, admin_text)
+            finally:
+                await notify_bot.session.close()
+            print(f"[MINI/ADMIN_NOTIFY] sent bid={result['bid']} admin={ADMIN_ID}")
         except Exception as exc:
-            print(f"[MINI/ADMIN_NOTIFY] {type(exc).__name__}: {exc}")
+            print(f"[MINI/ADMIN_NOTIFY] FAILED bid={result.get('bid')}: {type(exc).__name__}: {exc}")
         return mini_json({"id":result["bid"],"days":result["days"],"total":result["total"],"location_fee":result["location_fee"],"location":result["location"],"expires":result["expires"]})
     except Exception as exc:
         print(f"[MINI/BOOKING] {type(exc).__name__}: {exc}")
