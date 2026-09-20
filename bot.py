@@ -4666,6 +4666,13 @@ async def admin_booking(
                     callback_data=f"deletecancel:{bid}"
                 )
             ])
+        elif row["status"] == "rejected":
+            buttons.append([
+                InlineKeyboardButton(
+                    text="🗑 Удалить отклонённую бронь",
+                    callback_data=f"deleterej:{bid}"
+                )
+            ])
         buttons.append([
             InlineKeyboardButton(
                 text="◀️ К бронированиям",
@@ -4681,7 +4688,7 @@ async def admin_booking(
 # DELETE CANCELLED BOOKING
 # ============================================================
 
-def delete_cancelled_booking_sync(bid):
+def delete_booking_sync(bid, allowed_statuses=("cancelled", "rejected")):
 
     con = db()
 
@@ -4703,11 +4710,11 @@ def delete_cancelled_booking_sync(bid):
                 con.rollback()
                 return {"ok": False, "reason": "not_found"}
 
-            if row["status"] != "cancelled":
+            if row["status"] not in allowed_statuses:
                 con.rollback()
                 return {
                     "ok": False,
-                    "reason": "not_cancelled",
+                    "reason": "not_deletable",
                     "status": row["status"]
                 }
 
@@ -4715,9 +4722,9 @@ def delete_cancelled_booking_sync(bid):
                 """
                 DELETE FROM bookings
                 WHERE id=%s
-                  AND status='cancelled'
+                  AND status = ANY(%s)
                 """,
-                (bid,)
+                (bid, list(allowed_statuses))
             )
 
             con.commit()
@@ -4730,6 +4737,14 @@ def delete_cancelled_booking_sync(bid):
 
     finally:
         con.close()
+
+
+def delete_cancelled_booking_sync(bid):
+    return delete_booking_sync(bid, ("cancelled",))
+
+
+def delete_rejected_booking_sync(bid):
+    return delete_booking_sync(bid, ("rejected",))
 
 
 async def delete_cancelled_booking(callback: CallbackQuery):
@@ -4792,11 +4807,13 @@ async def delete_cancelled_booking(callback: CallbackQuery):
                 callback_data=f"adminbooking:{row['id']}"
             )
         ])
-        if row["status"] == "cancelled":
+        if row["status"] in ("cancelled", "rejected"):
+            status = row["status"]
+            callback_data = f"deletecancel:{row['id']}" if status == "cancelled" else f"deleterej:{row['id']}"
             keyboard.append([
                 InlineKeyboardButton(
                     text=f"🗑 Удалить бронь №{row['id']}",
-                    callback_data=f"deletecancel:{row['id']}"
+                    callback_data=callback_data
                 )
             ])
 
@@ -4813,6 +4830,44 @@ async def delete_cancelled_booking(callback: CallbackQuery):
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=keyboard
         )
+    )
+
+
+async def delete_rejected_booking(callback: CallbackQuery):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID:
+        await callback.message.answer("Нет доступа.")
+        return
+    try:
+        bid = int(callback.data.split(":", 1)[1])
+    except (ValueError, IndexError):
+        await callback.message.answer("Некорректный номер брони.")
+        return
+
+    result = await asyncio.to_thread(delete_rejected_booking_sync, bid)
+    if not result["ok"]:
+        if result["reason"] == "not_found":
+            await callback.message.answer("Бронь не найдена или уже удалена.")
+        else:
+            await callback.message.answer("Удалять можно только отклонённые брони.")
+        return
+
+    rows = await asyncio.to_thread(get_all_bookings_sync)
+    if not rows:
+        await callback.message.edit_text(
+            "📋 <b>Все бронирования</b>\n\nБронирований пока нет.",
+            reply_markup=admin_back_keyboard()
+        )
+        return
+
+    keyboard = admin_bookings_markup(rows)
+    keyboard.append([
+        InlineKeyboardButton(text="◀️ В админ-панель", callback_data="admin:back")
+    ])
+    await callback.message.edit_text(
+        "📋 <b>Все бронирования</b>\n\n"
+        f"Показаны последние {len(rows)} заявок.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
     )
 
 
@@ -4856,8 +4911,10 @@ def admin_bookings_markup(rows, show_delete=True):
     keyboard=[]
     for row in rows:
         keyboard.append([InlineKeyboardButton(text=f"№{row['id']} • {CARS[row['car_id']]['name'][:18]} • {status_label(row['status'])[:2]}", callback_data=f"adminbooking:{row['id']}")])
-        if show_delete and row['status']=='cancelled':
-            keyboard.append([InlineKeyboardButton(text=f"🗑 Удалить №{row['id']}", callback_data=f"deletecancel:{row['id']}")])
+        if show_delete and row['status'] in ('cancelled','rejected'):
+            status = row['status']
+            callback_data = f"deletecancel:{row['id']}" if status == 'cancelled' else f"deleterej:{row['id']}"
+            keyboard.append([InlineKeyboardButton(text=f"🗑 Удалить №{row['id']}", callback_data=callback_data)])
     return keyboard
 
 
@@ -5873,6 +5930,11 @@ async def main():
     )
 
     dp.callback_query.register(
+        delete_rejected_booking,
+        F.data.startswith("deleterej:")
+    )
+
+    dp.callback_query.register(
         admin_action,
         F.data.startswith("cancel:")
     )
@@ -6366,7 +6428,12 @@ async def mini_mybookings(request):
     finally: con.close()
 
 async def mini_bookings(request):
-    uid=mini_auth_or_401(request)
+    print(f"[MINI/BOOKING] REQUEST /api/bookings init_data={'yes' if request.headers.get('X-Telegram-Init-Data') else 'NO'}")
+    try:
+        uid=mini_auth_or_401(request)
+    except Exception as exc:
+        print(f"[MINI/BOOKING] AUTH FAILED: {type(exc).__name__}: {exc!r}")
+        raise
     try:
         data=await request.json()
         name=str(data.get("name","")).strip(); phone=str(data.get("phone","")).strip()
@@ -6401,12 +6468,28 @@ async def mini_bookings(request):
                 f"💰 Аренда: <b>{money(result['rental_total'])}</b>\n"
                 f"🔐 Залог: <b>{money(DEPOSIT_AMOUNT)}</b>"
             )
-            await MINI_BOT.send_message(
-                ADMIN_ID,
-                admin_text,
-                reply_markup=admin_buttons(result['bid'])
-            )
-            print(f"[MINI/ADMIN_NOTIFY] SENT bid={result['bid']} admin={ADMIN_ID}")
+            try:
+                await MINI_BOT.send_message(
+                    ADMIN_ID,
+                    admin_text,
+                    reply_markup=admin_buttons(result['bid'])
+                )
+                print(f"[MINI/ADMIN_NOTIFY] SENT via MINI_BOT bid={result['bid']} admin={ADMIN_ID}")
+            except Exception as first_exc:
+                print(f"[MINI/ADMIN_NOTIFY] PRIMARY FAILED bid={result.get('bid')}: {type(first_exc).__name__}: {first_exc!r}")
+                notify_bot = Bot(
+                    BOT_TOKEN,
+                    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+                )
+                try:
+                    await notify_bot.send_message(
+                        ADMIN_ID,
+                        admin_text,
+                        reply_markup=admin_buttons(result['bid'])
+                    )
+                    print(f"[MINI/ADMIN_NOTIFY] SENT via FALLBACK bid={result['bid']} admin={ADMIN_ID}")
+                finally:
+                    await notify_bot.session.close()
         except Exception as exc:
             print(f"[MINI/ADMIN_NOTIFY] FAILED bid={result.get('bid')}: {type(exc).__name__}: {exc!r}")
         return mini_json({"id":result["bid"],"days":result["days"],"total":result["total"],"location_fee":result["location_fee"],"location":result["location"],"expires":result["expires"]})
