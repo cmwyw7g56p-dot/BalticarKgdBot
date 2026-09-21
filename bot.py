@@ -6428,11 +6428,11 @@ async def mini_mybookings(request):
     finally: con.close()
 
 async def mini_bookings(request):
-    print(f"[MINI/BOOKING] REQUEST /api/bookings init_data={'yes' if request.headers.get('X-Telegram-Init-Data') else 'NO'}")
+    print(f"[MINI/BOOKING] REQUEST /api/bookings init_data={'yes' if request.headers.get('X-Telegram-Init-Data') else 'NO'}", flush=True)
     try:
         uid=mini_auth_or_401(request)
     except Exception as exc:
-        print(f"[MINI/BOOKING] AUTH FAILED: {type(exc).__name__}: {exc!r}")
+        print(f"[MINI/BOOKING] AUTH FAILED: {type(exc).__name__}: {exc!r}", flush=True)
         raise
     try:
         data=await request.json()
@@ -6442,16 +6442,19 @@ async def mini_bookings(request):
         location_note=str(data.get("pickup_location_note",data.get("location_note",""))).strip()
         result=mini_create_booking_sync(uid,cid,str(data.get("start_at")),str(data.get("end_at")),name,phone,comment,location_type,location_note)
         if not result["ok"]:
+            print(f"[MINI/BOOKING] REJECTED reason={result.get('reason')}", flush=True)
             messages={"car":"Автомобиль недоступен.","period":"Проверьте даты и время.","past":"Выбранное время уже прошло.","time":"Выдача и возврат доступны с 08:00 до 20:00.","location":"Выберите место подачи.","location_note":"Укажите адрес или комментарий для другого места.","maintenance":"Автомобиль недоступен в выбранный период.","overlap":"Эти даты или время уже заняты. Выберите другой вариант."}
             return mini_json({"message":messages.get(result["reason"],"Не удалось создать заявку.")},409)
-        # V13: уведомление отправляем через основной экземпляр Bot,
-        # который уже используется работающим Telegram-ботом.
+        print(f"[MINI/BOOKING] CREATED bid={result['bid']} car={cid} uid={uid}", flush=True)
+        # V15: уведомление напрямую через Telegram Bot API.
+        # Так мы исключаем проблемы с отдельной Bot-сессией и сразу видим
+        # HTTP-ответ Telegram в Render Logs.
         try:
-            print(f"[MINI/ADMIN_NOTIFY] START bid={result['bid']} admin={ADMIN_ID} bot_ready={MINI_BOT is not None}")
+            print(f"[MINI/ADMIN_NOTIFY] START bid={result['bid']} admin={ADMIN_ID} token={'set' if BOT_TOKEN else 'EMPTY'}", flush=True)
             if not ADMIN_ID:
                 raise RuntimeError("ADMIN_ID is empty or 0")
-            if MINI_BOT is None:
-                raise RuntimeError("MINI_BOT is not initialized")
+            if not BOT_TOKEN:
+                raise RuntimeError("BOT_TOKEN is empty")
 
             loc=result["location"]
             loc_line=f"📍 Место подачи: <b>{escape_html(loc)}</b>"
@@ -6468,33 +6471,30 @@ async def mini_bookings(request):
                 f"💰 Аренда: <b>{money(result['rental_total'])}</b>\n"
                 f"🔐 Залог: <b>{money(DEPOSIT_AMOUNT)}</b>"
             )
-            try:
-                await MINI_BOT.send_message(
-                    ADMIN_ID,
-                    admin_text,
-                    reply_markup=admin_buttons(result['bid'])
-                )
-                print(f"[MINI/ADMIN_NOTIFY] SENT via MINI_BOT bid={result['bid']} admin={ADMIN_ID}")
-            except Exception as first_exc:
-                print(f"[MINI/ADMIN_NOTIFY] PRIMARY FAILED bid={result.get('bid')}: {type(first_exc).__name__}: {first_exc!r}")
-                notify_bot = Bot(
-                    BOT_TOKEN,
-                    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-                )
-                try:
-                    await notify_bot.send_message(
-                        ADMIN_ID,
-                        admin_text,
-                        reply_markup=admin_buttons(result['bid'])
-                    )
-                    print(f"[MINI/ADMIN_NOTIFY] SENT via FALLBACK bid={result['bid']} admin={ADMIN_ID}")
-                finally:
-                    await notify_bot.session.close()
+            kb=admin_buttons(result['bid'])
+            payload={
+                "chat_id": ADMIN_ID,
+                "text": admin_text,
+                "parse_mode": "HTML",
+                "reply_markup": kb.model_dump(mode="json"),
+            }
+            from aiohttp import ClientSession
+            async with ClientSession() as session:
+                async with session.post(
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                    json=payload,
+                    timeout=15,
+                ) as resp:
+                    body=await resp.text()
+                    print(f"[MINI/ADMIN_NOTIFY] TELEGRAM_HTTP status={resp.status} body={body[:1500]}", flush=True)
+                    if resp.status != 200:
+                        raise RuntimeError(f"Telegram sendMessage HTTP {resp.status}: {body[:500]}")
+            print(f"[MINI/ADMIN_NOTIFY] SENT bid={result['bid']} admin={ADMIN_ID}", flush=True)
         except Exception as exc:
-            print(f"[MINI/ADMIN_NOTIFY] FAILED bid={result.get('bid')}: {type(exc).__name__}: {exc!r}")
+            print(f"[MINI/ADMIN_NOTIFY] FAILED bid={result.get('bid')}: {type(exc).__name__}: {exc!r}", flush=True)
         return mini_json({"id":result["bid"],"days":result["days"],"total":result["total"],"location_fee":result["location_fee"],"location":result["location"],"expires":result["expires"]})
     except Exception as exc:
-        print(f"[MINI/BOOKING] {type(exc).__name__}: {exc}")
+        print(f"[MINI/BOOKING] {type(exc).__name__}: {exc}", flush=True)
         return mini_json({"message":"Не удалось отправить заявку. Попробуйте ещё раз."},500)
 
 async def mini_cancel_booking(request):
