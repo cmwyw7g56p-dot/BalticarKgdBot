@@ -4,6 +4,7 @@ import secrets
 import time as monotonic_time
 from pathlib import Path
 from datetime import date, datetime, timedelta, time
+from html import escape as escape_html
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
