@@ -1877,6 +1877,9 @@ def admin_panel_keyboard():
                 )
             ],
             [
+                InlineKeyboardButton(text="⭐ Отзывы", callback_data="admin:reviews")
+            ],
+            [
                 InlineKeyboardButton(text="🔎 Поиск / фильтр", callback_data="admin:filter"),
                 InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")
             ],
@@ -5538,6 +5541,47 @@ def income_sync(period):
     finally: con.close()
 
 
+def admin_reviews_sync(limit=50):
+    con=db()
+    try:
+        with con.cursor() as cur:
+            return cur.execute("""
+                SELECT r.id, r.booking_id, r.rating, r.review_text, r.created_at,
+                       b.name, b.phone, r.car_id
+                FROM reviews r
+                LEFT JOIN bookings b ON b.id=r.booking_id
+                ORDER BY r.created_at DESC
+                LIMIT %s
+            """,(limit,)).fetchall()
+    finally:
+        con.close()
+
+
+async def admin_reviews(callback:CallbackQuery):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID:
+        return
+    rows=await asyncio.to_thread(admin_reviews_sync,50)
+    if not rows:
+        text="⭐ <b>Отзывы клиентов</b>\n\nПока отзывов нет."
+    else:
+        parts=["⭐ <b>Отзывы клиентов</b>",f"\nВсего показано: {len(rows)}",""]
+        for row in rows:
+            stars="⭐"*int(row["rating"] or 0)
+            name=escape_html(row.get("name") or "Клиент")
+            car=escape_html(CARS.get(row.get("car_id"),{}).get("name",row.get("car_id") or "Автомобиль"))
+            review=escape_html((row.get("review_text") or "Без текста").strip())
+            if len(review)>500:
+                review=review[:497]+"..."
+            created=ensure_tz(row["created_at"]).strftime("%d.%m.%Y %H:%M") if row.get("created_at") else ""
+            parts.append(f"№{row['booking_id']} · <b>{name}</b> · {car}")
+            parts.append(f"{stars} · {created}")
+            parts.append(review)
+            parts.append("━━━━━━━━━━━━━━━━━━")
+        text="\n".join(parts)
+    await callback.message.edit_text(text,reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ В админ-панель",callback_data="admin:back")]]))
+
+
 async def admin_stats(callback:CallbackQuery):
     await safe_callback_answer(callback)
     if callback.from_user.id != ADMIN_ID:return
@@ -5939,6 +5983,7 @@ async def main():
         admin_action,
         F.data.startswith("cancel:")
     )
+    dp.callback_query.register(admin_reviews, F.data == "admin:reviews")
     dp.callback_query.register(admin_filter, F.data == "admin:filter")
     dp.callback_query.register(admin_stats, F.data == "admin:stats")
     dp.callback_query.register(admin_report, F.data == "admin:report")
