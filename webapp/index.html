@@ -382,10 +382,10 @@ function renderHome(){
 async function openCars(push=true){show('cars',push);$('cars').innerHTML='<div class="sectionTitle">Автомобили</div><div class="sub">Выберите машину — увидите фото, тариф и сможете сразу перейти к датам.</div><div class="catalogLead"><div><b>🚗 Все автомобили доступны онлайн</b><span>Бронирование без звонка</span></div><span>08:00–20:00</span></div><div id="carlist" class="carlistGrid"><div class="loading"></div><div class="loading"></div></div>';try{cars=(await api('/api/cars')).cars;renderCars()}catch(e){$('carlist').innerHTML='<div class="empty">Не удалось загрузить автомобили.<br>'+e.message+'</div>'}}
 function galleryPhotos(c){
   const map={
-    solaris21:['photos/solaris21_1_front.jpg','photos/solaris21_3_interior.jpg','photos/solaris21_2_rear.jpg'],
-    solaris20:['photos/solaris20_1_front.jpg','photos/solaris20_3_interior.jpg','photos/solaris20_2_rear.jpg'],
-    solaris17:['photos/solaris17_1_front.jpg','photos/solaris17_3_interior.jpg','photos/solaris17_2_rear.jpg'],
-    i30:['photos/i30_1_front.jpg','photos/i30_3_interior.jpg','photos/i30_2_rear.jpg']
+    solaris21:['photos/solaris21_1_front.jpg','photos/solaris21_2_rear.jpg','photos/solaris21_3_interior.jpg'],
+    solaris20:['photos/solaris20_1_front.jpg','photos/solaris20_2_rear.jpg','photos/solaris20_3_interior.jpg'],
+    solaris17:['photos/solaris17_1_front.jpg','photos/solaris17_2_rear.jpg','photos/solaris17_3_interior.jpg'],
+    i30:['photos/i30_1_front.jpg','photos/i30_2_rear.jpg','photos/i30_3_interior.jpg']
   };
   return (map[c.id]||c.photos||[]).filter(Boolean);
 }
@@ -434,7 +434,26 @@ function openWhy(){show('why');$('why').innerHTML='<div class="sectionTitle">П�
 function openTerms(){show('terms');$('terms').innerHTML='<div class="sectionTitle">Условия аренды</div><div class="block"><h3>🕐 Время</h3><div class="sub">Выдача и возврат: 08:00–20:00.</div></div><div class="block"><h3>🔧 Технический интервал</h3><div class="sub">Между бронированиями закладывается 2 часа.</div></div><div class="block"><h3>💰 Оплата</h3><div class="sub">Тариф определяется количеством оплачиваемых суток: 1–3, 4–6 или 7+.</div></div><div class="block"><h3>📌 Важно</h3><div class="sub">Если возврат происходит позже полного количества суток, добавляется ещё одни оплачиваемые сутки.</div></div>'}
 function openContact(){tg?.openTelegramLink?.('https://t.me/Balticar_kgd')||toast('Откройте канал BALTICAR для связи')}
 function openMap(){tg?.openTelegramLink?.('https://t.me/Balticar_kgd')||toast('Свяжитесь с менеджером для уточнения точки встречи')}
-function openReviewForm(id){toast('Форма отзыва будет открыта менеджером')}
+function openReviewForm(id){
+  show('bookings');
+  $('bookings').innerHTML=`<div class="sectionTitle">Оставить отзыв</div><div class="sub">Расскажите, как прошла аренда. Ваша оценка поможет нам улучшать сервис.</div><div class="block" style="margin-top:16px"><h3>Ваша оценка</h3><div id="reviewStars" style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">${[1,2,3,4,5].map(i=>`<button type="button" class="secondary" style="font-size:22px;padding:10px 13px" onclick="selectReviewRating(${i})">☆</button>`).join('')}</div><div class="field" style="margin-top:16px"><label>Ваш отзыв <span style="font-weight:500">· необязательно</span></label><textarea id="reviewText" maxlength="1000" placeholder="Что вам понравилось? Что можно улучшить?"></textarea></div></div><button class="primary" onclick="submitReview(${id})">Опубликовать отзыв →</button><button class="secondary" style="margin-top:10px" onclick="openBookings()">← Вернуться к бронированиям</button>`;
+  window.reviewRating=5;
+  selectReviewRating(5);
+}
+function selectReviewRating(rating){
+  window.reviewRating=rating;
+  const box=$('reviewStars'); if(!box)return;
+  box.querySelectorAll('button').forEach((b,i)=>{b.textContent=i<rating?'★':'☆';b.classList.toggle('primary',i<rating);b.classList.toggle('secondary',i>=rating)});
+}
+async function submitReview(id){
+  const rating=Number(window.reviewRating||5);
+  const text=($('reviewText')?.value||'').trim();
+  try{
+    await api('/api/reviews',{method:'POST',body:JSON.stringify({booking_id:id,rating,text})});
+    toast('Спасибо за отзыв!');
+    await openBookings();
+  }catch(e){toast(e.message)}
+}
 function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
 renderHome();$('backBtn').style.visibility='hidden';
 </script>
