@@ -6472,12 +6472,26 @@ async def mini_bookings(request):
                 f"💰 Аренда: <b>{money(result['rental_total'])}</b>\n"
                 f"🔐 Залог: <b>{money(DEPOSIT_AMOUNT)}</b>"
             )
-            kb=admin_buttons(result['bid'])
+            # Не сериализуем aiogram InlineKeyboardMarkup через model_dump():
+            # в текущей версии aiogram это может добавить пустое поле
+            # icon_custom_emoji_id, которое Telegram API принимает только числом.
+            # Передаём минимальный чистый JSON keyboard вручную.
             payload={
                 "chat_id": ADMIN_ID,
                 "text": admin_text,
                 "parse_mode": "HTML",
-                "reply_markup": kb.model_dump(mode="json"),
+                "reply_markup": {
+                    "inline_keyboard": [[
+                        {
+                            "text": "✅ Подтвердить",
+                            "callback_data": f"confirm:{result['bid']}"
+                        },
+                        {
+                            "text": "❌ Отклонить",
+                            "callback_data": f"reject:{result['bid']}"
+                        }
+                    ]]
+                },
             }
             from aiohttp import ClientSession
             async with ClientSession() as session:
