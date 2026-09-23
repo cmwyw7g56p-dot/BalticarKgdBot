@@ -3865,148 +3865,45 @@ async def admin_back(
 # ADMIN CALENDAR
 # ============================================================
 
-def admin_all_calendar_sync(year, month):
-    first = date(year, month, 1)
-    next_first = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
-    month_start = local_dt(first, time(0, 0))
-    month_end = local_dt(next_first, time(0, 0))
+async def admin_calendar(
+    callback: CallbackQuery
+):
 
-    con = db()
-    try:
-        with con.cursor() as cur:
-            bookings = cur.execute("""
-                SELECT car_id, id, status, start_at, end_at
-                FROM bookings
-                WHERE status IN ('pending','confirmed')
-                  AND start_at < %s AND end_at > %s
-                ORDER BY car_id, start_at
-            """, (month_end, month_start)).fetchall()
-            maintenance = cur.execute("""
-                SELECT car_id, id, 'maintenance' AS status, start_at, end_at
-                FROM car_maintenance
-                WHERE start_at < %s AND end_at > %s
-                ORDER BY car_id, start_at
-            """, (month_end, month_start)).fetchall()
-            return list(bookings) + list(maintenance)
-    finally:
-        con.close()
+    await safe_callback_answer(callback)
 
+    if callback.from_user.id != ADMIN_ID:
 
-def admin_all_calendar_text(year, month, rows):
-    import calendar
-    days = calendar.monthrange(year, month)[1]
-    today = datetime.now(TZ).date()
-    by_car = {cid: [] for cid in CARS}
-    for row in rows:
-        if row['car_id'] in by_car:
-            by_car[row['car_id']].append(row)
+        await callback.message.answer(
+            "Нет доступа."
+        )
 
-    months = [
-        'Январь','Февраль','Март','Апрель','Май','Июнь',
-        'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'
-    ]
-    # Один символ = один день. Это помещает все автомобили на один экран/сообщение.
-    header = ''.join(str((n // 10) % 10) if n >= 10 else ' ' for n in range(1, days + 1))
-    header2 = ''.join(str(n % 10) for n in range(1, days + 1))
-    lines = [
-        f"📅 <b>Занятость всех автомобилей — {months[month-1]} {year}</b>",
-        '',
-        '<code>Дни:  ' + header + '</code>',
-        '<code>       ' + header2 + '</code>',
-    ]
+        return
 
-    occupied_counts = [0] * days
-    for cid, car in CARS.items():
-        cells = []
-        for idx in range(days):
-            current = date(year, month, idx + 1)
-            if current < today:
-                cells.append('·')
-                continue
-            day_start = local_dt(current, time(0, 0))
-            day_end = day_start + timedelta(days=1)
-            matched = [r for r in by_car[cid] if ensure_tz(r['start_at']) < day_end and ensure_tz(r['end_at']) > day_start]
-            if any(r['status'] == 'maintenance' for r in matched):
-                cells.append('M')
-                occupied_counts[idx] += 1
-            elif any(r['status'] == 'confirmed' for r in matched):
-                cells.append('■')
-                occupied_counts[idx] += 1
-            elif any(r['status'] == 'pending' for r in matched):
-                cells.append('P')
-                occupied_counts[idx] += 1
-            else:
-                cells.append('·')
-        short = car['name'].replace('Hyundai ', '').replace(' ', '')[:8]
-        lines.append(f"<code>{short:<8} {''.join(cells)}</code>")
-
-    lines += [
-        '',
-        '<code>Авто   ' + ''.join(str(min(9, n)) for n in occupied_counts) + '</code>',
-        '■ подтверждено   P ожидает   M обслуживание   · свободно',
-        '<b>Цифра в строке «Авто»</b> = сколько машин занято в этот день.',
-        'Так сразу видно, когда несколько автомобилей забронированы одновременно.',
-    ]
-    return '\n'.join(lines)
-
-
-def admin_all_calendar_keyboard(year, month):
-    if month == 12:
-        next_first = date(year + 1, 1, 1)
-    else:
-        next_first = date(year, month + 1, 1)
-    if month == 1:
-        prev_first = date(year - 1, 12, 1)
-    else:
-        prev_first = date(year, month - 1, 1)
-    return InlineKeyboardMarkup(inline_keyboard=[
+    rows = [
         [
-            InlineKeyboardButton(text='‹', callback_data=f'adminallmonth:{prev_first.isoformat()}'),
-            InlineKeyboardButton(text='📅 Месяц', callback_data='noop'),
-            InlineKeyboardButton(text='›', callback_data=f'adminallmonth:{next_first.isoformat()}'),
-        ],
-        [InlineKeyboardButton(text='🚗 Календарь отдельного авто', callback_data='admin:calendar_cars')],
-        [InlineKeyboardButton(text='📋 Все бронирования', callback_data='admin:bookings')],
-        [InlineKeyboardButton(text='◀️ В админ-панель', callback_data='admin:back')],
-    ])
+            InlineKeyboardButton(
+                text=f"🚗 {car['name']}",
+                callback_data=f"admincar:{cid}"
+            )
+        ]
+        for cid, car in CARS.items()
+    ]
 
-
-async def admin_calendar(callback: CallbackQuery):
-    await safe_callback_answer(callback)
-    if callback.from_user.id != ADMIN_ID:
-        await callback.message.answer('Нет доступа.')
-        return
-    today = datetime.now(TZ).date()
-    rows = await asyncio.to_thread(admin_all_calendar_sync, today.year, today.month)
-    await callback.message.edit_text(
-        admin_all_calendar_text(today.year, today.month, rows),
-        reply_markup=admin_all_calendar_keyboard(today.year, today.month),
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="◀️ Назад",
+                callback_data="admin:back"
+            )
+        ]
     )
 
-
-async def admin_calendar_cars(callback: CallbackQuery):
-    await safe_callback_answer(callback)
-    if callback.from_user.id != ADMIN_ID:
-        return
-    rows = [[InlineKeyboardButton(text=f"🚗 {car['name']}", callback_data=f'admincar:{cid}')] for cid, car in CARS.items()]
-    rows.append([InlineKeyboardButton(text='◀️ Все автомобили на одном листе', callback_data='admin:calendar')])
-    rows.append([InlineKeyboardButton(text='◀️ В админ-панель', callback_data='admin:back')])
     await callback.message.edit_text(
-        '📅 <b>Календарь отдельного автомобиля</b>\n\nВыберите автомобиль:',
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
-    )
-
-
-async def admin_all_month(callback: CallbackQuery):
-    await safe_callback_answer(callback)
-    if callback.from_user.id != ADMIN_ID:
-        return
-    _, iso = callback.data.split(':', 1)
-    d = date.fromisoformat(iso)
-    rows = await asyncio.to_thread(admin_all_calendar_sync, d.year, d.month)
-    await callback.message.edit_text(
-        admin_all_calendar_text(d.year, d.month, rows),
-        reply_markup=admin_all_calendar_keyboard(d.year, d.month),
+        "📅 <b>Календарь занятости</b>\n\n"
+        "Выберите автомобиль:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=rows
+        )
     )
 
 
@@ -5996,14 +5893,6 @@ async def main():
         admin_calendar,
         F.data == "admin:calendar"
     )
-    dp.callback_query.register(
-        admin_calendar_cars,
-        F.data == "admin:calendar_cars"
-    )
-    dp.callback_query.register(
-        admin_all_month,
-        F.data.startswith("adminallmonth:")
-    )
 
     dp.callback_query.register(
         admin_bookings,
@@ -6184,10 +6073,24 @@ async def main():
         f"{WEBHOOK_PATH}"
     )
 
+    # ВАЖНО: если WEBHOOK_SECRET не задан в окружении, генерируем секрет
+    # один раз при старте и используем именно его для проверки входящих
+    # запросов (см. telegram_webhook ниже). Раньше при пустом
+    # WEBHOOK_SECRET сгенерированный секрет ставился в set_webhook, но
+    # проверка запросов пропускалась целиком (`if WEBHOOK_SECRET and ...`),
+    # то есть любой, кто узнает URL вебхука, мог слать поддельные апдейты.
     secret = (
         WEBHOOK_SECRET
         or secrets.token_urlsafe(32)
     )
+
+    if not WEBHOOK_SECRET:
+        print(
+            "WEBHOOK_SECRET не задан в окружении — сгенерирован "
+            "случайный секрет на время работы процесса. Рекомендуется "
+            "задать WEBHOOK_SECRET явно в Render, иначе секрет "
+            "изменится при каждом перезапуске."
+        )
 
     await bot.set_webhook(
         webhook_url,
@@ -6210,12 +6113,12 @@ async def main():
         request: web.Request
     ):
 
-        if (
-            WEBHOOK_SECRET
-            and request.headers.get(
-                "X-Telegram-Bot-Api-Secret-Token"
-            ) != WEBHOOK_SECRET
-        ):
+        # Сверяем с `secret` (реально установленным в set_webhook), а не
+        # напрямую с WEBHOOK_SECRET — так проверка работает и в случае,
+        # когда секрет был сгенерирован автоматически при старте.
+        if request.headers.get(
+            "X-Telegram-Bot-Api-Secret-Token"
+        ) != secret:
 
             raise web.HTTPForbidden(
                 text="Invalid webhook secret"
@@ -6359,6 +6262,17 @@ def mini_validate_init_data(init_data: str):
         calc = hmac.new(secret_key, data_check.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(calc, received_hash):
             return None
+        # Отбрасываем устаревшие (например, перехваченные и повторно
+        # отправленные) initData: Telegram подписывает их без срока
+        # действия, поэтому свежесть проверяем сами по auth_date.
+        auth_date = pairs.get("auth_date")
+        if auth_date is not None:
+            try:
+                age = monotonic_time.time() - int(auth_date)
+            except ValueError:
+                return None
+            if age > 86400 or age < -300:
+                return None
         user_raw = pairs.get("user", "")
         user = json.loads(user_raw) if user_raw else {}
         uid = user.get("id")
