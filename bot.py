@@ -6777,6 +6777,12 @@ async def admin_web_page(request):
 
 
 def admin_calendar_payload_sync(year, month):
+    """Данные для веб-календаря автопарка.
+
+    Используем только поля, которые гарантированно есть в рабочей схеме,
+    а дополнительные данные (имя/телефон/место) подхватываем безопасно.
+    Это не должно ломать календарь из-за одной необязательной колонки.
+    """
     first = date(year, month, 1)
     next_first = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
     month_start = local_dt(first, time(0, 0))
@@ -6784,67 +6790,106 @@ def admin_calendar_payload_sync(year, month):
     con = db()
     try:
         with con.cursor() as cur:
-            bookings = cur.execute("""
-                SELECT id, car_id, status, start_at, end_at, name, phone, total,
-                       pickup_location
+            # Базовые поля — те же, что используются существующим календарём.
+            booking_rows = cur.execute("""
+                SELECT id, car_id, status, start_at, end_at
                 FROM bookings
                 WHERE status IN ('pending','confirmed')
                   AND start_at < %s AND end_at > %s
                 ORDER BY car_id, start_at, id
             """, (month_end, month_start)).fetchall()
-            maintenance = cur.execute("""
-                SELECT id, car_id, 'maintenance' AS status, start_at, end_at,
-                       '' AS name, '' AS phone, NULL AS total, reason AS pickup_location
-                FROM car_maintenance
-                WHERE start_at < %s AND end_at > %s
-                ORDER BY car_id, start_at, id
-            """, (month_end, month_start)).fetchall()
+
+            # Дополнительные данные нужны только для карточки при нажатии.
+            extra = {}
+            if booking_rows:
+                ids = [r['id'] for r in booking_rows]
+                try:
+                    rows = cur.execute("""
+                        SELECT id, name, phone, total, pickup_location
+                        FROM bookings WHERE id = ANY(%s)
+                    """, (ids,)).fetchall()
+                    extra = {r['id']: r for r in rows}
+                except Exception as exc:
+                    print(f"[ADMIN/WEB/CALENDAR] optional booking fields skipped: {type(exc).__name__}: {exc}", flush=True)
+                    con.rollback()
+
+            try:
+                maintenance_rows = cur.execute("""
+                    SELECT id, car_id, start_at, end_at, reason
+                    FROM car_maintenance
+                    WHERE start_at < %s AND end_at > %s
+                    ORDER BY car_id, start_at, id
+                """, (month_end, month_start)).fetchall()
+            except Exception as exc:
+                print(f"[ADMIN/WEB/CALENDAR] maintenance skipped: {type(exc).__name__}: {exc}", flush=True)
+                con.rollback()
+                maintenance_rows = []
     finally:
         con.close()
 
     days = (next_first - first).days
-    all_rows = list(bookings) + list(maintenance)
-    cars_out = []
     by_car = {cid: [] for cid in active_cars()}
-    for row in all_rows:
-        if row['car_id'] in by_car:
-            by_car[row['car_id']].append(row)
 
-    def block(row):
+    def block(row, maintenance=False):
         sa = ensure_tz(row['start_at'])
         ea = ensure_tz(row['end_at'])
-        # Calendar end is exclusive. A booking ending on the 10th occupies
-        # columns through the 9th for the visual month timeline.
-        start_day = max(1, sa.date().day if sa.date() >= month_start.date() else 1)
-        end_day = min(days, (ea.date() - timedelta(microseconds=1)).day if ea.date() <= month_end else days)
+        start_day = 1 if sa.date() < first else sa.day
+        end_day = days if ea.date() > next_first else (ea.date() - timedelta(microseconds=1)).day
+        end_day = max(start_day, min(days, end_day))
+        if maintenance:
+            return {
+                'id': row['id'], 'status': 'maintenance', 'name': row.get('reason') or 'ТО',
+                'phone': '', 'total': None, 'pickup': '',
+                'start_label': sa.strftime('%d.%m.%Y %H:%M'),
+                'end_label': ea.strftime('%d.%m.%Y %H:%M'),
+                'start_day': max(1, start_day), 'end_day': end_day,
+            }
+        ex = extra.get(row['id'], {})
         return {
-            'id': row['id'], 'status': row['status'], 'name': row.get('name') or '',
-            'phone': row.get('phone') or '', 'total': row.get('total'),
-            'pickup': row.get('pickup_location') or '',
+            'id': row['id'], 'status': row['status'], 'name': ex.get('name') or f"Бронь №{row['id']}",
+            'phone': ex.get('phone') or '', 'total': ex.get('total'), 'pickup': ex.get('pickup_location') or '',
             'start_label': sa.strftime('%d.%m.%Y %H:%M'),
             'end_label': ea.strftime('%d.%m.%Y %H:%M'),
-            'start_day': start_day, 'end_day': max(start_day, end_day),
+            'start_day': max(1, start_day), 'end_day': end_day,
         }
 
+    all_blocks = []
+    for r in booking_rows:
+        if r['car_id'] in by_car:
+            b = block(r)
+            by_car[r['car_id']].append(b)
+            all_blocks.append((r['car_id'], r['start_at'], r['end_at'], b))
+    for r in maintenance_rows:
+        if r['car_id'] in by_car:
+            b = block(r, True)
+            by_car[r['car_id']].append(b)
+            all_blocks.append((r['car_id'], r['start_at'], r['end_at'], b))
+
+    cars_out = []
     for cid, car in active_cars().items():
         cars_out.append({
             'id': cid, 'name': car.get('name', cid), 'gear': car.get('gear',''),
-            'blocks': [block(r) for r in by_car.get(cid, [])]
+            'blocks': sorted(by_car.get(cid, []), key=lambda x: (x['start_day'], x['end_day']))
         })
 
     overlap = []
     for n in range(1, days + 1):
-        day_start = local_dt(date(year, month, n), time(0,0))
+        day_start = local_dt(date(year, month, n), time(0, 0))
         day_end = day_start + timedelta(days=1)
         occupied = 0
         for cid in by_car:
-            if any(ensure_tz(r['start_at']) < day_end and ensure_tz(r['end_at']) > day_start for r in by_car[cid]):
+            if any(ensure_tz(sa) < day_end and ensure_tz(ea) > day_start
+                   for ccid, sa, ea, b in all_blocks if ccid == cid and b['status'] != 'maintenance'):
                 occupied += 1
         if occupied >= 2:
             overlap.append({'date': date(year, month, n).strftime('%d.%m'), 'count': occupied})
 
-    return {'year': year, 'month': month, 'days': days, 'cars': cars_out,
-            'bookings': [block(r) for r in all_rows], 'overlaps': overlap}
+    return {
+        'year': year, 'month': month, 'days': days,
+        'cars': cars_out,
+        'bookings': [b for cid, sa, ea, b in all_blocks],
+        'overlaps': overlap,
+    }
 
 
 async def admin_calendar_api(request):
@@ -6856,8 +6901,8 @@ async def admin_calendar_api(request):
             raise ValueError
         return mini_json(await asyncio.to_thread(admin_calendar_payload_sync, year, month))
     except Exception as exc:
-        print(f"[ADMIN/WEB/CALENDAR] {type(exc).__name__}: {exc}")
-        return mini_json({'message':'Не удалось загрузить календарь.'}, 500)
+        print(f"[ADMIN/WEB/CALENDAR] {type(exc).__name__}: {exc!r}", flush=True)
+        return mini_json({'message':f'Не удалось загрузить календарь: {type(exc).__name__}'}, 500)
 
 
 async def admin_bookings_api(request):
