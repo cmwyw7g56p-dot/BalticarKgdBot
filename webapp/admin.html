@@ -14,8 +14,10 @@ html.dark{--bg:#07111b;--surface:#0e1a24;--text:#edf4f8;--muted:#91a2ae;--line:#
 </head><body><div class="wrap"><div class="top"><div><div class="brand">BALTICAR</div><small>Администратор · автопарк</small></div><button class="close" onclick="closeApp()">Закрыть</button></div><div class="nav"><button id="tabCal" class="active" onclick="setTab('calendar')">📅 Календарь</button><button id="tabBookings" onclick="setTab('bookings')">📋 Брони</button><button id="tabReviews" onclick="setTab('reviews')">⭐ Отзывы</button></div><section id="content"></section></div>
 <script>
 const tg=window.Telegram?.WebApp; try{tg?.ready();tg?.expand()}catch(e){}
-const headers=()=>({'Content-Type':'application/json','X-Telegram-Init-Data':tg?.initData||''});
-async function api(url,opt={}){const r=await fetch(url,{...opt,headers:{...headers(),...(opt.headers||{})}});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.message||'Ошибка сервера');return d}
+const initData=()=>tg?.initData||'';
+const headers=()=>({'Content-Type':'application/json','X-Telegram-Init-Data':initData()});
+function withAuth(url){const s=initData();if(!s)return url;return url+(url.includes('?')?'&':'?')+'init_data='+encodeURIComponent(s)}
+async function api(url,opt={}){const r=await fetch(withAuth(url),{...opt,headers:{...headers(),...(opt.headers||{})}});let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.message||`Ошибка сервера (${r.status})`);return d}
 const months=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];const wd=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];let tab='calendar',cursor=new Date();cursor.setDate(1);let currentData=null;
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
 function isoDate(y,m,d){return `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`}
@@ -30,5 +32,6 @@ function showBooking(id){const b=(currentData.bookings||[]).find(x=>Number(x.id)
 async function renderBookings(){ $('content').innerHTML='<div class="panel"><div class="loader">Загружаю брони…</div></div>';try{const d=await api('/api/admin/bookings');$('content').innerHTML='<div class="panel"><div class="panelHead"><h1>Все бронирования</h1></div><div class="list">'+(d.bookings.length?d.bookings.map(b=>`<div class="item"><div class="itemTop"><b>№${b.id} · ${esc(b.car_name)}</b><span class="status ${esc(b.status)}">${esc(b.status_label)}</span></div><div class="muted">${esc(b.name||'Клиент')} · ${esc(b.phone||'')}</div><div class="muted">📅 ${esc(b.start_label)} → ${esc(b.end_label)} · 💰 ${Number(b.total||0).toLocaleString('ru-RU')} ₽</div></div>`).join(''):'<div class="empty">Бронирований пока нет.</div>')+'</div></div>'}catch(e){$('content').innerHTML=`<div class="panel"><div class="empty">${esc(e.message)}</div></div>`}}
 async function renderReviews(){ $('content').innerHTML='<div class="panel"><div class="loader">Загружаю отзывы…</div></div>';try{const d=await api('/api/admin/reviews');$('content').innerHTML='<div class="panel"><div class="panelHead"><div><h1>Отзывы клиентов</h1><div class="muted">Средняя оценка: '+(d.average||'—')+' ★ · '+d.reviews.length+'</div></div></div><div class="list">'+(d.reviews.length?d.reviews.map(r=>`<div class="item"><div class="stars">${'★'.repeat(Number(r.rating||0))}${'☆'.repeat(5-Number(r.rating||0))}</div><div style="margin-top:8px">${esc(r.text||'Без текста')}</div><div class="muted">${esc(r.name||'Клиент')} · ${esc(r.car_name||'Автомобиль')} · бронь №${r.booking_id} · ${esc(r.created_at||'')}</div></div>`).join(''):'<div class="empty">Отзывов пока нет.</div>')+'</div></div>'}catch(e){$('content').innerHTML=`<div class="panel"><div class="empty">${esc(e.message)}</div></div>`}}
 function closeApp(){tg?.close?.()||history.back()}
-renderCalendar();
+if(!initData()){ $('content').innerHTML='<div class="panel"><div class="empty"><b>Откройте админку из Telegram</b><br>Для защиты данных календарь и отзывы доступны только через кнопку «🖥 Открыть веб-админку» в боте.</div></div>'; }
+else renderCalendar();
 </script></body></html>
