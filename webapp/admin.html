@@ -14,6 +14,7 @@ html.dark{--bg:#07111b;--surface:#0e1a24;--text:#edf4f8;--muted:#91a2ae;--line:#
 </head><body><div class="wrap"><div class="top"><div><div class="brand">BALTICAR</div><small>Администратор · автопарк</small></div><button class="close" onclick="closeApp()">Закрыть</button></div><div class="nav"><button id="tabCal" class="active" onclick="setTab('calendar')">📅 Календарь</button><button id="tabBookings" onclick="setTab('bookings')">📋 Брони</button><button id="tabReviews" onclick="setTab('reviews')">⭐ Отзывы</button></div><section id="content"></section></div>
 <script>
 const tg=window.Telegram?.WebApp; try{tg?.ready();tg?.expand()}catch(e){}
+const $=(id)=>document.getElementById(id);
 const initData=()=>tg?.initData||'';
 const headers=()=>({'Content-Type':'application/json','X-Telegram-Init-Data':initData()});
 function withAuth(url){const s=initData();if(!s)return url;return url+(url.includes('?')?'&':'?')+'init_data='+encodeURIComponent(s)}
