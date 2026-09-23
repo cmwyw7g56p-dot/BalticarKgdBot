@@ -6758,7 +6758,11 @@ async def mini_reviews_post(request):
 
 
 def admin_web_auth_or_403(request):
-    uid = mini_user_id(request)
+    # Telegram Web Apps normally send initData in a custom header.
+    # Some Telegram/iOS WebView paths can omit custom headers on fetch(),
+    # so accept the same signed initData from the query string as a fallback.
+    init_data = request.headers.get("X-Telegram-Init-Data", "") or request.query.get("init_data", "")
+    uid = mini_validate_init_data(init_data)
     if uid != ADMIN_ID:
         raise web.HTTPForbidden(text="Admin authorization required")
     return uid
