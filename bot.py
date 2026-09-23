@@ -90,6 +90,7 @@ WEBHOOK_SECRET = os.getenv(
 
 _RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
 MINIAPP_URL = (_RENDER_URL + "/app") if _RENDER_URL else "https://balticarkgdbot.onrender.com/app"
+ADMIN_WEBAPP_URL = (_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin"
 
 
 # ============================================================
@@ -1885,6 +1886,9 @@ def admin_panel_keyboard():
             ],
             [
                 InlineKeyboardButton(text="💰 Отчёт по доходам", callback_data="admin:report")
+            ],
+            [
+                InlineKeyboardButton(text="🖥 Открыть веб-админку", web_app=WebAppInfo(url=ADMIN_WEBAPP_URL))
             ],
         ]
     )
@@ -6752,9 +6756,160 @@ async def mini_reviews_post(request):
         con.commit(); return mini_json({"ok":True})
     finally: con.close()
 
+
+def admin_web_auth_or_403(request):
+    uid = mini_user_id(request)
+    if uid != ADMIN_ID:
+        raise web.HTTPForbidden(text="Admin authorization required")
+    return uid
+
+async def admin_web_page(request):
+    # Сам HTML можно открыть только как Telegram Web App: API дополнительно
+    # проверяет initData и ADMIN_ID. Это не создаёт публичную админку без авторизации.
+    p = WEBAPP_DIR / "admin.html"
+    if not p.is_file():
+        raise web.HTTPNotFound(text="Admin app not found")
+    return web.FileResponse(p)
+
+
+def admin_calendar_payload_sync(year, month):
+    first = date(year, month, 1)
+    next_first = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    month_start = local_dt(first, time(0, 0))
+    month_end = local_dt(next_first, time(0, 0))
+    con = db()
+    try:
+        with con.cursor() as cur:
+            bookings = cur.execute("""
+                SELECT id, car_id, status, start_at, end_at, name, phone, total,
+                       pickup_location
+                FROM bookings
+                WHERE status IN ('pending','confirmed')
+                  AND start_at < %s AND end_at > %s
+                ORDER BY car_id, start_at, id
+            """, (month_end, month_start)).fetchall()
+            maintenance = cur.execute("""
+                SELECT id, car_id, 'maintenance' AS status, start_at, end_at,
+                       '' AS name, '' AS phone, NULL AS total, reason AS pickup_location
+                FROM car_maintenance
+                WHERE start_at < %s AND end_at > %s
+                ORDER BY car_id, start_at, id
+            """, (month_end, month_start)).fetchall()
+    finally:
+        con.close()
+
+    days = (next_first - first).days
+    all_rows = list(bookings) + list(maintenance)
+    cars_out = []
+    by_car = {cid: [] for cid in active_cars()}
+    for row in all_rows:
+        if row['car_id'] in by_car:
+            by_car[row['car_id']].append(row)
+
+    def block(row):
+        sa = ensure_tz(row['start_at'])
+        ea = ensure_tz(row['end_at'])
+        # Calendar end is exclusive. A booking ending on the 10th occupies
+        # columns through the 9th for the visual month timeline.
+        start_day = max(1, sa.date().day if sa.date() >= month_start.date() else 1)
+        end_day = min(days, (ea.date() - timedelta(microseconds=1)).day if ea.date() <= month_end else days)
+        return {
+            'id': row['id'], 'status': row['status'], 'name': row.get('name') or '',
+            'phone': row.get('phone') or '', 'total': row.get('total'),
+            'pickup': row.get('pickup_location') or '',
+            'start_label': sa.strftime('%d.%m.%Y %H:%M'),
+            'end_label': ea.strftime('%d.%m.%Y %H:%M'),
+            'start_day': start_day, 'end_day': max(start_day, end_day),
+        }
+
+    for cid, car in active_cars().items():
+        cars_out.append({
+            'id': cid, 'name': car.get('name', cid), 'gear': car.get('gear',''),
+            'blocks': [block(r) for r in by_car.get(cid, [])]
+        })
+
+    overlap = []
+    for n in range(1, days + 1):
+        day_start = local_dt(date(year, month, n), time(0,0))
+        day_end = day_start + timedelta(days=1)
+        occupied = 0
+        for cid in by_car:
+            if any(ensure_tz(r['start_at']) < day_end and ensure_tz(r['end_at']) > day_start for r in by_car[cid]):
+                occupied += 1
+        if occupied >= 2:
+            overlap.append({'date': date(year, month, n).strftime('%d.%m'), 'count': occupied})
+
+    return {'year': year, 'month': month, 'days': days, 'cars': cars_out,
+            'bookings': [block(r) for r in all_rows], 'overlaps': overlap}
+
+
+async def admin_calendar_api(request):
+    admin_web_auth_or_403(request)
+    try:
+        year = int(request.query.get('year'))
+        month = int(request.query.get('month'))
+        if not 1 <= month <= 12:
+            raise ValueError
+        return mini_json(await asyncio.to_thread(admin_calendar_payload_sync, year, month))
+    except Exception as exc:
+        print(f"[ADMIN/WEB/CALENDAR] {type(exc).__name__}: {exc}")
+        return mini_json({'message':'Не удалось загрузить календарь.'}, 500)
+
+
+async def admin_bookings_api(request):
+    admin_web_auth_or_403(request)
+    con = db()
+    try:
+        with con.cursor() as cur:
+            rows = cur.execute("""
+                SELECT id, car_id, status, name, phone, start_at, end_at, total, created_at
+                FROM bookings ORDER BY start_at DESC, id DESC LIMIT 200
+            """).fetchall()
+        out=[]
+        for r in rows:
+            sa=ensure_tz(r['start_at']) if r.get('start_at') else None
+            ea=ensure_tz(r['end_at']) if r.get('end_at') else None
+            out.append({'id':r['id'],'car_name':CARS.get(r['car_id'],{}).get('name',r['car_id']),
+                        'status':r['status'],'status_label':status_label(r['status']),
+                        'name':r.get('name') or '','phone':r.get('phone') or '',
+                        'start_label':sa.strftime('%d.%m.%Y %H:%M') if sa else '',
+                        'end_label':ea.strftime('%d.%m.%Y %H:%M') if ea else '',
+                        'total':r.get('total') or 0})
+        return mini_json({'bookings':out})
+    finally:
+        con.close()
+
+
+async def admin_reviews_api(request):
+    admin_web_auth_or_403(request)
+    con = db()
+    try:
+        with con.cursor() as cur:
+            rows = cur.execute("""
+                SELECT r.id, r.booking_id, r.rating, r.review_text, r.created_at,
+                       b.name, b.car_id
+                FROM reviews r LEFT JOIN bookings b ON b.id=r.booking_id
+                ORDER BY r.created_at DESC LIMIT 200
+            """).fetchall()
+        reviews=[]
+        for r in rows:
+            reviews.append({'id':r['id'],'booking_id':r['booking_id'],'rating':r['rating'],
+                            'text':r.get('review_text') or '','name':r.get('name') or 'Клиент',
+                            'car_name':CARS.get(r.get('car_id'),{}).get('name',r.get('car_id') or 'Автомобиль'),
+                            'created_at':ensure_tz(r['created_at']).strftime('%d.%m.%Y %H:%M') if r.get('created_at') else ''})
+        avg=round(sum(float(x['rating']) for x in reviews)/len(reviews),1) if reviews else None
+        return mini_json({'reviews':reviews,'average':avg})
+    finally:
+        con.close()
+
+
 async def mini_app_routes(app):
     mini_add_location_columns()
     app.router.add_get("/app", mini_app)
+    app.router.add_get("/admin", admin_web_page)
+    app.router.add_get("/api/admin/calendar", admin_calendar_api)
+    app.router.add_get("/api/admin/bookings", admin_bookings_api)
+    app.router.add_get("/api/admin/reviews", admin_reviews_api)
     app.router.add_get("/photos/{name:.*}", mini_photo)
     app.router.add_get("/api/cars", mini_cars)
     app.router.add_get("/api/availability", mini_availability)
