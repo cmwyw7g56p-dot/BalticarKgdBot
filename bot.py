@@ -3570,7 +3570,7 @@ def get_user_bookings_sync(
                 SELECT *
                 FROM bookings
                 WHERE user_id=%s
-                ORDER BY id DESC
+                ORDER BY id ASC
                 LIMIT 10
                 """,
                 (
@@ -5062,7 +5062,7 @@ def get_all_bookings_sync(status=None, car_id=None, query=None, limit=50):
             if query:
                 sql += " AND (name ILIKE %s OR phone ILIKE %s OR COALESCE(username,'') ILIKE %s)"
                 q=f"%{query}%"; params += [q,q,q]
-            sql += " ORDER BY start_at DESC, id DESC LIMIT %s"; params.append(limit)
+            sql += " ORDER BY id ASC LIMIT %s"; params.append(limit)
             return cur.execute(sql, params).fetchall()
     finally:
         con.close()
@@ -6912,7 +6912,7 @@ async def admin_bookings_api(request):
         with con.cursor() as cur:
             rows = cur.execute("""
                 SELECT id, car_id, status, name, phone, start_at, end_at, total, created_at
-                FROM bookings ORDER BY start_at DESC, id DESC LIMIT 200
+                FROM bookings ORDER BY id ASC LIMIT 200
             """).fetchall()
         out=[]
         for r in rows:
