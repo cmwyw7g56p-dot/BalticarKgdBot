@@ -6918,13 +6918,16 @@ async def admin_bookings_api(request):
         for r in rows:
             sa=ensure_tz(r['start_at']) if r.get('start_at') else None
             ea=ensure_tz(r['end_at']) if r.get('end_at') else None
-            out.append({'id':r['id'],'car_name':CARS.get(r['car_id'],{}).get('name',r['car_id']),
+            out.append({'id':r['id'],'car_id':r['car_id'],'car_name':CARS.get(r['car_id'],{}).get('name',r['car_id']),
                         'status':r['status'],'status_label':status_label(r['status']),
                         'name':r.get('name') or '','phone':r.get('phone') or '',
                         'start_label':sa.strftime('%d.%m.%Y %H:%M') if sa else '',
                         'end_label':ea.strftime('%d.%m.%Y %H:%M') if ea else '',
+                        'start_ms':int(sa.timestamp()*1000) if sa else 0,
+                        'end_ms':int(ea.timestamp()*1000) if ea else 0,
+                        'pickup':r.get('pickup_location') or '',
                         'total':r.get('total') or 0})
-        return mini_json({'bookings':out})
+        return mini_json({'bookings':out,'fleet_count':len(active_cars())})
     finally:
         con.close()
 
