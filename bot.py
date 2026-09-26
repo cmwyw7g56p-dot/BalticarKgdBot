@@ -382,27 +382,6 @@ def init_db():
 
             cur.execute(
                 """
-                CREATE TABLE IF NOT EXISTS expenses (
-                    id BIGSERIAL PRIMARY KEY,
-                    expense_date DATE NOT NULL,
-                    car_id TEXT,
-                    category TEXT NOT NULL,
-                    amount INTEGER NOT NULL CHECK (amount > 0),
-                    comment TEXT,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-
-            cur.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_expenses_date
-                ON expenses(expense_date)
-                """
-            )
-
-            cur.execute(
-                """
                 CREATE INDEX IF NOT EXISTS idx_maintenance_car_datetime
                 ON car_maintenance(car_id, start_at, end_at)
                 """
@@ -7038,23 +7017,6 @@ def admin_finance_sync(start_day, end_day):
             daily.append({'date':cur_day.isoformat(),'label':cur_day.strftime('%d.%m'),'revenue':sum(int(r.get('total') or 0) for r in dr),'bookings':len(dr)})
             cur_day += timedelta(days=1)
 
-        expense_rows = cur.execute(
-                """
-                SELECT category, car_id, amount
-                FROM expenses
-                WHERE expense_date BETWEEN %s AND %s
-                """, (start_day, end_day)
-            ).fetchall()
-        expense_total = sum(int(r.get('amount') or 0) for r in expense_rows)
-        expense_by_category = {}
-        expense_by_car = {}
-        for r in expense_rows:
-            cat = r.get('category') or 'other'
-            expense_by_category[cat] = expense_by_category.get(cat, 0) + int(r.get('amount') or 0)
-            cid = r.get('car_id')
-            if cid:
-                expense_by_car[cid] = expense_by_car.get(cid, 0) + int(r.get('amount') or 0)
-
         locations={}
         for r in period_confirmed:
             key=r.get('pickup_location_type') or 'unknown'
@@ -7070,12 +7032,7 @@ def admin_finance_sync(start_day, end_day):
             'avg_check':avg_check,'avg_day':avg_day,'occupancy':occupancy,
             'pending_count':len(pending),'rejected_count':len(rejected),
             'future_revenue':int(future['revenue'] or 0),'future_count':int(future['cnt'] or 0),
-            'cars':cars,'daily':daily,'locations':sorted(locations.values(), key=lambda x:-x['bookings']),
-            'expenses_total':expense_total,
-            'profit':revenue-expense_total,
-            'expense_count':len(expense_rows),
-            'expense_by_category':[{'category':k,'label':EXPENSE_CATEGORIES.get(k,'📦 Прочее'),'amount':v} for k,v in sorted(expense_by_category.items(), key=lambda x:-x[1])],
-            'expense_by_car':[{'car_id':cid,'car_name':CARS.get(cid,{}).get('name',cid),'amount':v} for cid,v in sorted(expense_by_car.items(), key=lambda x:-x[1])]
+            'cars':cars,'daily':daily,'locations':sorted(locations.values(), key=lambda x:-x['bookings'])
         }
     finally:
         con.close()
@@ -7097,94 +7054,6 @@ async def admin_finance_api(request):
         print(f"[ADMIN/WEB/FINANCE] {type(exc).__name__}: {exc!r}", flush=True)
         return mini_json({'message':f'Не удалось сформировать отчёт: {type(exc).__name__}'},500)
 
-
-EXPENSE_CATEGORIES = {
-    'maintenance': '🔧 ТО / обслуживание',
-    'repair': '🛠 Ремонт',
-    'wash': '🧽 Мойка / химчистка',
-    'insurance': '🛡 Страховка',
-    'tax': '📄 Налог / сборы',
-    'parking': '🅿️ Парковка',
-    'fuel': '⛽ Топливо',
-    'advertising': '📣 Реклама',
-    'other': '📦 Прочее',
-}
-
-def admin_expenses_list_sync(start_day, end_day):
-    con=db()
-    try:
-        with con.cursor() as cur:
-            rows=cur.execute("""
-                SELECT e.id,e.expense_date,e.car_id,e.category,e.amount,e.comment
-                FROM expenses e
-                WHERE e.expense_date BETWEEN %s AND %s
-                ORDER BY e.expense_date DESC,e.id DESC
-                LIMIT 500
-            """,(start_day,end_day)).fetchall()
-        return [{
-            'id':r['id'],'date':r['expense_date'].isoformat() if r.get('expense_date') else '',
-            'car_id':r.get('car_id') or '',
-            'car_name':CARS.get(r.get('car_id'),{}).get('name','Все автомобили') if r.get('car_id') else 'Все автомобили',
-            'category':r.get('category') or 'other',
-            'category_label':EXPENSE_CATEGORIES.get(r.get('category'),'📦 Прочее'),
-            'amount':int(r.get('amount') or 0),'comment':r.get('comment') or ''
-        } for r in rows]
-    finally:
-        con.close()
-
-def admin_expense_add_sync(expense_date, car_id, category, amount, comment):
-    con=db()
-    try:
-        with con.cursor() as cur:
-            row=cur.execute("""
-                INSERT INTO expenses(expense_date,car_id,category,amount,comment)
-                VALUES(%s,%s,%s,%s,%s)
-                RETURNING id
-            """,(expense_date,car_id or None,category,amount,comment or None)).fetchone()
-        con.commit(); return int(row['id'])
-    finally:
-        con.close()
-
-def admin_expense_delete_sync(eid):
-    con=db()
-    try:
-        with con.cursor() as cur:
-            cur.execute('DELETE FROM expenses WHERE id=%s',(eid,))
-        con.commit()
-    finally:
-        con.close()
-
-async def admin_expenses_api(request):
-    admin_web_auth_or_403(request)
-    today=datetime.now(TZ).date()
-    start_day=_finance_date(request.query.get('from'),today.replace(day=1))
-    end_day=_finance_date(request.query.get('to'),today)
-    if request.method=='GET':
-        if end_day < start_day:
-            return mini_json({'message':'Дата окончания раньше даты начала.'},400)
-        return mini_json({'expenses':await asyncio.to_thread(admin_expenses_list_sync,start_day,end_day), 'categories':EXPENSE_CATEGORIES})
-    try:
-        data=await request.json()
-        expense_date=date.fromisoformat(str(data.get('date',''))); category=str(data.get('category','other')).strip()
-        amount=int(data.get('amount',0)); car_id=str(data.get('car_id') or '').strip() or None; comment=str(data.get('comment') or '').strip()
-        if category not in EXPENSE_CATEGORIES: raise ValueError('invalid category')
-        if amount<=0: raise ValueError('invalid amount')
-        if car_id and car_id not in CARS: raise ValueError('invalid car')
-        eid=await asyncio.to_thread(admin_expense_add_sync,expense_date,car_id,category,amount,comment)
-        return mini_json({'ok':True,'id':eid})
-    except Exception as exc:
-        print(f"[ADMIN/EXPENSE] ADD FAILED: {type(exc).__name__}: {exc!r}",flush=True)
-        return mini_json({'message':'Не удалось добавить расход.'},400)
-
-async def admin_expense_delete_api(request):
-    admin_web_auth_or_403(request)
-    try:
-        data=await request.json(); eid=int(data.get('id'))
-        await asyncio.to_thread(admin_expense_delete_sync,eid)
-        return mini_json({'ok':True})
-    except Exception as exc:
-        print(f"[ADMIN/EXPENSE] DELETE FAILED: {type(exc).__name__}: {exc!r}",flush=True)
-        return mini_json({'message':'Не удалось удалить расход.'},400)
 
 async def admin_reviews_api(request):
     admin_web_auth_or_403(request)
@@ -7216,9 +7085,6 @@ async def mini_app_routes(app):
     app.router.add_get("/api/admin/calendar", admin_calendar_api)
     app.router.add_get("/api/admin/bookings", admin_bookings_api)
     app.router.add_get("/api/admin/finance", admin_finance_api)
-    app.router.add_get("/api/admin/expenses", admin_expenses_api)
-    app.router.add_post("/api/admin/expenses", admin_expenses_api)
-    app.router.add_post("/api/admin/expenses/delete", admin_expense_delete_api)
     app.router.add_get("/api/admin/reviews", admin_reviews_api)
     app.router.add_get("/photos/{name:.*}", mini_photo)
     app.router.add_get("/api/cars", mini_cars)
