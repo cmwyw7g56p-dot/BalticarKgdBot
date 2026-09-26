@@ -11,8 +11,11 @@
 
 @media(max-width:700px){.stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.stat{padding:11px 12px}.stat b{font-size:18px}.bookingTools{grid-template-columns:1fr}.filters{padding-bottom:2px}.wrap{padding:12px 10px 28px}.panelHead{align-items:flex-start;flex-direction:column}.monthNav{width:100%;justify-content:space-between}.monthTitle{flex:1}.calendar{min-width:940px}.dayHead,.carRow{grid-template-columns:145px repeat(var(--days),38px)}.carLabel{font-size:12px}.track{height:64px}.carRow .carLabel{height:64px}.booking{top:8px;height:48px}.top{padding:2px 4px}}
 html.dark{--bg:#07111b;--surface:#0e1a24;--text:#edf4f8;--muted:#91a2ae;--line:#20313e;--shadow:0 16px 40px rgba(0,0,0,.25)}html.dark .day.today{background:#10283b}html.dark .overlap{background:#302712;border-color:#604d1e}html.dark .dayHead{background:var(--surface)}html.dark .carLabel{background:var(--surface)}
+
+.financePeriod{padding:12px;border-bottom:1px solid var(--line);display:flex;gap:7px;flex-wrap:wrap;align-items:center}.financePeriod button{border:1px solid var(--line);background:var(--surface);border-radius:11px;padding:9px 11px;font-weight:800}.financePeriod button.active{background:var(--text);color:#fff;border-color:var(--text)}.financeDates{display:flex;gap:7px;align-items:center;margin-left:auto}.financeDates input{border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:10px;padding:9px 10px}.financeGrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}.financeCard{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:var(--shadow)}.financeCard b{display:block;font-size:21px;line-height:1.1}.financeCard span{display:block;color:var(--muted);font-size:11px;margin-top:6px;font-weight:700}.financeCard.green b{color:var(--green)}.financeCard.blue b{color:var(--blue)}.financeCard.amber b{color:var(--amber)}.financeCard.red b{color:var(--red)}.financeSection{margin-bottom:14px}.financeSection .panelHead{border-bottom:0}.chart{padding:8px 16px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(28px,1fr));gap:6px;align-items:end;height:190px;border-top:1px solid var(--line)}.barCol{height:160px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px;min-width:0}.bar{width:100%;max-width:34px;border-radius:7px 7px 3px 3px;background:linear-gradient(180deg,#3b9bea,#176fc4);min-height:3px}.barLabel{font-size:9px;color:var(--muted);white-space:nowrap;transform:rotate(-45deg);transform-origin:center;margin-top:3px}.barValue{font-size:9px;color:var(--muted);white-space:nowrap}.financeTable{width:100%;border-collapse:collapse}.financeTable th,.financeTable td{text-align:left;padding:10px 12px;border-top:1px solid var(--line);font-size:12px}.financeTable th{color:var(--muted);font-size:11px}.financeTable td b{font-size:13px}.progress{height:7px;border-radius:99px;background:var(--line);overflow:hidden;min-width:70px}.progress i{display:block;height:100%;background:var(--blue);border-radius:99px}.financeTwo{display:grid;grid-template-columns:1.35fr .65fr;gap:14px}.financeNote{padding:12px 16px;color:var(--muted);font-size:11px;border-top:1px solid var(--line)}
+@media(max-width:900px){.financeGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.financeTwo{grid-template-columns:1fr}.financeDates{margin-left:0;width:100%}.financeDates input{flex:1;min-width:0}}
 </style>
-</head><body><div class="wrap"><div class="top"><div><div class="brand">BALTICAR</div><small>Администратор · автопарк</small></div><button class="close" onclick="closeApp()">Закрыть</button></div><div class="nav"><button id="tabCal" class="active" onclick="setTab('calendar')">📅 Календарь</button><button id="tabBookings" onclick="setTab('bookings')">📋 Брони</button><button id="tabReviews" onclick="setTab('reviews')">⭐ Отзывы</button></div><section id="content"></section></div>
+</head><body><div class="wrap"><div class="top"><div><div class="brand">BALTICAR</div><small>Администратор · автопарк</small></div><button class="close" onclick="closeApp()">Закрыть</button></div><div class="nav"><button id="tabCal" class="active" onclick="setTab('calendar')">📅 Календарь</button><button id="tabBookings" onclick="setTab('bookings')">📋 Брони</button><button id="tabFinance" onclick="setTab('finance')">💰 Финансы</button><button id="tabReviews" onclick="setTab('reviews')">⭐ Отзывы</button></div><section id="content"></section></div>
 <script>
 const tg=window.Telegram?.WebApp;
 try{tg?.ready();tg?.expand()}catch(e){}
@@ -46,7 +49,7 @@ async function api(url,opt={}){
 const months=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];const wd=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];let tab='calendar',cursor=new Date();cursor.setDate(1);let currentData=null;let viewToken=0;
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
 function isoDate(y,m,d){return `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`}
-function setTab(x){tab=x;const token=++viewToken;document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));const btn=document.getElementById('tab'+x[0].toUpperCase()+x.slice(1));if(btn)btn.classList.add('active');if(x==='calendar')renderCalendar(token);if(x==='bookings')renderBookings(token);if(x==='reviews')renderReviews(token)}
+function setTab(x){tab=x;const token=++viewToken;document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));const btn=document.getElementById('tab'+x[0].toUpperCase()+x.slice(1));if(btn)btn.classList.add('active');if(x==='calendar')renderCalendar(token);if(x==='bookings')renderBookings(token);if(x==='finance')renderFinance(token);if(x==='reviews')renderReviews(token)}
 async function renderCalendar(token=viewToken){const y=cursor.getFullYear(),m=cursor.getMonth();$('content').innerHTML='<div class="panel"><div class="loader">Загружаю календарь…</div></div>';try{currentData=await api(`/api/admin/calendar?year=${y}&month=${m+1}`);if(token!==viewToken||tab!=='calendar')return;drawCalendar()}catch(e){if(token!==viewToken||tab!=='calendar')return;$('content').innerHTML=`<div class="panel"><div class="empty">${esc(e.message)}</div></div>`}}
 function drawCalendar(){const d=currentData, y=cursor.getFullYear(),m=cursor.getMonth(),days=d.days;let html=`<div class="panel"><div class="panelHead"><div><h1>Занятость автопарка</h1><div class="muted">Все автомобили · пересечения видно сразу</div></div><div class="monthNav"><button onclick="moveMonth(-1)">‹</button><div class="monthTitle">${months[m]} ${y}</div><button onclick="moveMonth(1)">›</button></div></div><div class="legend"><span class="dot"><i class="d-confirmed"></i> подтверждено</span><span class="dot"><i class="d-pending"></i> ожидает</span><span class="dot"><i class="d-maint"></i> обслуживание</span><span class="dot"><i class="d-free"></i> свободно</span></div>`;
 
@@ -93,6 +96,68 @@ async function renderBookings(token=viewToken){
     drawBookingStats(); renderBookingList();
   }catch(e){if(token!==viewToken||tab!=='bookings')return;$('content').innerHTML=`<div class="panel"><div class="empty">${esc(e.message)}</div></div>`}
 }
+
+let financePeriod='month';
+function financeRange(period){
+  const d=new Date(); const end=new Date(d.getFullYear(),d.getMonth(),d.getDate()); let start=new Date(end);
+  if(period==='today')start=new Date(end);
+  else if(period==='7')start.setDate(start.getDate()-6);
+  else if(period==='month')start=new Date(end.getFullYear(),end.getMonth(),1);
+  else if(period==='prev'){start=new Date(end.getFullYear(),end.getMonth()-1,1);return {from:dateInput(start),to:dateInput(new Date(end.getFullYear(),end.getMonth(),0))};}
+  else if(period==='year')start=new Date(end.getFullYear(),0,1);
+  return {from:dateInput(start),to:dateInput(end)};
+}
+function dateInput(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
+function money0(n){return Number(n||0).toLocaleString('ru-RU')+' ₽'}
+function setFinancePeriod(p){financePeriod=p;const r=financeRange(p);renderFinance(viewToken,r.from,r.to)}
+function applyFinanceDates(){renderFinance(viewToken,$('finFrom').value,$('finTo').value)}
+async function renderFinance(token=viewToken,from=null,to=null){
+  const r=from&&to?{from,to}:financeRange(financePeriod);
+  $('content').innerHTML='<div class="panel"><div class="loader">Формирую финансовый отчёт…</div></div>';
+  try{
+    const d=await api(`/api/admin/finance?from=${encodeURIComponent(r.from)}&to=${encodeURIComponent(r.to)}`);
+    if(token!==viewToken||tab!=='finance')return;
+    const maxDay=Math.max(1,...d.daily.map(x=>Number(x.revenue||0)));
+    const maxCar=Math.max(1,...d.cars.map(x=>Number(x.revenue||0)));
+    const active=financePeriod;
+    $('content').innerHTML=`
+      <div class="panel financeSection">
+        <div class="panelHead"><div><h1>Финансовый отчёт</h1><div class="muted">${esc(d.from)} → ${esc(d.to)} · выручка только по подтверждённым броням</div></div></div>
+        <div class="financePeriod">
+          <button class="${active==='today'?'active':''}" onclick="setFinancePeriod('today')">Сегодня</button>
+          <button class="${active==='7'?'active':''}" onclick="setFinancePeriod('7')">7 дней</button>
+          <button class="${active==='month'?'active':''}" onclick="setFinancePeriod('month')">Этот месяц</button>
+          <button class="${active==='prev'?'active':''}" onclick="setFinancePeriod('prev')">Прошлый месяц</button>
+          <button class="${active==='year'?'active':''}" onclick="setFinancePeriod('year')">Год</button>
+          <div class="financeDates"><input id="finFrom" type="date" value="${esc(d.from)}"><span>—</span><input id="finTo" type="date" value="${esc(d.to)}"><button onclick="applyFinanceDates()">Показать</button></div>
+        </div>
+      </div>
+      <div class="financeGrid">
+        <div class="financeCard green"><b>${money0(d.revenue)}</b><span>💰 Выручка</span></div>
+        <div class="financeCard blue"><b>${d.booking_count}</b><span>📋 Подтверждённых броней</span></div>
+        <div class="financeCard"><b>${Number(d.rental_days||0).toLocaleString('ru-RU')} дн.</b><span>⏱ Дней аренды</span></div>
+        <div class="financeCard amber"><b>${Number(d.occupancy||0).toLocaleString('ru-RU')}%</b><span>🚗 Загрузка автопарка</span></div>
+        <div class="financeCard"><b>${money0(d.avg_check)}</b><span>🧾 Средний чек</span></div>
+        <div class="financeCard"><b>${money0(d.avg_day)}</b><span>📅 Выручка за день аренды</span></div>
+        <div class="financeCard amber"><b>${d.pending_count}</b><span>🟡 Новых заявок в периоде</span></div>
+        <div class="financeCard red"><b>${d.rejected_count}</b><span>🔴 Отклонённых/отменённых</span></div>
+      </div>
+      <div class="financeTwo">
+        <div class="panel financeSection"><div class="panelHead"><div><h1>Динамика выручки</h1><div class="muted">По дате начала аренды</div></div></div>
+          <div class="chart">${d.daily.map(x=>`<div class="barCol"><div class="barValue">${x.revenue?money0(x.revenue).replace(' ₽',''):''}</div><div class="bar" style="height:${Math.max(3,Math.round(Number(x.revenue||0)/maxDay*145))}px" title="${esc(x.label)} · ${money0(x.revenue)} · ${x.bookings} брон."></div><div class="barLabel">${esc(x.label)}</div></div>`).join('')}</div>
+        </div>
+        <div class="panel financeSection"><div class="panelHead"><div><h1>Будущая выручка</h1><div class="muted">Подтверждённые брони после текущего момента</div></div></div><div class="empty" style="padding:24px 16px"><b style="font-size:24px;color:var(--green)">${money0(d.future_revenue)}</b><br><span>${d.future_count} подтверждённых броней впереди</span></div></div>
+      </div>
+      <div class="panel financeSection"><div class="panelHead"><div><h1>По автомобилям</h1><div class="muted">Кто сколько заработал и насколько загружен</div></div></div>
+        <div class="calendarScroll"><table class="financeTable"><thead><tr><th>Автомобиль</th><th>Броней</th><th>Дней</th><th>Выручка</th><th>Средний чек</th><th>Загрузка</th></tr></thead><tbody>${d.cars.map(c=>`<tr><td><b>${esc(c.car_name)}</b><div class="progress" style="margin-top:6px"><i style="width:${Math.min(100,Number(c.revenue||0)/maxCar*100)}%"></i></div></td><td>${c.bookings}</td><td>${c.rental_days}</td><td><b>${money0(c.revenue)}</b></td><td>${money0(c.avg_check)}</td><td><b>${c.occupancy}%</b></td></tr>`).join('')}</tbody></table></div>
+      </div>
+      <div class="financeTwo">
+        <div class="panel financeSection"><div class="panelHead"><div><h1>Места подачи</h1><div class="muted">По подтверждённым броням периода</div></div></div><div class="calendarScroll"><table class="financeTable"><thead><tr><th>Место</th><th>Броней</th><th>Зафиксированные доплаты</th></tr></thead><tbody>${(d.locations.length?d.locations.map(x=>`<tr><td>${esc(x.label)}</td><td>${x.bookings}</td><td>${money0(x.fees)}</td></tr>`).join(''):'<tr><td colspan="3">Нет данных</td></tr>')}</tbody></table></div><div class="financeNote">Аэропорт и вокзал сейчас имеют тариф 0 ₽. Для мест, где стоимость согласуется вручную, сумма не включается в выручку до фиксации в брони.</div></div>
+        <div class="panel financeSection"><div class="panelHead"><div><h1>Что важно</h1></div></div><div class="list"><div class="item">💰 <b>Выручка</b> — сумма подтверждённых аренд, начинающихся в выбранном периоде.</div><div class="item">🚗 <b>Загрузка</b> — фактическое занятое время автопарка без двойного счёта пересечений.</div><div class="item">📈 <b>Будущая выручка</b> — подтверждённые брони начиная с текущего момента.</div></div></div>
+      </div>`;
+  }catch(e){if(token!==viewToken||tab!=='finance')return;$('content').innerHTML=`<div class="panel"><div class="empty">${esc(e.message)}</div></div>`}
+}
+
 async function renderReviews(token=viewToken){ $('content').innerHTML='<div class="panel"><div class="loader">Загружаю отзывы…</div></div>';try{const d=await api('/api/admin/reviews');if(token!==viewToken||tab!=='reviews')return;$('content').innerHTML='<div class="panel"><div class="panelHead"><div><h1>Отзывы клиентов</h1><div class="muted">Средняя оценка: '+(d.average||'—')+' ★ · '+d.reviews.length+'</div></div></div><div class="list">'+(d.reviews.length?d.reviews.map(r=>`<div class="item"><div class="stars">${'★'.repeat(Number(r.rating||0))}${'☆'.repeat(5-Number(r.rating||0))}</div><div style="margin-top:8px">${esc(r.text||'Без текста')}</div><div class="muted">${esc(r.name||'Клиент')} · ${esc(r.car_name||'Автомобиль')} · бронь №${r.booking_id} · ${esc(r.created_at||'')}</div></div>`).join(''):'<div class="empty">Отзывов пока нет.</div>')+'</div></div>'}catch(e){if(token!==viewToken||tab!=='reviews')return;$('content').innerHTML=`<div class="panel"><div class="empty">${esc(e.message)}</div></div>`}}
 function closeApp(){tg?.close?.()||history.back()}
 async function boot(){
