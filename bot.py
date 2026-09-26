@@ -6932,6 +6932,129 @@ async def admin_bookings_api(request):
         con.close()
 
 
+def _finance_date(value, default):
+    try:
+        return date.fromisoformat(value) if value else default
+    except Exception:
+        return default
+
+
+def admin_finance_sync(start_day, end_day):
+    """Detailed revenue report for the web admin.
+    Revenue is counted from confirmed bookings whose rental starts inside the selected period.
+    Operational occupancy uses confirmed bookings overlapping the period, clipped to its bounds.
+    """
+    start_dt = local_dt(start_day, time(0, 0))
+    end_dt = local_dt(end_day + timedelta(days=1), time(0, 0))
+    now = datetime.now(TZ)
+    con = db()
+    try:
+        with con.cursor() as cur:
+            rows = cur.execute("""
+                SELECT id, car_id, status, name, start_at, end_at, total,
+                       created_at, pickup_location, pickup_location_type,
+                       pickup_location_fee
+                FROM bookings
+                WHERE end_at > %s AND start_at < %s
+                ORDER BY start_at ASC, id ASC
+            """, (start_dt, end_dt)).fetchall()
+
+            future = cur.execute("""
+                SELECT COALESCE(SUM(total),0) AS revenue, COUNT(*) AS cnt
+                FROM bookings
+                WHERE status='confirmed' AND start_at >= %s
+            """, (now,)).fetchone()
+
+        confirmed = [r for r in rows if r.get('status') == 'confirmed']
+        pending = [r for r in rows if r.get('status') == 'pending']
+        rejected = [r for r in rows if r.get('status') == 'rejected']
+
+        # Revenue for the selected period: confirmed rentals beginning in the period.
+        period_confirmed = [r for r in confirmed if r.get('start_at') and start_dt <= ensure_tz(r['start_at']) < end_dt]
+        revenue = sum(int(r.get('total') or 0) for r in period_confirmed)
+        booking_count = len(period_confirmed)
+        rental_days = sum(max(0, (ensure_tz(r['end_at']) - ensure_tz(r['start_at'])).total_seconds()/86400) for r in period_confirmed if r.get('start_at') and r.get('end_at'))
+        avg_check = round(revenue / booking_count) if booking_count else 0
+        avg_day = round(revenue / rental_days) if rental_days else 0
+
+        # Occupancy: union overlapping confirmed intervals per car, clipped to the period.
+        intervals = {}
+        for r in confirmed:
+            if not r.get('start_at') or not r.get('end_at'): continue
+            a=max(start_dt, ensure_tz(r['start_at'])); b=min(end_dt, ensure_tz(r['end_at']))
+            if a < b:
+                intervals.setdefault(r['car_id'], []).append((a,b))
+        occupied_days_by_car={}
+        occupied_total=0.0
+        for cid, arr in intervals.items():
+            arr.sort(); merged=[]
+            for a,b in arr:
+                if not merged or a > merged[-1][1]: merged.append([a,b])
+                elif b > merged[-1][1]: merged[-1][1]=b
+            val=sum((b-a).total_seconds()/86400 for a,b in merged)
+            occupied_days_by_car[cid]=val; occupied_total += val
+        fleet_count=len(active_cars())
+        period_days=max(1,(end_dt-start_dt).total_seconds()/86400)
+        occupancy=round((occupied_total/(fleet_count*period_days))*100,1) if fleet_count else 0
+
+        cars=[]
+        for cid, car in CARS.items():
+            cr=[r for r in period_confirmed if r.get('car_id')==cid]
+            rev=sum(int(r.get('total') or 0) for r in cr)
+            days=sum(max(0,(ensure_tz(r['end_at'])-ensure_tz(r['start_at'])).total_seconds()/86400) for r in cr if r.get('start_at') and r.get('end_at'))
+            cars.append({
+                'car_id':cid,'car_name':car.get('name',cid),'bookings':len(cr),'revenue':rev,
+                'rental_days':round(days,1),'avg_check':round(rev/len(cr)) if cr else 0,
+                'occupancy':round((occupied_days_by_car.get(cid,0)/period_days)*100,1) if fleet_count else 0
+            })
+        cars.sort(key=lambda x:(-x['revenue'], x['car_name']))
+
+        # Daily revenue and booking counts for the selected period.
+        daily=[]; cur_day=start_day
+        while cur_day <= end_day:
+            ds=local_dt(cur_day,time(0,0)); de=ds+timedelta(days=1)
+            dr=[r for r in period_confirmed if r.get('start_at') and ds <= ensure_tz(r['start_at']) < de]
+            daily.append({'date':cur_day.isoformat(),'label':cur_day.strftime('%d.%m'),'revenue':sum(int(r.get('total') or 0) for r in dr),'bookings':len(dr)})
+            cur_day += timedelta(days=1)
+
+        locations={}
+        for r in period_confirmed:
+            key=r.get('pickup_location_type') or 'unknown'
+            label=r.get('pickup_location') or {'airport':'Аэропорт Храброво','station':'Южный вокзал','city':'Калининград','region':'Калининградская область','other':'Другое место'}.get(key,'Не указано')
+            item=locations.setdefault(key,{'type':key,'label':label,'bookings':0,'fees':0})
+            item['bookings']+=1
+            if r.get('pickup_location_fee') is not None:
+                item['fees'] += int(r.get('pickup_location_fee') or 0)
+
+        return {
+            'from':start_day.isoformat(),'to':end_day.isoformat(),
+            'revenue':revenue,'booking_count':booking_count,'rental_days':round(rental_days,1),
+            'avg_check':avg_check,'avg_day':avg_day,'occupancy':occupancy,
+            'pending_count':len(pending),'rejected_count':len(rejected),
+            'future_revenue':int(future['revenue'] or 0),'future_count':int(future['cnt'] or 0),
+            'cars':cars,'daily':daily,'locations':sorted(locations.values(), key=lambda x:-x['bookings'])
+        }
+    finally:
+        con.close()
+
+
+async def admin_finance_api(request):
+    admin_web_auth_or_403(request)
+    today=datetime.now(TZ).date()
+    start_default=today.replace(day=1)
+    start_day=_finance_date(request.query.get('from'), start_default)
+    end_day=_finance_date(request.query.get('to'), today)
+    if end_day < start_day:
+        return mini_json({'message':'Дата окончания раньше даты начала.'},400)
+    if (end_day-start_day).days > 370:
+        return mini_json({'message':'Период отчёта не может быть больше 371 дня.'},400)
+    try:
+        return mini_json(await asyncio.to_thread(admin_finance_sync,start_day,end_day))
+    except Exception as exc:
+        print(f"[ADMIN/WEB/FINANCE] {type(exc).__name__}: {exc!r}", flush=True)
+        return mini_json({'message':f'Не удалось сформировать отчёт: {type(exc).__name__}'},500)
+
+
 async def admin_reviews_api(request):
     admin_web_auth_or_403(request)
     con = db()
@@ -6961,6 +7084,7 @@ async def mini_app_routes(app):
     app.router.add_get("/admin", admin_web_page)
     app.router.add_get("/api/admin/calendar", admin_calendar_api)
     app.router.add_get("/api/admin/bookings", admin_bookings_api)
+    app.router.add_get("/api/admin/finance", admin_finance_api)
     app.router.add_get("/api/admin/reviews", admin_reviews_api)
     app.router.add_get("/photos/{name:.*}", mini_photo)
     app.router.add_get("/api/cars", mini_cars)
