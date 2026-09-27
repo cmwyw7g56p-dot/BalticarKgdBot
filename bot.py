@@ -6986,13 +6986,13 @@ def admin_finance_sync(start_day, end_day):
                 WHERE status='confirmed' AND start_at >= %s
             """, (now,)).fetchone()
 
-        expense_rows = cur.execute(
-            """
-            SELECT category, car_id, amount
-            FROM expenses
-            WHERE expense_date BETWEEN %s AND %s
-            """, (start_day, end_day)
-        ).fetchall()
+            expense_rows = cur.execute(
+                """
+                SELECT category, car_id, amount
+                FROM expenses
+                WHERE expense_date BETWEEN %s AND %s
+                """, (start_day, end_day)
+            ).fetchall()
 
         confirmed = [r for r in rows if r.get('status') == 'confirmed']
         pending = [r for r in rows if r.get('status') == 'pending']
