@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>BALTICAR — Админ</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{--bg:#f4f7fa;--surface:#fff;--text:#142532;--muted:#71808c;--line:#dfe6eb;--blue:#1676d2;--blue2:#0e5eac;--green:#24a85a;--amber:#e7a22b;--red:#dc4d4d;--shadow:0 14px 40px rgba(18,38,55,.08)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button{font:inherit} .wrap{max-width:1280px;margin:auto;padding:18px 18px 40px}.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.brand{font-weight:950;letter-spacing:.12em}.top small{color:var(--muted)}.nav{display:flex;gap:8px;overflow:auto;padding-bottom:4px;margin-bottom:14px}.nav button{border:1px solid var(--line);background:var(--surface);border-radius:13px;padding:11px 14px;font-weight:800;white-space:nowrap}.nav button.active{background:var(--text);color:#fff;border-color:var(--text)}.panel{background:var(--surface);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow);overflow:hidden}.panelHead{padding:16px 16px 13px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line)}.panelHead h1{font-size:20px;margin:0}.monthNav{display:flex;align-items:center;gap:6px}.monthNav button{border:1px solid var(--line);background:var(--surface);border-radius:11px;width:38px;height:36px;font-weight:900}.monthTitle{min-width:150px;text-align:center;font-weight:900}.legend{display:flex;gap:12px;flex-wrap:wrap;padding:11px 16px;color:var(--muted);font-size:12px;border-bottom:1px solid var(--line)}.dot{display:inline-flex;align-items:center;gap:5px}.dot i{width:10px;height:10px;border-radius:3px;display:inline-block}.d-confirmed{background:#4b9df0}.d-pending{background:#f3b53e}.d-maint{background:#d95757}.d-free{background:#dfe6eb}.calendarScroll{overflow:auto}.calendar{min-width:1040px}.dayHead,.carRow{display:grid;grid-template-columns:170px repeat(var(--days),42px)}.dayHead{position:sticky;top:0;background:var(--surface);z-index:5;border-bottom:1px solid var(--line)}.carLabel{position:sticky;left:0;z-index:4;background:var(--surface);padding:10px 12px;font-weight:900;border-right:1px solid var(--line)}.dayHead .carLabel{z-index:6}.day{height:54px;border-right:1px solid #edf1f4;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;color:var(--muted)}.day b{color:var(--text);font-size:12px}.day.weekend b{color:#a45d5d}.day.today{background:#eef6ff}.track{grid-column:2/-1;position:relative;height:68px;border-bottom:1px solid var(--line);background:repeating-linear-gradient(90deg,transparent 0,transparent 41px,#edf1f4 42px)}.carRow{position:relative}.carRow .carLabel{height:68px;border-bottom:1px solid var(--line);display:flex;align-items:center}.carSub{display:block;font-size:10px;color:var(--muted);font-weight:600;margin-top:2px}.booking{position:absolute;top:10px;height:48px;border-radius:12px;padding:7px 9px;color:#fff;overflow:hidden;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.10)}.booking.confirmed{background:linear-gradient(135deg,#2e8eea,#176fc4)}.booking.pending{background:linear-gradient(135deg,#efb43b,#d98c12)}.booking.maintenance{background:linear-gradient(135deg,#d95a5a,#b73c3c)}.booking b{display:block;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.booking span{display:block;font-size:10px;opacity:.88;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.overlap{margin:14px 16px;background:#fff7e5;border:1px solid #f0d38b;border-radius:14px;padding:12px 14px}.overlap b{color:#9a6510}.empty{padding:30px;text-align:center;color:var(--muted)}.list{padding:12px}.item{border:1px solid var(--line);border-radius:15px;padding:13px;margin-bottom:9px}.itemTop{display:flex;justify-content:space-between;gap:8px}.status{font-size:11px;font-weight:900;padding:5px 8px;border-radius:999px;background:#eef3f6}.confirmed{color:#176fc4}.pending{color:#a36a09}.rejected{color:#b73c3c}.stars{letter-spacing:2px}.muted{color:var(--muted);font-size:12px;margin-top:5px}.detail{padding:14px 16px;border-top:1px solid var(--line);background:#fbfcfd}.detail h3{margin:0 0 7px}.close{float:right;border:0;background:#eef3f6;border-radius:9px;padding:6px 9px}.loader{padding:30px;text-align:center;color:var(--muted)} .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}.stat{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:13px 14px;box-shadow:var(--shadow)}.stat b{display:block;font-size:20px;line-height:1.1}.stat span{display:block;color:var(--muted);font-size:11px;margin-top:5px;font-weight:700}.stat.blue b{color:var(--blue)}.stat.green b{color:var(--green)}.stat.amber b{color:var(--amber)}.stat.red b{color:var(--red)}.bookingTools{padding:12px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:minmax(180px,1fr) auto;gap:9px}.search{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:11px 12px;outline:none;color:var(--text)}.search:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(22,118,210,.10)}.filters{display:flex;gap:7px;overflow:auto}.filters button{border:1px solid var(--line);background:var(--surface);border-radius:11px;padding:9px 11px;font-weight:800;white-space:nowrap;color:var(--text)}.filters button.active{background:var(--text);color:#fff;border-color:var(--text)}.bookingItem{transition:transform .12s ease,box-shadow .12s ease}.bookingItem:hover{box-shadow:0 7px 18px rgba(18,38,55,.07)}.bookingMain{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.bookingMeta{margin-top:8px;display:grid;gap:4px}.bookingActions{display:flex;gap:7px;flex-wrap:wrap;margin-top:11px}.miniBtn{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:8px 10px;font-weight:800;color:var(--text)}.miniBtn.primary{background:var(--blue);border-color:var(--blue);color:#fff}.miniBtn.danger{color:var(--red)}.emptyFiltered{padding:28px 18px;text-align:center;color:var(--muted)}
+
+@media(max-width:700px){.stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.stat{padding:11px 12px}.stat b{font-size:18px}.bookingTools{grid-template-columns:1fr}.filters{padding-bottom:2px}.wrap{padding:12px 10px 28px}.panelHead{align-items:flex-start;flex-direction:column}.monthNav{width:100%;justify-content:space-between}.monthTitle{flex:1}.calendar{min-width:940px}.dayHead,.carRow{grid-template-columns:145px repeat(var(--days),38px)}.carLabel{font-size:12px}.track{height:64px}.carRow .carLabel{height:64px}.booking{top:8px;height:48px}.top{padding:2px 4px}}
+html.dark{--bg:#07111b;--surface:#0e1a24;--text:#edf4f8;--muted:#91a2ae;--line:#20313e;--shadow:0 16px 40px rgba(0,0,0,.25)}html.dark .day.today{background:#10283b}html.dark .overlap{background:#302712;border-color:#604d1e}html.dark .dayHead{background:var(--surface)}html.dark .carLabel{background:var(--surface)}
+
+.financePeriod{padding:12px;border-bottom:1px solid var(--line);display:flex;gap:7px;flex-wrap:wrap;align-items:center}.financePeriod button{border:1px solid var(--line);background:var(--surface);border-radius:11px;padding:9px 11px;font-weight:800}.financePeriod button.active{background:var(--text);color:#fff;border-color:var(--text)}.financeDates{display:flex;gap:7px;align-items:center;margin-left:auto}.financeDates input{border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:10px;padding:9px 10px}.financeGrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}.financeCard{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:var(--shadow)}.financeCard b{display:block;font-size:21px;line-height:1.1}.financeCard span{display:block;color:var(--muted);font-size:11px;margin-top:6px;font-weight:700}.financeCard.green b{color:var(--green)}.financeCard.blue b{color:var(--blue)}.financeCard.amber b{color:var(--amber)}.financeCard.red b{color:var(--red)}.financeSection{margin-bottom:14px}.financeSection .panelHead{border-bottom:0}.chartWrap{overflow-x:auto;border-top:1px solid var(--line)}.chart{padding:8px 16px 16px;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(28px,1fr);grid-template-rows:1fr;gap:6px;align-items:end;height:190px;min-width:max-content}.barCol{height:160px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px;min-width:0}.bar{width:100%;max-width:34px;border-radius:7px 7px 3px 3px;background:linear-gradient(180deg,#3b9bea,#176fc4);min-height:3px}.barLabel{font-size:9px;color:var(--muted);white-space:nowrap;transform:rotate(-45deg);transform-origin:center;margin-top:3px}.barValue{font-size:9px;color:var(--muted);white-space:nowrap}.financeTable{width:100%;border-collapse:collapse}.financeTable th,.financeTable td{text-align:left;padding:10px 12px;border-top:1px solid var(--line);font-size:12px}.financeTable th{color:var(--muted);font-size:11px}.financeTable td b{font-size:13px}.progress{height:7px;border-radius:99px;background:var(--line);overflow:hidden;min-width:70px}.progress i{display:block;height:100%;background:var(--blue);border-radius:99px}.financeTwo{display:grid;grid-template-columns:1.35fr .65fr;gap:14px}.financeNote{padding:12px 16px;color:var(--muted);font-size:11px;border-top:1px solid var(--line)}
+@media(max-width:900px){.financeGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.financeTwo{grid-template-columns:1fr}.financeDates{margin-left:0;width:100%}.financeDates input{flex:1;min-width:0}}
+.expenseTools{padding:12px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:140px 170px 180px minmax(160px,1fr) auto;gap:8px;align-items:center}.expenseTools input,.expenseTools select{border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:11px;padding:10px 11px;min-width:0}.expenseBtn{border:0;background:var(--blue);color:#fff;border-radius:11px;padding:10px 13px;font-weight:900;white-space:nowrap}.expenseList{padding:12px}.expenseRow{display:grid;grid-template-columns:110px 1fr 130px 110px 34px;gap:10px;align-items:center;border:1px solid var(--line);border-radius:13px;padding:10px 12px;margin-bottom:7px}.expenseAmount{text-align:right;font-weight:900}.expenseDelete{border:0;background:#fff0f0;color:var(--red);border-radius:9px;width:30px;height:30px;font-weight:900}.profitGood{color:var(--green)!important}.profitBad{color:var(--red)!important}.expenseSummary{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}.expenseMini{padding:12px 16px;border-top:1px solid var(--line)}
+@media(max-width:900px){.expenseTools{grid-template-columns:1fr 1fr}.expenseBtn{width:100%}.expenseSummary{grid-template-columns:1fr}}
+@media(max-width:700px){.expenseRow{grid-template-columns:90px 1fr 90px 34px;gap:7px}.expenseRow .expenseComment{grid-column:1/-1}.expenseAmount{text-align:right}}
+</style>
+</head><body><div class="wrap"><div class="top"><div><div class="brand">BALTICAR</div><small>Администратор · автопарк</small></div><button class="close" onclick="closeApp()">Закрыть</button></div><div class="nav"><button id="tabCal" class="active" onclick="setTab('calendar')">📅 Календарь</button><button id="tabBookings" onclick="setTab('bookings')">📋 Брони</button><button id="tabFinance" onclick="setTab('finance')">💰 Финансы</button><button id="tabReviews" onclick="setTab('reviews')">⭐ Отзывы</button></div><section id="content"></section></div>
+<script>
+const tg=window.Telegram?.WebApp;
+try{tg?.ready();tg?.expand()}catch(e){}
+const $=(id)=>document.getElementById(id);
+const initData=()=>{try{return tg?.initData||''}catch(e){return ''}};
+async function waitInitData(){
+  for(let i=0;i<30;i++){
+    const s=initData();
+    if(s)return s;
+    await new Promise(r=>setTimeout(r,100));
+  }
+  return '';
+}
+const headers=()=>({'Content-Type':'application/json','X-Telegram-Init-Data':initData()});
+function withAuth(url){const s=initData();if(!s)return url;return url+(url.includes('?')?'&':'?')+'init_data='+encodeURIComponent(s)}
+async function api(url,opt={}){
+  const auth=await waitInitData();
+  if(!auth) throw new Error('Telegram не передал данные авторизации. Закройте админку и откройте её заново из кнопки «🖥 Открыть веб-админку».');
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),10000);
+  try{
+    const r=await fetch(withAuth(url),{...opt,signal:controller.signal,headers:{...headers(),...(opt.headers||{})}});
+    let d={};try{d=await r.json()}catch{}
+    if(!r.ok) throw new Error(d.message||`Ошибка сервера (${r.status})`);
+    return d;
+  }catch(e){
+    if(e.name==='AbortError') throw new Error('Сервер не ответил за 10 секунд. Проверьте деплой Render.');
+    throw e;
+  }finally{clearTimeout(timer)}
+}
+const months=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];const wd=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];let tab='calendar',cursor=new Date();cursor.setDate(1);let currentData=null;let viewToken=0;
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
+function isoDate(y,m,d){return `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`}
+function setTab(x){tab=x;const token=++viewToken;document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));const btn=document.getElementById('tab'+x[0].toUpperCase()+x.slice(1));if(btn)btn.classList.add('active');if(x==='calendar')renderCalendar(token);if(x==='bookings')renderBookings(token);if(x==='finance')renderFinance(token);if(x==='reviews')renderReviews(token)}
+async function renderCalendar(token=viewToken){const y=cursor.getFullYear(),m=cursor.getMonth();$('content').innerHTML='<div class="panel"><div class="loader">Загружаю календарь…</div></div>';try{currentData=await api(`/api/admin/calendar?year=${y}&month=${m+1}`);if(token!==viewToken||tab!=='calendar')return;drawCalendar()}catch(e){if(token!==viewToken||tab!=='calendar')return;$('content').innerHTML=`<div class="panel"><div class="empty">${esc(e.message)}</div></div>`}}
+function drawCalendar(){const d=currentData, y=cursor.getFullYear(),m=cursor.getMonth(),days=d.days;let html=`<div class="panel"><div class="panelHead"><div><h1>Занятость автопарка</h1><div class="muted">Все автомобили · пересечения видно сразу</div></div><div class="monthNav"><button onclick="moveMonth(-1)">‹</button><div class="monthTitle">${months[m]} ${y}</div><button onclick="moveMonth(1)">›</button></div></div><div class="legend"><span class="dot"><i class="d-confirmed"></i> подтверждено</span><span class="dot"><i class="d-pending"></i> ожидает</span><span class="dot"><i class="d-maint"></i> обслуживание</span><span class="dot"><i class="d-free"></i> свободно</span></div>`;
+
+html+='<div class="calendarScroll"><div class="calendar" style="--days:'+days+'"><div class="dayHead"><div class="carLabel">Автомобиль</div>';for(let n=1;n<=days;n++){const dt=new Date(y,m,n),week=dt.getDay(),today=new Date();const isToday=dt.toDateString()===today.toDateString();html+=`<div class="day ${week===0||week===6?'weekend':''} ${isToday?'today':''}"><b>${n}</b><span>${wd[week]}</span></div>`}html+='</div>';
+for(const car of d.cars){html+=`<div class="carRow"><div class="carLabel">🚗 ${esc(car.name)}<span class="carSub">${esc(car.gear||'')}</span></div><div class="track">`;for(const b of car.blocks){const start=Math.max(1,b.start_day),end=Math.min(days,b.end_day);if(end<1||start>days)continue;const left=(start-1)*100/days,width=(end-start+1)*100/days;html+=`<div class="booking ${esc(b.status)}" style="left:${left}%;width:${width}%" onclick="showBooking(${Number(b.id)})"><b>${b.status==='maintenance'?'🔧 ТО':esc(b.name||'Без имени')}</b><span>№${b.id} · ${b.status==='pending'?'ожидает':'бронь'}</span></div>`}html+='</div></div>'}html+='</div></div></div>';html+=`<div id="detail"></div></div>`;$('content').innerHTML=html}
+function moveMonth(n){cursor.setMonth(cursor.getMonth()+n);renderCalendar(viewToken)}
+function showBooking(id){const b=(currentData.bookings||[]).find(x=>Number(x.id)===Number(id));if(!b)return;const el=document.getElementById('detail');el.innerHTML=`<div class="detail"><button class="close" onclick="this.parentElement.innerHTML=''">×</button><h3>Бронирование №${b.id}</h3><div><b>${esc(b.car_name)}</b> · <span class="status ${esc(b.status)}">${b.status==='confirmed'?'подтверждено':b.status==='pending'?'ожидает':b.status==='maintenance'?'обслуживание':b.status}</span></div>${b.name?`<div class="muted">👤 ${esc(b.name)} · 📞 ${esc(b.phone||'')}</div>`:''}<div class="muted">📅 ${esc(b.start_label)} → ${esc(b.end_label)}</div>${b.pickup?`<div class="muted">📍 ${esc(b.pickup)}</div>`:''}${b.total!=null?`<div class="muted">💰 ${Number(b.total).toLocaleString('ru-RU')} ₽</div>`:''}</div>`;el.scrollIntoView({behavior:'smooth',block:'nearest'})}
+let bookingsCache=[];let bookingFilter='all';let bookingSearch='';
+function bookingStatusMatch(b){return bookingFilter==='all'||b.status===bookingFilter}
+function bookingSearchMatch(b){const q=bookingSearch.trim().toLowerCase();if(!q)return true;return [b.id,b.car_name,b.name,b.phone,b.start_label,b.end_label].some(v=>String(v??'').toLowerCase().includes(q))}
+function renderBookingList(){
+  const filtered=bookingsCache.filter(b=>bookingStatusMatch(b)&&bookingSearchMatch(b));
+  const list=filtered.length?filtered.map(b=>`<div class="item bookingItem">
+    <div class="bookingMain"><div><b>№${b.id} · ${esc(b.car_name)}</b><div class="muted">${esc(b.name||'Клиент')} · ${esc(b.phone||'')}</div></div><span class="status ${esc(b.status)}">${esc(b.status_label)}</span></div>
+    <div class="bookingMeta"><div>📅 ${esc(b.start_label)} → ${esc(b.end_label)}</div><div>💰 <b>${Number(b.total||0).toLocaleString('ru-RU')} ₽</b></div>${b.pickup?`<div>📍 ${esc(b.pickup)}</div>`:''}</div>
+    <div class="bookingActions"><button class="miniBtn" onclick="showBookingFromList(${Number(b.id)})">Подробнее</button></div>
+  </div>`).join(''):`<div class="emptyFiltered">По выбранным условиям бронирований не найдено.</div>`;
+  $('bookingList').innerHTML=list;
+  document.querySelectorAll('.filters button').forEach(btn=>btn.classList.toggle('active',btn.dataset.filter===bookingFilter));
+}
+function showBookingFromList(id){const b=bookingsCache.find(x=>Number(x.id)===Number(id));if(!b)return;const box=document.getElementById('bookingDetail');box.innerHTML=`<div class="detail"><button class="close" onclick="this.parentElement.innerHTML=''">×</button><h3>Бронирование №${b.id}</h3><div><b>${esc(b.car_name)}</b> · <span class="status ${esc(b.status)}">${esc(b.status_label)}</span></div><div class="muted">👤 ${esc(b.name||'Клиент')} · 📞 ${esc(b.phone||'')}</div><div class="muted">📅 ${esc(b.start_label)} → ${esc(b.end_label)}</div>${b.pickup?`<div class="muted">📍 ${esc(b.pickup)}</div>`:''}<div class="muted">💰 ${Number(b.total||0).toLocaleString('ru-RU')} ₽</div></div>`;box.scrollIntoView({behavior:'smooth',block:'nearest'})}
+function setBookingFilter(f){bookingFilter=f;renderBookingList()}
+function setBookingSearch(v){bookingSearch=v;renderBookingList()}
+function drawBookingStats(){
+  const totalCars=bookingsCache.reduce((s,b)=>s,0); // placeholder kept deterministic
+  const now=Date.now();
+  const active=bookingsCache.filter(b=>b.status==='confirmed'&&b.start_ms<=now&&b.end_ms>now).length;
+  const pending=bookingsCache.filter(b=>b.status==='pending').length;
+  const cars=new Set(bookingsCache.filter(b=>b.status==='confirmed'&&b.start_ms<=now&&b.end_ms>now).map(b=>b.car_id));
+  const allCarIds=new Set(bookingsCache.map(b=>b.car_id).filter(Boolean));
+  const fleetCount=Math.max(allCarIds.size, Number(window.__fleetCount||0));
+  const free=Math.max(0,fleetCount-cars.size);
+  $('stats').innerHTML=`<div class="stat"><b>${fleetCount||'—'}</b><span>🚗 автомобилей</span></div><div class="stat green"><b>${free||0}</b><span>🟢 свободны</span></div><div class="stat blue"><b>${cars.size}</b><span>🔵 в аренде</span></div><div class="stat amber"><b>${pending}</b><span>📝 новых заявок</span></div>`;
+}
+async function renderBookings(token=viewToken){
+  $('content').innerHTML='<div class="panel"><div class="loader">Загружаю брони…</div></div>';
+  try{
+    const d=await api('/api/admin/bookings');
+    if(token!==viewToken||tab!=='bookings')return;
+    bookingsCache=d.bookings||[]; bookingFilter='all'; bookingSearch='';
+    // The endpoint includes enough information for the dashboard; fleet count is supplied with the response when available.
+    window.__fleetCount=Number(d.fleet_count||0);
+    $('content').innerHTML=`<div class="stats" id="stats"></div><div class="panel"><div class="panelHead"><div><h1>Бронирования</h1><div class="muted">${bookingsCache.length} последних заявок · порядок по номеру</div></div></div><div class="bookingTools"><input class="search" placeholder="🔎 Имя, телефон, № заявки или автомобиль" oninput="setBookingSearch(this.value)"><div class="filters"><button data-filter="all" onclick="setBookingFilter('all')">Все</button><button data-filter="pending" onclick="setBookingFilter('pending')">🟡 Новые</button><button data-filter="confirmed" onclick="setBookingFilter('confirmed')">🔵 Подтверждены</button><button data-filter="completed" onclick="setBookingFilter('completed')">🟢 Завершены</button><button data-filter="rejected" onclick="setBookingFilter('rejected')">🔴 Отменены</button></div></div><div class="list" id="bookingList"></div><div id="bookingDetail"></div></div>`;
+    drawBookingStats(); renderBookingList();
+  }catch(e){if(token!==viewToken||tab!=='bookings')return;$('content').innerHTML=`<div class="panel"><div class="empty">${esc(e.message)}</div></div>`}
+}
+
+let financePeriod='month';
+function financeRange(period){
+  const d=new Date(); const end=new Date(d.getFullYear(),d.getMonth(),d.getDate()); let start=new Date(end);
+  if(period==='today')start=new Date(end);
+  else if(period==='7')start.setDate(start.getDate()-6);
+  else if(period==='month')start=new Date(end.getFullYear(),end.getMonth(),1);
+  else if(period==='prev'){start=new Date(end.getFullYear(),end.getMonth()-1,1);return {from:dateInput(start),to:dateInput(new Date(end.getFullYear(),end.getMonth(),0))};}
+  else if(period==='year')start=new Date(end.getFullYear(),0,1);
+  return {from:dateInput(start),to:dateInput(end)};
+}
+function dateInput(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
+function money0(n){return Number(n||0).toLocaleString('ru-RU')+' ₽'}
+function setFinancePeriod(p){financePeriod=p;const r=financeRange(p);renderFinance(viewToken,r.from,r.to)}
+function applyFinanceDates(){renderFinance(viewToken,$('finFrom').value,$('finTo').value)}
+async function renderFinance(token=viewToken,from=null,to=null){
+  const r=from&&to?{from,to}:financeRange(financePeriod);
+  $('content').innerHTML='<div class="panel"><div class="loader">Формирую финансовый отчёт…</div></div>';
+  try{
+    const [d,ed]=await Promise.all([api(`/api/admin/finance?from=${encodeURIComponent(r.from)}&to=${encodeURIComponent(r.to)}`),api(`/api/admin/expenses?from=${encodeURIComponent(r.from)}&to=${encodeURIComponent(r.to)}`)]);
+    if(token!==viewToken||tab!=='finance')return;
+    const maxDay=Math.max(1,...d.daily.map(x=>Number(x.revenue||0)));
+    const maxCar=Math.max(1,...d.cars.map(x=>Number(x.revenue||0)));
+    const active=financePeriod;
+    $('content').innerHTML=`
+      <div class="panel financeSection">
+        <div class="panelHead"><div><h1>Финансовый отчёт</h1><div class="muted">${esc(d.from)} → ${esc(d.to)} · выручка только по подтверждённым броням</div></div></div>
+        <div class="financePeriod">
+          <button class="${active==='today'?'active':''}" onclick="setFinancePeriod('today')">Сегодня</button>
+          <button class="${active==='7'?'active':''}" onclick="setFinancePeriod('7')">7 дней</button>
+          <button class="${active==='month'?'active':''}" onclick="setFinancePeriod('month')">Этот месяц</button>
+          <button class="${active==='prev'?'active':''}" onclick="setFinancePeriod('prev')">Прошлый месяц</button>
+          <button class="${active==='year'?'active':''}" onclick="setFinancePeriod('year')">Год</button>
+          <div class="financeDates"><input id="finFrom" type="date" value="${esc(d.from)}"><span>—</span><input id="finTo" type="date" value="${esc(d.to)}"><button onclick="applyFinanceDates()">Показать</button></div>
+        </div>
+      </div>
+      <div class="financeGrid">
+        <div class="financeCard green"><b>${money0(d.revenue)}</b><span>💰 Выручка</span></div>
+        <div class="financeCard red"><b>${money0(d.expenses_total)}</b><span>💸 Расходы</span></div>
+        <div class="financeCard ${Number(d.profit||0)>=0?'green':'red'}"><b>${money0(d.profit)}</b><span>📈 Прибыль после учтённых расходов</span></div>
+        <div class="financeCard blue"><b>${d.booking_count}</b><span>📋 Подтверждённых броней</span></div>
+        <div class="financeCard"><b>${Number(d.rental_days||0).toLocaleString('ru-RU')} дн.</b><span>⏱ Дней аренды</span></div>
+        <div class="financeCard amber"><b>${Number(d.occupancy||0).toLocaleString('ru-RU')}%</b><span>🚗 Загрузка автопарка</span></div>
+        <div class="financeCard"><b>${money0(d.avg_check)}</b><span>🧾 Средний чек</span></div>
+        <div class="financeCard"><b>${money0(d.avg_day)}</b><span>📅 Выручка за день аренды</span></div>
+        <div class="financeCard amber"><b>${d.pending_count}</b><span>🟡 Новых заявок в периоде</span></div>
+        <div class="financeCard red"><b>${d.rejected_count}</b><span>🔴 Отклонённых/отменённых</span></div>
+      </div>
+      <div class="expenseSummary">
+        <div class="panel financeSection"><div class="panelHead"><div><h1>Расходы по категориям</h1><div class="muted">${d.expense_count} записей за выбранный период</div></div></div><div class="calendarScroll"><table class="financeTable"><thead><tr><th>Категория</th><th>Сумма</th></tr></thead><tbody>${(d.expense_by_category.length?d.expense_by_category.map(x=>`<tr><td>${esc(x.label)}</td><td><b>${money0(x.amount)}</b></td></tr>`).join(''):'<tr><td colspan="2">Расходов пока нет</td></tr>')}</tbody></table></div></div>
+        <div class="panel financeSection"><div class="panelHead"><div><h1>Расходы по автомобилям</h1><div class="muted">Можно привязать расход к конкретной машине</div></div></div><div class="calendarScroll"><table class="financeTable"><thead><tr><th>Автомобиль</th><th>Расходы</th></tr></thead><tbody>${(d.expense_by_car.length?d.expense_by_car.map(x=>`<tr><td>${esc(x.car_name)}</td><td><b>${money0(x.amount)}</b></td></tr>`).join(''):'<tr><td colspan="2">Расходы по автомобилям не указаны</td></tr>')}</tbody></table></div><div class="financeNote">Расход без выбранного автомобиля учитывается в общей прибыли, но не относится к конкретной машине.</div></div>
+      </div>
+      <div class="panel financeSection">
+        <div class="panelHead"><div><h1>Добавить расход</h1><div class="muted">ТО, ремонт, страховка, мойка, реклама и другие затраты</div></div></div>
+        <div class="expenseTools">
+          <input id="expenseDate" type="date" value="${esc(d.to)}">
+          <select id="expenseCategory">${Object.entries(ed.categories||{}).map(([k,v])=>`<option value="${esc(k)}">${esc(v)}</option>`).join('')}</select>
+          <select id="expenseCar"><option value="">Все автомобили</option>${(d.cars||[]).map(c=>`<option value="${esc(c.car_id)}">${esc(c.car_name)}</option>`).join('')}</select>
+          <input id="expenseAmount" type="number" min="1" step="1" placeholder="Сумма, ₽">
+          <button class="expenseBtn" onclick="addExpense()">+ Добавить расход</button>
+        </div>
+        <div style="padding:0 12px 12px"><input id="expenseComment" class="search" placeholder="Комментарий: например, замена масла, страховка ОСАГО…"></div>
+        <div class="expenseList">${(ed.expenses||[]).length?(ed.expenses.map(x=>`<div class="expenseRow"><div>${esc(x.date)}</div><div><b>${esc(x.category_label)}</b><div class="muted expenseComment">${esc(x.comment||x.car_name)}</div></div><div class="expenseAmount">${money0(x.amount)}</div><div class="muted">${esc(x.car_name)}</div><button class="expenseDelete" onclick="deleteExpense(${Number(x.id)})">×</button></div>`).join('')):'<div class="empty">За выбранный период расходов нет.</div>'}</div>
+      </div>
+      <div class="financeTwo">
+        <div class="panel financeSection"><div class="panelHead"><div><h1>Динамика выручки</h1><div class="muted">По дате начала аренды</div></div></div>
+          <div class="chartWrap"><div class="chart">${d.daily.map(x=>`<div class="barCol"><div class="barValue">${x.revenue?money0(x.revenue).replace(' ₽',''):''}</div><div class="bar" style="height:${Math.max(3,Math.round(Number(x.revenue||0)/maxDay*145))}px" title="${esc(x.label)} · ${money0(x.revenue)} · ${x.bookings} брон."></div><div class="barLabel">${esc(x.label)}</div></div>`).join('')}</div></div>
+        </div>
+        <div class="panel financeSection"><div class="panelHead"><div><h1>Будущая выручка</h1><div class="muted">Подтверждённые брони после текущего момента</div></div></div><div class="empty" style="padding:24px 16px"><b style="font-size:24px;color:var(--green)">${money0(d.future_revenue)}</b><br><span>${d.future_count} подтверждённых броней впереди</span></div></div>
+      </div>
+      <div class="panel financeSection"><div class="panelHead"><div><h1>По автомобилям</h1><div class="muted">Кто сколько заработал и насколько загружен</div></div></div>
+        <div class="calendarScroll"><table class="financeTable"><thead><tr><th>Автомобиль</th><th>Броней</th><th>Дней</th><th>Выручка</th><th>Средний чек</th><th>Загрузка</th></tr></thead><tbody>${d.cars.map(c=>`<tr><td><b>${esc(c.car_name)}</b><div class="progress" style="margin-top:6px"><i style="width:${Math.min(100,Number(c.revenue||0)/maxCar*100)}%"></i></div></td><td>${c.bookings}</td><td>${c.rental_days}</td><td><b>${money0(c.revenue)}</b></td><td>${money0(c.avg_check)}</td><td><b>${c.occupancy}%</b></td></tr>`).join('')}</tbody></table></div>
+      </div>
+      <div class="financeTwo">
+        <div class="panel financeSection"><div class="panelHead"><div><h1>Места подачи</h1><div class="muted">По подтверждённым броням периода</div></div></div><div class="calendarScroll"><table class="financeTable"><thead><tr><th>Место</th><th>Броней</th><th>Зафиксированные доплаты</th></tr></thead><tbody>${(d.locations.length?d.locations.map(x=>`<tr><td>${esc(x.label)}</td><td>${x.bookings}</td><td>${money0(x.fees)}</td></tr>`).join(''):'<tr><td colspan="3">Нет данных</td></tr>')}</tbody></table></div><div class="financeNote">Аэропорт и вокзал сейчас имеют тариф 0 ₽. Для мест, где стоимость согласуется вручную, сумма не включается в выручку до фиксации в брони.</div></div>
+        <div class="panel financeSection"><div class="panelHead"><div><h1>Что важно</h1></div></div><div class="list"><div class="item">💰 <b>Выручка</b> — сумма подтверждённых аренд, начинающихся в выбранном периоде.</div><div class="item">🚗 <b>Загрузка</b> — фактическое занятое время автопарка без двойного счёта пересечений.</div><div class="item">📈 <b>Будущая выручка</b> — подтверждённые брони начиная с текущего момента.</div></div></div>
+      </div>`;
+  }catch(e){if(token!==viewToken||tab!=='finance')return;$('content').innerHTML=`<div class="panel"><div class="empty">${esc(e.message)}</div></div>`}
+}
+
+async function addExpense(){
+  const amount=Number($('expenseAmount')?.value||0);
+  if(!amount || amount<=0){alert('Укажи сумму расхода.');return;}
+  const payload={date:$('expenseDate').value,category:$('expenseCategory').value,car_id:$('expenseCar').value,amount,comment:$('expenseComment').value.trim()};
+  try{
+    await api('/api/admin/expenses',{method:'POST',body:JSON.stringify(payload)});
+    const r={from:$('finFrom')?.value,to:$('finTo')?.value}; renderFinance(viewToken,r.from,r.to);
+  }catch(e){alert(e.message)}
+}
+async function deleteExpense(id){
+  if(!confirm('Удалить этот расход?'))return;
+  try{
+    await api('/api/admin/expenses/delete',{method:'POST',body:JSON.stringify({id})});
+    const r={from:$('finFrom')?.value,to:$('finTo')?.value}; renderFinance(viewToken,r.from,r.to);
+  }catch(e){alert(e.message)}
+}
+
+async function renderReviews(token=viewToken){ $('content').innerHTML='<div class="panel"><div class="loader">Загружаю отзывы…</div></div>';try{const d=await api('/api/admin/reviews');if(token!==viewToken||tab!=='reviews')return;$('content').innerHTML='<div class="panel"><div class="panelHead"><div><h1>Отзывы клиентов</h1><div class="muted">Средняя оценка: '+(d.average||'—')+' ★ · '+d.reviews.length+'</div></div></div><div class="list">'+(d.reviews.length?d.reviews.map(r=>`<div class="item"><div class="stars">${'★'.repeat(Number(r.rating||0))}${'☆'.repeat(5-Number(r.rating||0))}</div><div style="margin-top:8px">${esc(r.text||'Без текста')}</div><div class="muted">${esc(r.name||'Клиент')} · ${esc(r.car_name||'Автомобиль')} · бронь №${r.booking_id} · ${esc(r.created_at||'')}</div></div>`).join(''):'<div class="empty">Отзывов пока нет.</div>')+'</div></div>'}catch(e){if(token!==viewToken||tab!=='reviews')return;$('content').innerHTML=`<div class="panel"><div class="empty">${esc(e.message)}</div></div>`}}
+function closeApp(){tg?.close?.()||history.back()}
+async function boot(){
+  $('content').innerHTML='<div class="panel"><div class="loader">Подключаюсь к админке…</div></div>';
+  const s=await waitInitData();
+  if(!s){$('content').innerHTML='<div class="panel"><div class="empty"><b>Не удалось получить авторизацию Telegram.</b><br>Закройте это окно и откройте админку заново через кнопку «🖥 Открыть веб-админку».</div></div>';return;}
+  renderCalendar(viewToken);
+}
+boot();
+</script></body></html>
