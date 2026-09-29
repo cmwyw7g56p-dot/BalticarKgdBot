@@ -233,13 +233,6 @@ html.dark .homeTrustRow div,html.dark .homeFooterLinks button{color:#a5b4c0}
 /* V34 — premium car photography */
 .gallery{position:relative;overflow:hidden;background:#e5e9ed}
 .galleryImg{display:block;width:100%;height:100%;object-fit:cover}
-.galleryCaption{
-  position:absolute;left:12px;bottom:12px;z-index:3;
-  padding:6px 9px;border-radius:999px;
-  background:rgba(10,18,27,.72);color:#fff;
-  font-size:10px;font-weight:800;letter-spacing:.01em;
-  backdrop-filter:blur(8px);
-}
 .car{
   border-color:rgba(18,32,46,.12);
   box-shadow:0 16px 38px rgba(16,32,48,.11);
@@ -248,9 +241,7 @@ html.dark .homeTrustRow div,html.dark .homeFooterLinks button{color:#a5b4c0}
 .carGallery .galleryImg{transition:transform .28s ease}
 .car:active .carGallery .galleryImg{transform:scale(1.01)}
 .detailGallery{box-shadow:0 14px 34px rgba(16,32,48,.10)}
-.detailGallery .galleryCaption{left:14px;bottom:14px;font-size:11px;padding:7px 10px}
-
-/* V7 — catalog: one full-width car per row */
+.detailGallery /* V7 — catalog: one full-width car per row */
 .carlistGrid{
   display:grid !important;
   grid-template-columns:1fr !important;
@@ -323,6 +314,21 @@ html.dark .homeTrustRow div,html.dark .homeFooterLinks button{color:#a5b4c0}
   .carlistGrid{grid-template-columns:1fr !important;max-width:720px}
 }
 
+
+/* V36 — clean detail gallery */
+.detailGallery{
+  background:#eef1f4;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.detailGallery .galleryImg{
+  width:100%;
+  height:100%;
+  object-fit:contain;
+  object-position:center;
+  background:#eef1f4;
+}
 </style>
 <script>
 window.BALTICAR_applyTheme=function(){
@@ -413,10 +419,10 @@ function galleryPhotos(c){
   };
   return (map[c.id]||c.photos||[]).filter(Boolean);
 }
-function galleryLabel(i){return ['Перед · 3/4','Зад · 3/4','Салон'][i]||`Фото ${i+1}`}
-function galleryHTML(c,detail=false){const photos=galleryPhotos(c);const id=(detail?'detail-':'card-')+c.id;return `<div class="${detail?'detailGallery':'carGallery'} gallery" data-gallery="${id}" data-index="0" data-photos='${JSON.stringify(photos)}' ontouchstart="galleryTouchStart(event,this)" ontouchend="galleryTouchEnd(event,this)"><img class="galleryImg" src="${img(photos[0])}" alt="${escapeHtml(c.name)}"><div class="galleryCaption">${galleryLabel(0)}</div>${photos.length>1?`<button class="galleryBtn prev" type="button" aria-label="Предыдущее фото" onclick="galleryMove(event,'${id}',-1)">‹</button><button class="galleryBtn next" type="button" aria-label="Следующее фото" onclick="galleryMove(event,'${id}',1)">›</button>`:''}${photos.length>1?`<div class="galleryCount">1 / ${photos.length}</div><div class="galleryDots">${photos.map((_,i)=>`<button class="galleryDot ${i===0?'active':''}" type="button" aria-label="Фото ${i+1}" onclick="gallerySet(event,'${id}',${i})"></button>`).join('')}</div>`:''}</div>`}
+`}
+function galleryHTML(c,detail=false){const photos=galleryPhotos(c);const id=(detail?'detail-':'card-')+c.id;return `<div class="${detail?'detailGallery':'carGallery'} gallery" data-gallery="${id}" data-index="0" data-photos='${JSON.stringify(photos)}' ontouchstart="galleryTouchStart(event,this)" ontouchend="galleryTouchEnd(event,this)"><img class="galleryImg" src="${img(photos[0])}" alt="${escapeHtml(c.name)}">${photos.length>1?`<button class="galleryBtn prev" type="button" aria-label="Предыдущее фото" onclick="galleryMove(event,'${id}',-1)">‹</button><button class="galleryBtn next" type="button" aria-label="Следующее фото" onclick="galleryMove(event,'${id}',1)">›</button>`:''}${photos.length>1?`<div class="galleryCount">1 / ${photos.length}</div><div class="galleryDots">${photos.map((_,i)=>`<button class="galleryDot ${i===0?'active':''}" type="button" aria-label="Фото ${i+1}" onclick="gallerySet(event,'${id}',${i})"></button>`).join('')}</div>`:''}</div>`}
 function galleryData(id){return document.querySelector(`[data-gallery="${id}"]`)}
-function galleryRender(g,i){const photos=JSON.parse(g.dataset.photos||'[]');if(!photos.length)return;i=(i+photos.length)%photos.length;g.dataset.index=i;g.querySelector('.galleryImg').src=img(photos[i]);const count=g.querySelector('.galleryCount');if(count)count.textContent=`${i+1} / ${photos.length}`;const cap=g.querySelector('.galleryCaption');if(cap)cap.textContent=galleryLabel(i);g.querySelectorAll('.galleryDot').forEach((d,n)=>d.classList.toggle('active',n===i))}
+function galleryRender(g,i){const photos=JSON.parse(g.dataset.photos||'[]');if(!photos.length)return;i=(i+photos.length)%photos.length;g.dataset.index=i;g.querySelector('.galleryImg').src=img(photos[i]);const count=g.querySelector('.galleryCount');if(count)count.textContent=`${i+1} / ${photos.length}`;g.querySelectorAll('.galleryDot').forEach((d,n)=>d.classList.toggle('active',n===i))}
 function galleryMove(ev,id,delta){ev.preventDefault();ev.stopPropagation();const g=galleryData(id);if(g)galleryRender(g,Number(g.dataset.index||0)+delta)}
 function gallerySet(ev,id,i){ev.preventDefault();ev.stopPropagation();const g=galleryData(id);if(g)galleryRender(g,i)}
 function galleryTouchStart(ev,g){g._touchX=ev.changedTouches[0].clientX}
@@ -484,20 +490,3 @@ renderHome();$('backBtn').style.visibility='hidden';
 </script>
 </body>
 </html>
-
-
-/* V35 — detail gallery: show the complete car photo */
-.detailGallery{
-  background:#eef1f4;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-}
-.detailGallery .galleryImg{
-  width:100%;
-  height:100%;
-  object-fit:contain;
-  object-position:center;
-  background:#eef1f4;
-}
-.detailGallery .galleryCaption{z-index:4}
