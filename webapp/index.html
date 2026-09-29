@@ -329,6 +329,63 @@ html.dark .homeTrustRow div,html.dark .homeFooterLinks button{color:#a5b4c0}
   object-position:center;
   background:#eef1f4;
 }
+
+/* V37 — one large car card per row */
+.carlistGrid{
+  display:grid !important;
+  grid-template-columns:1fr !important;
+  gap:18px !important;
+}
+.car{
+  width:100%;
+  border-radius:24px;
+  overflow:hidden;
+}
+.carGallery{
+  aspect-ratio:1.72 !important;
+}
+.carbody{
+  padding:16px !important;
+}
+.carTop{
+  display:flex !important;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+}
+.carname{
+  font-size:22px !important;
+  line-height:1.12 !important;
+}
+.onlineLabel{
+  flex:0 0 auto;
+  margin-top:2px !important;
+}
+.chips{
+  gap:7px !important;
+  margin:13px 0 !important;
+}
+.chip{
+  padding:7px 9px !important;
+  font-size:11px !important;
+}
+.carPrice{
+  padding:12px 0 13px !important;
+}
+.carPrice b{
+  font-size:25px !important;
+}
+.carActions .primary{
+  padding:14px !important;
+  font-size:14px !important;
+}
+@media(max-width:520px){
+  .carlistGrid{gap:16px !important}
+  .carGallery{aspect-ratio:1.55 !important}
+  .carbody{padding:15px !important}
+  .carname{font-size:21px !important}
+  .carPrice b{font-size:24px !important}
+}
 </style>
 <script>
 window.BALTICAR_applyTheme=function(){
