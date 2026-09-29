@@ -419,7 +419,6 @@ function galleryPhotos(c){
   };
   return (map[c.id]||c.photos||[]).filter(Boolean);
 }
-`}
 function galleryHTML(c,detail=false){const photos=galleryPhotos(c);const id=(detail?'detail-':'card-')+c.id;return `<div class="${detail?'detailGallery':'carGallery'} gallery" data-gallery="${id}" data-index="0" data-photos='${JSON.stringify(photos)}' ontouchstart="galleryTouchStart(event,this)" ontouchend="galleryTouchEnd(event,this)"><img class="galleryImg" src="${img(photos[0])}" alt="${escapeHtml(c.name)}">${photos.length>1?`<button class="galleryBtn prev" type="button" aria-label="Предыдущее фото" onclick="galleryMove(event,'${id}',-1)">‹</button><button class="galleryBtn next" type="button" aria-label="Следующее фото" onclick="galleryMove(event,'${id}',1)">›</button>`:''}${photos.length>1?`<div class="galleryCount">1 / ${photos.length}</div><div class="galleryDots">${photos.map((_,i)=>`<button class="galleryDot ${i===0?'active':''}" type="button" aria-label="Фото ${i+1}" onclick="gallerySet(event,'${id}',${i})"></button>`).join('')}</div>`:''}</div>`}
 function galleryData(id){return document.querySelector(`[data-gallery="${id}"]`)}
 function galleryRender(g,i){const photos=JSON.parse(g.dataset.photos||'[]');if(!photos.length)return;i=(i+photos.length)%photos.length;g.dataset.index=i;g.querySelector('.galleryImg').src=img(photos[i]);const count=g.querySelector('.galleryCount');if(count)count.textContent=`${i+1} / ${photos.length}`;g.querySelectorAll('.galleryDot').forEach((d,n)=>d.classList.toggle('active',n===i))}
