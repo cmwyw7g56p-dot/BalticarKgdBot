@@ -6322,6 +6322,12 @@ LOCATION_TYPES = {
     "other": ("Другое место", None),
 }
 
+PAYMENT_METHODS = {
+    "cash": "💵 Наличные",
+    "terminal": "💳 Терминал / карта",
+    "bank": "🏦 Безналичный перевод",
+}
+
 
 def mini_validate_init_data(init_data: str):
     """Validate Telegram WebApp initData and return user id when available."""
@@ -6426,7 +6432,7 @@ def mini_slots_sync(car_id, year, month, start_at=None):
     return {"mode":"end" if start_dt else "start", "slots":slots}
 
 
-def mini_create_booking_sync(user_id, cid, start_at, end_at, name, phone, comment, location_type, location_note):
+def mini_create_booking_sync(user_id, cid, start_at, end_at, name, phone, comment, location_type, location_note, payment_method="cash"):
     start_at=mini_parse_local_iso(start_at)
     end_at=mini_parse_local_iso(end_at)
     name = (name or "").strip()
@@ -6449,6 +6455,9 @@ def mini_create_booking_sync(user_id, cid, start_at, end_at, name, phone, commen
         return {"ok":False,"reason":"location"}
     if location_type == "other" and not (location_note or "").strip():
         return {"ok":False,"reason":"location_note"}
+    payment_method = (payment_method or "cash").strip().lower()
+    if payment_method not in PAYMENT_METHODS:
+        return {"ok":False,"reason":"payment"}
     days=rental_days(start_at,end_at)
     daily=rate_for_days(cid,days)
     rental_total=days*daily
@@ -6465,12 +6474,12 @@ def mini_create_booking_sync(user_id, cid, start_at, end_at, name, phone, commen
             if overlap:
                 con.rollback(); return {"ok":False,"reason":"overlap"}
             expires=datetime.now(TZ)+timedelta(minutes=HOLD_MINUTES)
-            cur.execute("""INSERT INTO bookings (user_id,username,car_id,start_date,end_date,start_at,end_at,name,phone,comment,total,status,created_at,expires_at,pickup_location,pickup_location_type,pickup_location_note,pickup_location_fee) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending',%s,%s,%s,%s,%s,%s) RETURNING id""",(
+            cur.execute("""INSERT INTO bookings (user_id,username,car_id,start_date,end_date,start_at,end_at,name,phone,comment,total,status,created_at,expires_at,pickup_location,pickup_location_type,pickup_location_note,pickup_location_fee,payment_method) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending',%s,%s,%s,%s,%s,%s,%s) RETURNING id""",(
                 user_id,"",cid,start_at.date(),end_at.date(),start_at,end_at,name,phone,comment,rental_total,datetime.now(TZ),expires,
-                LOCATION_TYPES[location_type][0],location_type,location_note or "",location_fee))
+                LOCATION_TYPES[location_type][0],location_type,location_note or "",location_fee,payment_method))
             bid=cur.fetchone()["id"]
         con.commit()
-        return {"ok":True,"bid":bid,"days":days,"total":rental_total,"rental_total":rental_total,"location_fee":location_fee,"location":LOCATION_TYPES[location_type][0],"expires":expires.isoformat()}
+        return {"ok":True,"bid":bid,"days":days,"total":rental_total,"rental_total":rental_total,"location_fee":location_fee,"location":LOCATION_TYPES[location_type][0],"payment_method":payment_method,"payment_label":PAYMENT_METHODS[payment_method],"expires":expires.isoformat()}
     except Exception:
         con.rollback(); raise
     finally:
@@ -6486,6 +6495,7 @@ def mini_add_location_columns():
                 "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_location_type TEXT",
                 "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_location_note TEXT",
                 "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_location_fee INTEGER",
+                "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_method TEXT",
             ]:
                 cur.execute(sql)
         con.commit()
@@ -6576,7 +6586,7 @@ def mini_mybookings_sync(uid):
     for r in rows:
         sa=ensure_tz(r.get("start_at")) if r.get("start_at") else local_dt(r["start_date"],time(10,0))
         ea=ensure_tz(r.get("end_at")) if r.get("end_at") else local_dt(r["end_date"],time(17,0))
-        out.append({"id":r["id"],"status":r["status"],"car_name":CARS.get(r["car_id"],{}).get("name",r["car_id"]),"car_id":r["car_id"],"start_at":sa.strftime("%d.%m.%Y · %H:%M"),"end_at":ea.strftime("%d.%m.%Y · %H:%M"),"total":r["total"],"past":ea < now,"reviewed":bool(r.get("review_id")),"comment":r.get("comment") or "","pickup_location":r.get("pickup_location") or "","pickup_location_type":r.get("pickup_location_type") or "","pickup_location_note":r.get("pickup_location_note") or "","pickup_location_fee":r.get("pickup_location_fee")})
+        pm=r.get("payment_method") or ""; out.append({"id":r["id"],"status":r["status"],"car_name":CARS.get(r["car_id"],{}).get("name",r["car_id"]),"car_id":r["car_id"],"start_at":sa.strftime("%d.%m.%Y · %H:%M"),"end_at":ea.strftime("%d.%m.%Y · %H:%M"),"total":r["total"],"past":ea < now,"reviewed":bool(r.get("review_id")),"comment":r.get("comment") or "","pickup_location":r.get("pickup_location") or "","pickup_location_type":r.get("pickup_location_type") or "","pickup_location_note":r.get("pickup_location_note") or "","pickup_location_fee":r.get("pickup_location_fee"),"payment_method":pm,"payment_label":PAYMENT_METHODS.get(pm, pm)})
     return out
 
 async def mini_mybookings(request):
@@ -6597,10 +6607,11 @@ async def mini_bookings(request):
         cid=str(data.get("car_id","")).strip(); comment=str(data.get("comment","")).strip()
         location_type=str(data.get("pickup_location_type",data.get("location_type","airport"))).strip()
         location_note=str(data.get("pickup_location_note",data.get("location_note",""))).strip()
-        result=await asyncio.to_thread(mini_create_booking_sync,uid,cid,str(data.get("start_at")),str(data.get("end_at")),name,phone,comment,location_type,location_note)
+        payment_method=str(data.get("payment_method","cash")).strip().lower()
+        result=await asyncio.to_thread(mini_create_booking_sync,uid,cid,str(data.get("start_at")),str(data.get("end_at")),name,phone,comment,location_type,location_note,payment_method)
         if not result["ok"]:
             print(f"[MINI/BOOKING] REJECTED reason={result.get('reason')}", flush=True)
-            messages={"car":"Автомобиль недоступен.","period":"Проверьте даты и время.","past":"Выбранное время уже прошло.","time":"Выдача и возврат доступны с 08:00 до 20:00.","location":"Выберите место подачи.","location_note":"Укажите адрес или комментарий для другого места.","maintenance":"Автомобиль недоступен в выбранный период.","overlap":"Эти даты или время уже заняты. Выберите другой вариант.","contact":"Введите имя и корректный телефон (не менее 10 цифр)."}
+            messages={"car":"Автомобиль недоступен.","period":"Проверьте даты и время.","past":"Выбранное время уже прошло.","time":"Выдача и возврат доступны с 08:00 до 20:00.","location":"Выберите место подачи.","location_note":"Укажите адрес или комментарий для другого места.","maintenance":"Автомобиль недоступен в выбранный период.","overlap":"Эти даты или время уже заняты. Выберите другой вариант.","contact":"Введите имя и корректный телефон (не менее 10 цифр).","payment":"Выберите способ оплаты."}
             return mini_json({"message":messages.get(result["reason"],"Не удалось создать заявку.")},409)
         print(f"[MINI/BOOKING] CREATED bid={result['bid']} car={cid} uid={uid}", flush=True)
         # V15: уведомление напрямую через Telegram Bot API.
@@ -6617,6 +6628,7 @@ async def mini_bookings(request):
             loc_line=f"📍 Место подачи: <b>{escape_html(loc)}</b>"
             if location_note:
                 loc_line += f"\n📝 {escape_html(location_note)}"
+            pay_label = result.get("payment_label") or PAYMENT_METHODS.get(result.get("payment_method"), "—")
             admin_text=(
                 f"📥 <b>Новая заявка из Mini App №{result['bid']}</b>\n\n"
                 f"🚗 <b>{escape_html(CARS[cid]['name'])}</b>\n"
@@ -6625,6 +6637,7 @@ async def mini_bookings(request):
                 f"📅 {mini_parse_local_iso(str(data.get('start_at'))).strftime('%d.%m.%Y %H:%M')} → "
                 f"{mini_parse_local_iso(str(data.get('end_at'))).strftime('%d.%m.%Y %H:%M')}\n"
                 f"{loc_line}\n"
+                f"💳 Оплата: <b>{escape_html(pay_label)}</b>\n"
                 f"💰 Аренда: <b>{money(result['rental_total'])}</b>\n"
                 f"🔐 Залог: <b>{money(DEPOSIT_AMOUNT)}</b>"
             )
@@ -6662,7 +6675,7 @@ async def mini_bookings(request):
             print(f"[MINI/ADMIN_NOTIFY] SENT bid={result['bid']} admin={ADMIN_ID}", flush=True)
         except Exception as exc:
             print(f"[MINI/ADMIN_NOTIFY] FAILED bid={result.get('bid')}: {type(exc).__name__}: {exc!r}", flush=True)
-        return mini_json({"id":result["bid"],"days":result["days"],"total":result["total"],"location_fee":result["location_fee"],"location":result["location"],"expires":result["expires"]})
+        return mini_json({"id":result["bid"],"days":result["days"],"total":result["total"],"location_fee":result["location_fee"],"location":result["location"],"payment_method":result.get("payment_method"),"payment_label":result.get("payment_label"),"expires":result["expires"]})
     except Exception as exc:
         print(f"[MINI/BOOKING] {type(exc).__name__}: {exc}", flush=True)
         return mini_json({"message":"Не удалось отправить заявку. Попробуйте ещё раз."},500)
@@ -6774,7 +6787,7 @@ def admin_calendar_payload_sync(year, month):
                 ids = [r['id'] for r in booking_rows]
                 try:
                     rows = cur.execute("""
-                        SELECT id, name, phone, total, pickup_location
+                        SELECT id, name, phone, total, pickup_location, payment_method
                         FROM bookings WHERE id = ANY(%s)
                     """, (ids,)).fetchall()
                     extra = {r['id']: r for r in rows}
@@ -6814,9 +6827,11 @@ def admin_calendar_payload_sync(year, month):
                 'start_day': max(1, start_day), 'end_day': end_day,
             }
         ex = extra.get(row['id'], {})
+        pm = ex.get('payment_method') or ''
         return {
             'id': row['id'], 'status': row['status'], 'name': ex.get('name') or f"Бронь №{row['id']}",
             'phone': ex.get('phone') or '', 'total': ex.get('total'), 'pickup': ex.get('pickup_location') or '',
+            'payment_method': pm, 'payment_label': PAYMENT_METHODS.get(pm, pm),
             'start_label': sa.strftime('%d.%m.%Y %H:%M'),
             'end_label': ea.strftime('%d.%m.%Y %H:%M'),
             'start_day': max(1, start_day), 'end_day': end_day,
@@ -6880,7 +6895,8 @@ def admin_bookings_sync():
         with con.cursor() as cur:
             rows = cur.execute("""
                 SELECT id, car_id, status, name, phone, start_at, end_at, total, created_at,
-                       pickup_location, pickup_location_type, pickup_location_note, pickup_location_fee
+                       pickup_location, pickup_location_type, pickup_location_note, pickup_location_fee,
+                       payment_method
                 FROM bookings ORDER BY id DESC LIMIT 200
             """).fetchall()
     finally:
@@ -6902,6 +6918,8 @@ def admin_bookings_sync():
                     'start_ms':int(sa.timestamp()*1000) if sa else 0,
                     'end_ms':int(ea.timestamp()*1000) if ea else 0,
                     'pickup':r.get('pickup_location') or '',
+                    'payment_method':r.get('payment_method') or '',
+                    'payment_label':PAYMENT_METHODS.get(r.get('payment_method') or '', r.get('payment_method') or ''),
                     'total':r.get('total') or 0})
     return out
 
