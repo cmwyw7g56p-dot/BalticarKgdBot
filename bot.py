@@ -1122,6 +1122,7 @@ def status_label(status):
     return {
         "pending": "🟡 Ожидает подтверждения",
         "confirmed": "🟢 Подтверждена",
+        "completed": "🔵 Завершена",
         "rejected": "🔴 Отклонена",
         "expired": "⚪ Истекла",
         "cancelled": "⚫ Отменена",
@@ -6349,8 +6350,12 @@ def mini_validate_init_data(init_data: str):
 
 
 def mini_user_id(request):
-    uid = mini_validate_init_data(request.headers.get("X-Telegram-Init-Data", ""))
-    return uid
+    # Header first; query fallback for iOS/WebView cases that drop custom headers.
+    init_data = (
+        request.headers.get("X-Telegram-Init-Data", "")
+        or request.query.get("init_data", "")
+    )
+    return mini_validate_init_data(init_data)
 
 
 def mini_json(data, status=200):
@@ -6359,12 +6364,18 @@ def mini_json(data, status=200):
 
 def mini_car_payload():
     load_car_settings()
+    base = Path(__file__).resolve().parent
     result=[]
     for cid, c in active_cars().items():
         photos=[]
         for p in c.get("photos", []):
-            if Path(p).exists():
-                photos.append(p.replace("\\", "/"))
+            rel = str(p).replace("\\", "/")
+            full = base / rel
+            if full.is_file():
+                photos.append(rel)
+            elif (PHOTOS_DIR / Path(rel).name).is_file():
+                # fallback: file lies directly under photos/
+                photos.append(f"photos/{Path(rel).name}")
         result.append({
             "id": cid,
             "name": c.get("name", cid),
@@ -6418,6 +6429,11 @@ def mini_slots_sync(car_id, year, month, start_at=None):
 def mini_create_booking_sync(user_id, cid, start_at, end_at, name, phone, comment, location_type, location_note):
     start_at=mini_parse_local_iso(start_at)
     end_at=mini_parse_local_iso(end_at)
+    name = (name or "").strip()
+    phone = (phone or "").strip()
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    if not name or len(digits) < 10:
+        return {"ok":False,"reason":"contact"}
     if cid not in active_cars():
         return {"ok":False,"reason":"car"}
     if end_at <= start_at:
@@ -6584,7 +6600,7 @@ async def mini_bookings(request):
         result=await asyncio.to_thread(mini_create_booking_sync,uid,cid,str(data.get("start_at")),str(data.get("end_at")),name,phone,comment,location_type,location_note)
         if not result["ok"]:
             print(f"[MINI/BOOKING] REJECTED reason={result.get('reason')}", flush=True)
-            messages={"car":"Автомобиль недоступен.","period":"Проверьте даты и время.","past":"Выбранное время уже прошло.","time":"Выдача и возврат доступны с 08:00 до 20:00.","location":"Выберите место подачи.","location_note":"Укажите адрес или комментарий для другого места.","maintenance":"Автомобиль недоступен в выбранный период.","overlap":"Эти даты или время уже заняты. Выберите другой вариант."}
+            messages={"car":"Автомобиль недоступен.","period":"Проверьте даты и время.","past":"Выбранное время уже прошло.","time":"Выдача и возврат доступны с 08:00 до 20:00.","location":"Выберите место подачи.","location_note":"Укажите адрес или комментарий для другого места.","maintenance":"Автомобиль недоступен в выбранный период.","overlap":"Эти даты или время уже заняты. Выберите другой вариант.","contact":"Введите имя и корректный телефон (не менее 10 цифр)."}
             return mini_json({"message":messages.get(result["reason"],"Не удалось создать заявку.")},409)
         print(f"[MINI/BOOKING] CREATED bid={result['bid']} car={cid} uid={uid}", flush=True)
         # V15: уведомление напрямую через Telegram Bot API.
@@ -6669,8 +6685,23 @@ def mini_reviews_get_sync():
     con=db()
     try:
         with con.cursor() as cur:
-            rows=cur.execute("""SELECT r.id,r.booking_id,r.rating,r.review_text AS text,r.created_at,b.name,c.car_id FROM reviews r JOIN bookings b ON b.id=r.booking_id JOIN car_settings c ON c.car_id=r.car_id ORDER BY r.created_at DESC LIMIT 30""").fetchall()
-        return [{"id":r["id"],"booking_id":r["booking_id"],"rating":r["rating"],"text":r.get("text") or "","name":r.get("name") or "Клиент","car_name":CARS.get(r["car_id"],{}).get("name",r["car_id"]),"created_at":ensure_tz(r["created_at"]).strftime("%d.%m.%Y")} for r in rows]
+            rows=cur.execute("""
+                SELECT r.id, r.booking_id, r.rating, r.review_text AS text, r.created_at,
+                       b.name, r.car_id
+                FROM reviews r
+                LEFT JOIN bookings b ON b.id = r.booking_id
+                ORDER BY r.created_at DESC
+                LIMIT 30
+            """).fetchall()
+        return [{
+            "id": r["id"],
+            "booking_id": r["booking_id"],
+            "rating": r["rating"],
+            "text": r.get("text") or "",
+            "name": r.get("name") or "Клиент",
+            "car_name": CARS.get(r["car_id"], {}).get("name", r["car_id"] or "Автомобиль"),
+            "created_at": ensure_tz(r["created_at"]).strftime("%d.%m.%Y") if r.get("created_at") else "",
+        } for r in rows]
     finally:
         con.close()
 
@@ -6848,17 +6879,23 @@ def admin_bookings_sync():
     try:
         with con.cursor() as cur:
             rows = cur.execute("""
-                SELECT id, car_id, status, name, phone, start_at, end_at, total, created_at
-                FROM bookings ORDER BY id ASC LIMIT 200
+                SELECT id, car_id, status, name, phone, start_at, end_at, total, created_at,
+                       pickup_location, pickup_location_type, pickup_location_note, pickup_location_fee
+                FROM bookings ORDER BY id DESC LIMIT 200
             """).fetchall()
     finally:
         con.close()
     out=[]
+    now = datetime.now(TZ)
     for r in rows:
         sa=ensure_tz(r['start_at']) if r.get('start_at') else None
         ea=ensure_tz(r['end_at']) if r.get('end_at') else None
+        # UI "completed": confirmed rental that already ended
+        status = r['status']
+        if status == 'confirmed' and ea is not None and ea < now:
+            status = 'completed'
         out.append({'id':r['id'],'car_id':r['car_id'],'car_name':CARS.get(r['car_id'],{}).get('name',r['car_id']),
-                    'status':r['status'],'status_label':status_label(r['status']),
+                    'status':status,'status_label':status_label(status) if status != 'completed' else '🔵 Завершена',
                     'name':r.get('name') or '','phone':r.get('phone') or '',
                     'start_label':sa.strftime('%d.%m.%Y %H:%M') if sa else '',
                     'end_label':ea.strftime('%d.%m.%Y %H:%M') if ea else '',
