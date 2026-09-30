@@ -1,14 +1,19 @@
 import asyncio
+import calendar
+import hashlib
+import hmac
+import json
 import os
 import secrets
 import time as monotonic_time
 from pathlib import Path
 from datetime import date, datetime, timedelta, time
 from html import escape as escape_html
+from urllib.parse import parse_qsl
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
-from aiohttp import web
+from aiohttp import ClientSession, ClientTimeout, web
 import psycopg
 from psycopg.rows import dict_row
 
@@ -19,13 +24,13 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from aiogram.types import (
     CallbackQuery,
     FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
+    Update,
     WebAppInfo,
 )
 
@@ -87,6 +92,14 @@ WEBHOOK_SECRET = os.getenv(
     "WEBHOOK_SECRET",
     ""
 ).strip()
+
+# Максимальный возраст подписи Telegram WebApp initData (секунды).
+INIT_DATA_MAX_AGE = int(
+    os.getenv(
+        "INIT_DATA_MAX_AGE_SECONDS",
+        "86400"
+    )
+)
 
 _RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
 MINIAPP_URL = (_RENDER_URL + "/app") if _RENDER_URL else "https://balticarkgdbot.onrender.com/app"
@@ -219,6 +232,22 @@ class AdminFeature(StatesGroup):
     car_name = State()
     car_rates = State()
     maintenance = State()
+
+
+# ============================================================
+# BACKGROUND TASKS
+# ============================================================
+
+# Ссылки на фоновые задачи: без них event loop держит задачу слабой ссылкой,
+# и сборщик мусора может убить её посреди работы.
+_BG_TASKS = set()
+
+
+def spawn_task(coro):
+    task = asyncio.create_task(coro)
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
+    return task
 
 
 # ============================================================
@@ -454,15 +483,7 @@ def cleanup_pending():
 
         with con.cursor() as cur:
 
-            cur.execute(
-                """
-                UPDATE bookings
-                SET status='expired'
-                WHERE status='pending'
-                  AND expires_at IS NOT NULL
-                  AND expires_at < NOW()
-                """
-            )
+            expire_pending(cur)
 
         con.commit()
 
@@ -472,20 +493,81 @@ def cleanup_pending():
 
 
 # ============================================================
-# ASYNC DATABASE HELPERS
+# ОБЩИЕ SQL-ХЕЛПЕРЫ (одна копия вместо 3-4 одинаковых)
 # ============================================================
 
-async def async_cleanup_pending():
-    """
-    Выполняет синхронный PostgreSQL-код
-    в отдельном потоке.
+def lock_bookings(cur):
+    """Транзакционная advisory-блокировка на все операции с бронями."""
+    cur.execute(
+        "SELECT pg_advisory_xact_lock(hashtext('balticar-bookings'))"
+    )
 
-    Это важно для aiogram:
-    event loop не блокируется ожиданием Neon.
-    """
 
-    await asyncio.to_thread(
-        cleanup_pending
+def expire_pending(cur):
+    """Истёкшие pending-заявки -> expired."""
+    cur.execute(
+        """
+        UPDATE bookings
+        SET status='expired'
+        WHERE status='pending'
+          AND expires_at IS NOT NULL
+          AND expires_at < NOW()
+        """
+    )
+
+
+def lock_booking_row(cur, bid):
+    """SELECT ... FOR UPDATE по одной брони."""
+    return cur.execute(
+        "SELECT * FROM bookings WHERE id=%s FOR UPDATE",
+        (bid,)
+    ).fetchone()
+
+
+def find_maintenance(cur, car_id, start_at, end_at):
+    """Пересечение периода с техобслуживанием (без буфера)."""
+    return cur.execute(
+        """
+        SELECT id FROM car_maintenance
+        WHERE car_id=%s AND start_at < %s AND end_at > %s
+        LIMIT 1
+        """,
+        (car_id, end_at, start_at)
+    ).fetchone()
+
+
+def find_overlap(cur, car_id, start_at, end_at, exclude_id=None):
+    """
+    Пересечение с другой активной бронью с учётом технического буфера
+    BUFFER_HOURS. exclude_id — бронь, которую нужно не учитывать
+    (при переносе дат / подтверждении).
+    """
+    buffer_delta = timedelta(hours=BUFFER_HOURS)
+    return cur.execute(
+        """
+        SELECT id, status FROM bookings
+        WHERE car_id=%s
+          AND id IS DISTINCT FROM %s::bigint
+          AND status IN ('pending','confirmed')
+          AND start_at < %s
+          AND end_at > %s
+        LIMIT 1
+        """,
+        (car_id, exclude_id, end_at + buffer_delta, start_at - buffer_delta)
+    ).fetchone()
+
+
+def mark_booking_cancelled(cur, bid):
+    cur.execute(
+        "UPDATE bookings SET status='cancelled', expires_at=NULL WHERE id=%s",
+        (bid,)
+    )
+
+
+def mark_booking_rejected(cur, bid):
+    cur.execute(
+        "UPDATE bookings SET status='rejected' WHERE id=%s",
+        (bid,)
     )
 
 
@@ -835,19 +917,6 @@ def get_month_bookings(
         con.close()
 
 
-async def async_get_month_bookings(
-    car_id,
-    year,
-    month
-):
-    return await asyncio.to_thread(
-        get_month_bookings,
-        car_id,
-        year,
-        month
-    )
-
-
 # ============================================================
 # DAY STATUS
 # ============================================================
@@ -965,37 +1034,6 @@ def day_has_available_return_date(
 
     return False
 
-
-def day_has_available_return(
-    current,
-    start_at,
-    bookings,
-    exclude_booking_id=None
-):
-    """
-    Полная проверка даты возврата относительно выбранного получения.
-
-    Используется только там, где нужно определить, можно ли реально
-    построить интервал start_at -> candidate_end. Для отображения
-    календаря используется day_has_available_return_date().
-    """
-    start_at = ensure_tz(start_at)
-
-    for hour in range(PICKUP_START_HOUR, PICKUP_END_HOUR + 1):
-        end_at = local_dt(current, time(hour, 0))
-
-        if end_at <= start_at:
-            continue
-
-        if not interval_overlaps_bookings(
-            start_at,
-            end_at,
-            bookings,
-            exclude_booking_id
-        ):
-            return True
-
-    return False
 
 def day_status(
     current,
@@ -2403,7 +2441,8 @@ async def start_day(
         Booking.start_time
     )
 
-    title, keyboard = time_keyboard(
+    title, keyboard = await asyncio.to_thread(
+        time_keyboard,
         cid,
         start_d,
         "pickup"
@@ -2411,33 +2450,6 @@ async def start_day(
 
     await callback.message.answer(
         title,
-        reply_markup=keyboard
-    )
-
-
-# ============================================================
-# BACK TO START CALENDAR
-# ============================================================
-
-async def backstart(
-    callback: CallbackQuery
-):
-
-    await safe_callback_answer(callback)
-
-    _, cid, iso = callback.data.split(":")
-
-    d = date.fromisoformat(
-        iso
-    )
-
-    keyboard = await calendar_keyboard(
-        cid,
-        d.year,
-        d.month
-    )
-
-    await callback.message.edit_reply_markup(
         reply_markup=keyboard
     )
 
@@ -2956,7 +2968,8 @@ async def end_day(
         )
         return
 
-    title, keyboard = time_keyboard(
+    title, keyboard = await asyncio.to_thread(
+        time_keyboard,
         cid,
         end_d,
         "return",
@@ -3037,7 +3050,8 @@ async def backstarttime(
         start_iso
     )
 
-    title, keyboard = time_keyboard(
+    title, keyboard = await asyncio.to_thread(
+        time_keyboard,
         cid,
         start_d,
         "pickup"
@@ -3324,73 +3338,25 @@ def create_booking_sync(
             # АТОМАРНАЯ БЛОКИРОВКА
             # ==================================================
 
-            cur.execute(
-                """
-                SELECT pg_advisory_xact_lock(
-                    hashtext('balticar-bookings')
-                )
-                """
-            )
+            lock_bookings(cur)
 
             # ==================================================
             # Истёкшие pending
             # ==================================================
 
-            cur.execute(
-                """
-                UPDATE bookings
-                SET status='expired'
-                WHERE status='pending'
-                  AND expires_at IS NOT NULL
-                  AND expires_at < NOW()
-                """
-            )
+            expire_pending(cur)
 
-            buffer_delta = timedelta(
-                hours=BUFFER_HOURS
-            )
-
-            check_start = (
-                start_at - buffer_delta
-            )
-
-            check_end = (
-                end_at + buffer_delta
-            )
-
-            maintenance = cur.execute(
-                """
-                SELECT id FROM car_maintenance
-                WHERE car_id=%s AND start_at < %s AND end_at > %s
-                LIMIT 1
-                """, (cid, end_at, start_at)
-            ).fetchone()
+            maintenance = find_maintenance(cur, cid, start_at, end_at)
 
             if maintenance:
                 con.rollback()
                 return {"ok": False, "reason": "maintenance"}
 
-            overlap = cur.execute(
-                """
-                SELECT id, status
-                FROM bookings
-                WHERE car_id=%s
-                  AND status IN ('pending','confirmed')
-                  AND start_at < %s
-                  AND end_at > %s
-                LIMIT 1
-                """,
-                (
-                    cid,
-                    check_end,
-                    check_start
-                )
-            ).fetchone()
+            overlap = find_overlap(cur, cid, start_at, end_at)
 
             print(
                 f"[CREATE_OVERLAP] car={cid} start={start_at.isoformat()} "
-                f"end={end_at.isoformat()} check_start={check_start.isoformat()} "
-                f"check_end={check_end.isoformat()} overlap={overlap!r}"
+                f"end={end_at.isoformat()} buffer_h={BUFFER_HOURS} overlap={overlap!r}"
             )
 
             if overlap:
@@ -3633,15 +3599,35 @@ def get_user_booking_sync(user_id, bid):
     finally: con.close()
 
 
-def user_cancel_booking_sync(user_id,bid):
-    con=db()
+def cancel_booking_by_user_sync(user_id, bid):
+    """
+    Отмена брони самим клиентом (общая логика бота и мини-приложения).
+
+    Возвращает (state, row): state = 'ok' | 'not_found' | 'closed'.
+    """
+    con = db()
     try:
         with con.cursor() as cur:
-            row=cur.execute("SELECT * FROM bookings WHERE id=%s AND user_id=%s FOR UPDATE",(bid,user_id)).fetchone()
-            if not row or row['status'] not in ('pending','confirmed'):
-                con.rollback(); return None
-            cur.execute("UPDATE bookings SET status='cancelled', expires_at=NULL WHERE id=%s",(bid,)); con.commit(); return row
-    finally: con.close()
+            row = cur.execute(
+                "SELECT * FROM bookings WHERE id=%s AND user_id=%s FOR UPDATE",
+                (bid, user_id)
+            ).fetchone()
+            if not row:
+                con.rollback()
+                return "not_found", None
+            if row["status"] not in ("pending", "confirmed"):
+                con.rollback()
+                return "closed", row
+            mark_booking_cancelled(cur, bid)
+        con.commit()
+        return "ok", row
+    finally:
+        con.close()
+
+
+def user_cancel_booking_sync(user_id, bid):
+    state, row = cancel_booking_by_user_sync(user_id, bid)
+    return row if state == "ok" else None
 
 
 async def mybooking_detail(callback: CallbackQuery):
@@ -3685,15 +3671,42 @@ async def user_cancel_booking(callback: CallbackQuery):
         await callback.bot.send_message(ADMIN_ID,f"🚫 <b>Клиент отменил бронирование №{bid}</b>\n\n🚗 {CARS[row['car_id']]['name']}\n👤 {row['name']}\n📞 {row['phone']}")
 
 
-def create_review_sync(bid,user_id,rating,text):
-    con=db()
+def create_review_for_user_sync(bid, user_id, rating, text):
+    """
+    Создание отзыва (общая логика бота и мини-приложения).
+
+    Возвращает 'ok' | 'not_found' | 'not_finished'.
+    """
+    con = db()
     try:
         with con.cursor() as cur:
-            row=cur.execute("SELECT * FROM bookings WHERE id=%s AND user_id=%s AND status='confirmed'",(bid,user_id)).fetchone()
-            if not row or not row['end_at'] or ensure_tz(row['end_at']) >= datetime.now(TZ): return False
-            cur.execute("""INSERT INTO reviews(booking_id,user_id,car_id,rating,review_text) VALUES(%s,%s,%s,%s,%s) ON CONFLICT(booking_id) DO NOTHING""",(bid,user_id,row['car_id'],rating,text))
-        con.commit(); return True
-    finally: con.close()
+            row = cur.execute(
+                "SELECT * FROM bookings WHERE id=%s AND user_id=%s AND status='confirmed'",
+                (bid, user_id)
+            ).fetchone()
+            if not row:
+                con.rollback()
+                return "not_found"
+            end_at = (
+                ensure_tz(row["end_at"]) if row.get("end_at")
+                else local_dt(row["end_date"], time(17, 0))
+            )
+            if end_at >= datetime.now(TZ):
+                con.rollback()
+                return "not_finished"
+            cur.execute(
+                """INSERT INTO reviews(booking_id,user_id,car_id,rating,review_text)
+                   VALUES(%s,%s,%s,%s,%s) ON CONFLICT(booking_id) DO NOTHING""",
+                (bid, user_id, row["car_id"], rating, text)
+            )
+        con.commit()
+        return "ok"
+    finally:
+        con.close()
+
+
+def create_review_sync(bid, user_id, rating, text):
+    return create_review_for_user_sync(bid, user_id, rating, text) == "ok"
 
 async def review_start(callback: CallbackQuery,state:FSMContext):
     await safe_callback_answer(callback)
@@ -3924,8 +3937,6 @@ def admin_all_calendar_text(year, month, rows):
     together. All cars remain visible in every week block, and a separate
     occupancy line makes overlaps immediately obvious.
     """
-    import calendar
-
     days = calendar.monthrange(year, month)[1]
     today = datetime.now(TZ).date()
     by_car = {cid: [] for cid in CARS}
@@ -4552,8 +4563,8 @@ def update_booking_dates_sync(bid, start_at, end_at, total=None):
     con=db()
     try:
         with con.cursor() as cur:
-            cur.execute("SELECT pg_advisory_xact_lock(hashtext('balticar-bookings'))")
-            row=cur.execute("SELECT * FROM bookings WHERE id=%s FOR UPDATE",(bid,)).fetchone()
+            lock_bookings(cur)
+            row=lock_booking_row(cur,bid)
             if not row:
                 con.rollback(); return {"ok":False,"message":"Заявка не найдена."}
             if row["status"] not in ("pending","confirmed"):
@@ -4561,24 +4572,11 @@ def update_booking_dates_sync(bid, start_at, end_at, total=None):
             if end_at <= start_at:
                 con.rollback(); return {"ok":False,"message":"Возврат должен быть позже получения."}
 
-            maintenance = cur.execute(
-                """
-                SELECT id FROM car_maintenance
-                WHERE car_id=%s AND start_at < %s AND end_at > %s
-                LIMIT 1
-                """, (row["car_id"], end_at, start_at)
-            ).fetchone()
+            maintenance = find_maintenance(cur, row["car_id"], start_at, end_at)
             if maintenance:
                 con.rollback(); return {"ok":False,"message":"❌ Новый период попадает на обслуживание автомобиля."}
 
-            buffer_delta=timedelta(hours=BUFFER_HOURS)
-            other=cur.execute("""
-                SELECT id FROM bookings
-                WHERE car_id=%s AND id<>%s
-                  AND status IN ('pending','confirmed')
-                  AND start_at < %s AND end_at > %s
-                LIMIT 1
-            """,(row["car_id"],bid,end_at+buffer_delta,start_at-buffer_delta)).fetchone()
+            other=find_overlap(cur,row["car_id"],start_at,end_at,exclude_id=bid)
             if other:
                 con.rollback(); return {"ok":False,"message":"❌ Новый период пересекается с другой арендой или техническим интервалом."}
 
@@ -4878,15 +4876,7 @@ def delete_booking_sync(bid, allowed_statuses=("cancelled", "rejected")):
 
         with con.cursor() as cur:
 
-            row = cur.execute(
-                """
-                SELECT *
-                FROM bookings
-                WHERE id=%s
-                FOR UPDATE
-                """,
-                (bid,)
-            ).fetchone()
+            row = lock_booking_row(cur, bid)
 
             if not row:
                 con.rollback()
@@ -5056,18 +5046,6 @@ async def delete_rejected_booking(callback: CallbackQuery):
 # ============================================================
 # ADMIN ALL BOOKINGS / SEARCH / FILTER
 # ============================================================
-
-def booking_short_text(row):
-    car = CARS.get(row["car_id"], {"name": row["car_id"]})
-    start_at = ensure_tz(row["start_at"])
-    end_at = ensure_tz(row["end_at"])
-    return (
-        f"№{row['id']} • {car['name']}\n"
-        f"📅 {start_at.strftime('%d.%m %H:%M')} → {end_at.strftime('%d.%m %H:%M')}\n"
-        f"👤 {row['name']} • {money(row['total'])}\n"
-        f"{status_label(row['status'])}"
-    )
-
 
 def get_all_bookings_sync(status=None, car_id=None, query=None, limit=50):
     cleanup_pending()
@@ -5327,33 +5305,11 @@ def admin_action_sync(
 
         with con.cursor() as cur:
 
-            cur.execute(
-                """
-                SELECT pg_advisory_xact_lock(
-                    hashtext('balticar-bookings')
-                )
-                """
-            )
+            lock_bookings(cur)
 
-            cur.execute(
-                """
-                UPDATE bookings
-                SET status='expired'
-                WHERE status='pending'
-                  AND expires_at IS NOT NULL
-                  AND expires_at < NOW()
-                """
-            )
+            expire_pending(cur)
 
-            row = cur.execute(
-                """
-                SELECT *
-                FROM bookings
-                WHERE id=%s
-                FOR UPDATE
-                """,
-                (bid,)
-            ).fetchone()
+            row = lock_booking_row(cur, bid)
 
             if not row:
 
@@ -5407,15 +5363,7 @@ def admin_action_sync(
 
             if action == "cancel":
 
-                cur.execute(
-                    """
-                    UPDATE bookings
-                    SET status='cancelled',
-                        expires_at=NULL
-                    WHERE id=%s
-                    """,
-                    (bid,)
-                )
+                mark_booking_cancelled(cur, bid)
 
                 con.commit()
 
@@ -5429,51 +5377,17 @@ def admin_action_sync(
 
             if action == "confirm":
 
-                maintenance = cur.execute(
-                    """
-                    SELECT id FROM car_maintenance
-                    WHERE car_id=%s AND start_at < %s AND end_at > %s
-                    LIMIT 1
-                    """, (row["car_id"], end_at, start_at)
-                ).fetchone()
+                maintenance = find_maintenance(cur, row["car_id"], start_at, end_at)
                 if maintenance:
-                    cur.execute("UPDATE bookings SET status='rejected' WHERE id=%s", (bid,))
+                    mark_booking_rejected(cur, bid)
                     con.commit()
                     return {"ok":False,"reason":"maintenance","row":row,"start_at":start_at,"end_at":end_at}
 
-                buffer_delta = timedelta(
-                    hours=BUFFER_HOURS
-                )
-
-                other = cur.execute(
-                    """
-                    SELECT id
-                    FROM bookings
-                    WHERE car_id=%s
-                      AND id<>%s
-                      AND status IN ('pending','confirmed')
-                      AND start_at < %s
-                      AND end_at > %s
-                    LIMIT 1
-                    """,
-                    (
-                        row["car_id"],
-                        bid,
-                        end_at + buffer_delta,
-                        start_at - buffer_delta
-                    )
-                ).fetchone()
+                other = find_overlap(cur, row["car_id"], start_at, end_at, exclude_id=bid)
 
                 if other:
 
-                    cur.execute(
-                        """
-                        UPDATE bookings
-                        SET status='rejected'
-                        WHERE id=%s
-                        """,
-                        (bid,)
-                    )
+                    mark_booking_rejected(cur, bid)
 
                     con.commit()
 
@@ -5507,14 +5421,7 @@ def admin_action_sync(
 
             else:
 
-                cur.execute(
-                    """
-                    UPDATE bookings
-                    SET status='rejected'
-                    WHERE id=%s
-                    """,
-                    (bid,)
-                )
+                mark_booking_rejected(cur, bid)
 
                 con.commit()
 
@@ -5827,9 +5734,9 @@ async def reminder_loop(bot):
                 start_at=ensure_tz(row['start_at'])
                 delta=start_at-now
                 if delta <= timedelta(hours=2):
-                    kind='2'; text=(f"⏰ <b>Напоминание о бронировании №{row['id']}</b>\n\n🚗 {CARS[row['car_id']]['name']}\n📅 Получение: <b>{format_date_time(start_at)}</b>\n↩️ Возврат: <b>{format_date_time(row['end_at'])}</b>\n\nДо начала аренды осталось около 2 часов.")
+                    kind='2'; text=(f"⏰ <b>Напоминание о бронировании №{row['id']}</b>\n\n🚗 {CARS.get(row['car_id'],{}).get('name',row['car_id'])}\n📅 Получение: <b>{format_date_time(start_at)}</b>\n↩️ Возврат: <b>{format_date_time(row['end_at'])}</b>\n\nДо начала аренды осталось около 2 часов.")
                 elif delta <= timedelta(hours=24):
-                    kind='24'; text=(f"🔔 <b>Напоминание о бронировании №{row['id']}</b>\n\n🚗 {CARS[row['car_id']]['name']}\n📅 Получение: <b>{format_date_time(start_at)}</b>\n↩️ Возврат: <b>{format_date_time(row['end_at'])}</b>\n💰 {money(row['total'])}\n\nДо начала аренды менее 24 часов.")
+                    kind='24'; text=(f"🔔 <b>Напоминание о бронировании №{row['id']}</b>\n\n🚗 {CARS.get(row['car_id'],{}).get('name',row['car_id'])}\n📅 Получение: <b>{format_date_time(start_at)}</b>\n↩️ Возврат: <b>{format_date_time(row['end_at'])}</b>\n💰 {money(row['total'])}\n\nДо начала аренды менее 24 часов.")
                 else: continue
                 try:
                     await bot.send_message(row['user_id'],text,reply_markup=main_keyboard())
@@ -5925,7 +5832,7 @@ async def main():
 
     dp = Dispatcher()
 
-    asyncio.create_task(reminder_loop(bot))
+    spawn_task(reminder_loop(bot))
 
     # ========================================================
     # COMMANDS
@@ -5975,19 +5882,16 @@ async def main():
         F.data.startswith("pick:")
     )
 
+    # month: и backstart: обрабатываются одним хендлером
+    # (формат callback_data одинаковый: <prefix>:<car_id>:<YYYY-MM-DD>).
     dp.callback_query.register(
         month,
-        F.data.startswith("month:")
+        F.data.startswith(("month:", "backstart:"))
     )
 
     dp.callback_query.register(
         start_day,
         F.data.startswith("day:")
-    )
-
-    dp.callback_query.register(
-        backstart,
-        F.data.startswith("backstart:")
     )
 
     dp.callback_query.register(
@@ -6285,11 +6189,15 @@ async def main():
         request: web.Request
     ):
 
-        if (
-            WEBHOOK_SECRET
-            and request.headers.get(
-                "X-Telegram-Bot-Api-Secret-Token"
-            ) != WEBHOOK_SECRET
+        # Сравниваем с тем секретом, который реально передан в set_webhook
+        # (если WEBHOOK_SECRET не задан, это случайный секрет на время работы).
+        received_secret = request.headers.get(
+            "X-Telegram-Bot-Api-Secret-Token", ""
+        )
+
+        if not hmac.compare_digest(
+            received_secret.encode("utf-8"),
+            secret.encode("utf-8")
         ):
 
             raise web.HTTPForbidden(
@@ -6297,8 +6205,6 @@ async def main():
             )
 
         data = await request.json()
-
-        from aiogram.types import Update
 
         update = Update.model_validate(
             data,
@@ -6337,7 +6243,7 @@ async def main():
                     f"duration={monotonic_time.monotonic() - started:.3f}s"
                 )
 
-        asyncio.create_task(
+        spawn_task(
             process_update()
         )
 
@@ -6402,10 +6308,6 @@ async def main():
 # ============================================================
 # TELEGRAM MINI APP / WEB APP
 # ============================================================
-import hashlib
-import hmac
-import json
-from urllib.parse import parse_qsl
 
 WEBAPP_DIR = Path(__file__).resolve().parent / "webapp"
 MINI_BOT = None
@@ -6428,6 +6330,10 @@ def mini_validate_init_data(init_data: str):
         pairs = dict(parse_qsl(init_data, keep_blank_values=True))
         received_hash = pairs.pop("hash", "")
         if not received_hash:
+            return None
+        # Свежесть подписи: старые initData (утёкшие из логов/истории) не принимаем.
+        auth_date = int(pairs.get("auth_date", "0") or 0)
+        if auth_date <= 0 or abs(monotonic_time.time() - auth_date) > INIT_DATA_MAX_AGE:
             return None
         data_check = "\n".join(f"{k}={pairs[k]}" for k in sorted(pairs))
         secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
@@ -6484,7 +6390,6 @@ def mini_slots_sync(car_id, year, month, start_at=None):
     if car_id not in active_cars():
         return {"mode":"start", "slots":{}}
     slots={}
-    import calendar
     days=calendar.monthrange(year, month)[1]
     now=datetime.now(TZ)
     start_dt=mini_parse_local_iso(start_at) if start_at else None
@@ -6535,13 +6440,12 @@ def mini_create_booking_sync(user_id, cid, start_at, end_at, name, phone, commen
     con=db()
     try:
         with con.cursor() as cur:
-            cur.execute("SELECT pg_advisory_xact_lock(hashtext('balticar-bookings'))")
-            cur.execute("UPDATE bookings SET status='expired' WHERE status='pending' AND expires_at IS NOT NULL AND expires_at < NOW()")
-            buffer_delta=timedelta(hours=BUFFER_HOURS)
-            maintenance=cur.execute("SELECT id FROM car_maintenance WHERE car_id=%s AND start_at < %s AND end_at > %s LIMIT 1",(cid,end_at,start_at)).fetchone()
+            lock_bookings(cur)
+            expire_pending(cur)
+            maintenance=find_maintenance(cur,cid,start_at,end_at)
             if maintenance:
                 con.rollback(); return {"ok":False,"reason":"maintenance"}
-            overlap=cur.execute("""SELECT id FROM bookings WHERE car_id=%s AND status IN ('pending','confirmed') AND start_at < %s AND end_at > %s LIMIT 1""",(cid,end_at+buffer_delta,start_at-buffer_delta)).fetchone()
+            overlap=find_overlap(cur,cid,start_at,end_at)
             if overlap:
                 con.rollback(); return {"ok":False,"reason":"overlap"}
             expires=datetime.now(TZ)+timedelta(minutes=HOLD_MINUTES)
@@ -6592,7 +6496,8 @@ async def mini_photo(request):
     return web.FileResponse(p)
 
 async def mini_cars(request):
-    return mini_json({"cars":mini_car_payload()})
+    cars=await asyncio.to_thread(mini_car_payload)
+    return mini_json({"cars":cars})
 
 
 def mini_calendar_payload_sync(car_id, year, month):
@@ -6638,26 +6543,30 @@ async def mini_slots(request):
         cid=request.query.get("car_id","")
         year=int(request.query.get("year")); month=int(request.query.get("month"))
         start_at=request.query.get("start_at")
-        return mini_json(mini_slots_sync(cid,year,month,start_at))
+        return mini_json(await asyncio.to_thread(mini_slots_sync,cid,year,month,start_at))
     except Exception as exc:
         print(f"[MINI/SLOTS] {type(exc).__name__}: {exc}")
         return mini_json({"message":"Не удалось загрузить доступное время."},500)
 
-async def mini_mybookings(request):
-    uid=mini_auth_or_401(request)
-    mini_add_location_columns()
+def mini_mybookings_sync(uid):
     con=db()
     try:
         with con.cursor() as cur:
             rows=cur.execute("""SELECT b.*, COALESCE(r.id,0) AS review_id FROM bookings b LEFT JOIN reviews r ON r.booking_id=b.id WHERE b.user_id=%s ORDER BY b.id DESC LIMIT 20""",(uid,)).fetchall()
-        out=[]
-        now=datetime.now(TZ)
-        for r in rows:
-            sa=ensure_tz(r.get("start_at")) if r.get("start_at") else local_dt(r["start_date"],time(10,0))
-            ea=ensure_tz(r.get("end_at")) if r.get("end_at") else local_dt(r["end_date"],time(17,0))
-            out.append({"id":r["id"],"status":r["status"],"car_name":CARS.get(r["car_id"],{}).get("name",r["car_id"]),"car_id":r["car_id"],"start_at":sa.strftime("%d.%m.%Y · %H:%M"),"end_at":ea.strftime("%d.%m.%Y · %H:%M"),"total":r["total"],"past":ea < now,"reviewed":bool(r.get("review_id")),"comment":r.get("comment") or "","pickup_location":r.get("pickup_location") or "","pickup_location_type":r.get("pickup_location_type") or "","pickup_location_note":r.get("pickup_location_note") or "","pickup_location_fee":r.get("pickup_location_fee")})
-        return mini_json({"bookings":out})
-    finally: con.close()
+    finally:
+        con.close()
+    out=[]
+    now=datetime.now(TZ)
+    for r in rows:
+        sa=ensure_tz(r.get("start_at")) if r.get("start_at") else local_dt(r["start_date"],time(10,0))
+        ea=ensure_tz(r.get("end_at")) if r.get("end_at") else local_dt(r["end_date"],time(17,0))
+        out.append({"id":r["id"],"status":r["status"],"car_name":CARS.get(r["car_id"],{}).get("name",r["car_id"]),"car_id":r["car_id"],"start_at":sa.strftime("%d.%m.%Y · %H:%M"),"end_at":ea.strftime("%d.%m.%Y · %H:%M"),"total":r["total"],"past":ea < now,"reviewed":bool(r.get("review_id")),"comment":r.get("comment") or "","pickup_location":r.get("pickup_location") or "","pickup_location_type":r.get("pickup_location_type") or "","pickup_location_note":r.get("pickup_location_note") or "","pickup_location_fee":r.get("pickup_location_fee")})
+    return out
+
+async def mini_mybookings(request):
+    uid=mini_auth_or_401(request)
+    out=await asyncio.to_thread(mini_mybookings_sync,uid)
+    return mini_json({"bookings":out})
 
 async def mini_bookings(request):
     print(f"[MINI/BOOKING] REQUEST /api/bookings init_data={'yes' if request.headers.get('X-Telegram-Init-Data') else 'NO'}", flush=True)
@@ -6672,7 +6581,7 @@ async def mini_bookings(request):
         cid=str(data.get("car_id","")).strip(); comment=str(data.get("comment","")).strip()
         location_type=str(data.get("pickup_location_type",data.get("location_type","airport"))).strip()
         location_note=str(data.get("pickup_location_note",data.get("location_note",""))).strip()
-        result=mini_create_booking_sync(uid,cid,str(data.get("start_at")),str(data.get("end_at")),name,phone,comment,location_type,location_note)
+        result=await asyncio.to_thread(mini_create_booking_sync,uid,cid,str(data.get("start_at")),str(data.get("end_at")),name,phone,comment,location_type,location_note)
         if not result["ok"]:
             print(f"[MINI/BOOKING] REJECTED reason={result.get('reason')}", flush=True)
             messages={"car":"Автомобиль недоступен.","period":"Проверьте даты и время.","past":"Выбранное время уже прошло.","time":"Выдача и возврат доступны с 08:00 до 20:00.","location":"Выберите место подачи.","location_note":"Укажите адрес или комментарий для другого места.","maintenance":"Автомобиль недоступен в выбранный период.","overlap":"Эти даты или время уже заняты. Выберите другой вариант."}
@@ -6724,12 +6633,11 @@ async def mini_bookings(request):
                     ]]
                 },
             }
-            from aiohttp import ClientSession
             async with ClientSession() as session:
                 async with session.post(
                     f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
                     json=payload,
-                    timeout=15,
+                    timeout=ClientTimeout(total=15),
                 ) as resp:
                     body=await resp.text()
                     print(f"[MINI/ADMIN_NOTIFY] TELEGRAM_HTTP status={resp.status} body={body[:1500]}", flush=True)
@@ -6745,37 +6653,46 @@ async def mini_bookings(request):
 
 async def mini_cancel_booking(request):
     uid=mini_auth_or_401(request)
-    data=await request.json(); bid=int(data.get("id",0))
-    con=db()
     try:
-        with con.cursor() as cur:
-            row=cur.execute("SELECT * FROM bookings WHERE id=%s AND user_id=%s FOR UPDATE",(bid,uid)).fetchone()
-            if not row: con.rollback(); return mini_json({"message":"Бронирование не найдено."},404)
-            if row["status"] not in ("pending","confirmed"): con.rollback(); return mini_json({"message":"Это бронирование уже обработано."},409)
-            cur.execute("UPDATE bookings SET status='cancelled', expires_at=NULL WHERE id=%s",(bid,))
-        con.commit(); return mini_json({"ok":True})
-    finally: con.close()
+        data=await request.json()
+        bid=int(data.get("id",0))
+    except (ValueError,TypeError,AttributeError):
+        return mini_json({"message":"Некорректный запрос."},400)
+    state,_=await asyncio.to_thread(cancel_booking_by_user_sync,uid,bid)
+    if state=="not_found":
+        return mini_json({"message":"Бронирование не найдено."},404)
+    if state=="closed":
+        return mini_json({"message":"Это бронирование уже обработано."},409)
+    return mini_json({"ok":True})
 
-async def mini_reviews_get(request):
+def mini_reviews_get_sync():
     con=db()
     try:
         with con.cursor() as cur:
             rows=cur.execute("""SELECT r.id,r.booking_id,r.rating,r.review_text AS text,r.created_at,b.name,c.car_id FROM reviews r JOIN bookings b ON b.id=r.booking_id JOIN car_settings c ON c.car_id=r.car_id ORDER BY r.created_at DESC LIMIT 30""").fetchall()
-        return mini_json({"reviews":[{"id":r["id"],"booking_id":r["booking_id"],"rating":r["rating"],"text":r.get("text") or "","name":r.get("name") or "Клиент","car_name":CARS.get(r["car_id"],{}).get("name",r["car_id"]),"created_at":ensure_tz(r["created_at"]).strftime("%d.%m.%Y")} for r in rows]})
-    finally: con.close()
+        return [{"id":r["id"],"booking_id":r["booking_id"],"rating":r["rating"],"text":r.get("text") or "","name":r.get("name") or "Клиент","car_name":CARS.get(r["car_id"],{}).get("name",r["car_id"]),"created_at":ensure_tz(r["created_at"]).strftime("%d.%m.%Y")} for r in rows]
+    finally:
+        con.close()
+
+async def mini_reviews_get(request):
+    reviews=await asyncio.to_thread(mini_reviews_get_sync)
+    return mini_json({"reviews":reviews})
 
 async def mini_reviews_post(request):
-    uid=mini_auth_or_401(request); data=await request.json(); bid=int(data.get("booking_id",0)); rating=max(1,min(5,int(data.get("rating",5)))); text=str(data.get("text","")).strip()
-    con=db()
+    uid=mini_auth_or_401(request)
     try:
-        with con.cursor() as cur:
-            row=cur.execute("SELECT * FROM bookings WHERE id=%s AND user_id=%s AND status='confirmed'",(bid,uid)).fetchone()
-            if not row: con.rollback(); return mini_json({"message":"Отзыв доступен после подтверждённой аренды."},409)
-            end_at=ensure_tz(row["end_at"]) if row.get("end_at") else local_dt(row["end_date"],time(17,0))
-            if end_at >= datetime.now(TZ): con.rollback(); return mini_json({"message":"Оставить отзыв можно после завершения аренды."},409)
-            cur.execute("INSERT INTO reviews(booking_id,user_id,car_id,rating,review_text) VALUES(%s,%s,%s,%s,%s) ON CONFLICT(booking_id) DO NOTHING",(bid,uid,row["car_id"],rating,text))
-        con.commit(); return mini_json({"ok":True})
-    finally: con.close()
+        data=await request.json()
+        bid=int(data.get("booking_id",0))
+        rating=max(1,min(5,int(data.get("rating",5))))
+        text=str(data.get("text","")).strip()[:1000]
+    except (ValueError,TypeError,AttributeError):
+        return mini_json({"message":"Некорректный запрос."},400)
+    state=await asyncio.to_thread(create_review_for_user_sync,bid,uid,rating,text)
+    if state=="not_found":
+        return mini_json({"message":"Отзыв доступен после подтверждённой аренды."},409)
+    if state=="not_finished":
+        return mini_json({"message":"Оставить отзыв можно после завершения аренды."},409)
+    return mini_json({"ok":True})
 
 
 def admin_web_auth_or_403(request):
@@ -6926,8 +6843,7 @@ async def admin_calendar_api(request):
         return mini_json({'message':f'Не удалось загрузить календарь: {type(exc).__name__}'}, 500)
 
 
-async def admin_bookings_api(request):
-    admin_web_auth_or_403(request)
+def admin_bookings_sync():
     con = db()
     try:
         with con.cursor() as cur:
@@ -6935,22 +6851,27 @@ async def admin_bookings_api(request):
                 SELECT id, car_id, status, name, phone, start_at, end_at, total, created_at
                 FROM bookings ORDER BY id ASC LIMIT 200
             """).fetchall()
-        out=[]
-        for r in rows:
-            sa=ensure_tz(r['start_at']) if r.get('start_at') else None
-            ea=ensure_tz(r['end_at']) if r.get('end_at') else None
-            out.append({'id':r['id'],'car_id':r['car_id'],'car_name':CARS.get(r['car_id'],{}).get('name',r['car_id']),
-                        'status':r['status'],'status_label':status_label(r['status']),
-                        'name':r.get('name') or '','phone':r.get('phone') or '',
-                        'start_label':sa.strftime('%d.%m.%Y %H:%M') if sa else '',
-                        'end_label':ea.strftime('%d.%m.%Y %H:%M') if ea else '',
-                        'start_ms':int(sa.timestamp()*1000) if sa else 0,
-                        'end_ms':int(ea.timestamp()*1000) if ea else 0,
-                        'pickup':r.get('pickup_location') or '',
-                        'total':r.get('total') or 0})
-        return mini_json({'bookings':out,'fleet_count':len(active_cars())})
     finally:
         con.close()
+    out=[]
+    for r in rows:
+        sa=ensure_tz(r['start_at']) if r.get('start_at') else None
+        ea=ensure_tz(r['end_at']) if r.get('end_at') else None
+        out.append({'id':r['id'],'car_id':r['car_id'],'car_name':CARS.get(r['car_id'],{}).get('name',r['car_id']),
+                    'status':r['status'],'status_label':status_label(r['status']),
+                    'name':r.get('name') or '','phone':r.get('phone') or '',
+                    'start_label':sa.strftime('%d.%m.%Y %H:%M') if sa else '',
+                    'end_label':ea.strftime('%d.%m.%Y %H:%M') if ea else '',
+                    'start_ms':int(sa.timestamp()*1000) if sa else 0,
+                    'end_ms':int(ea.timestamp()*1000) if ea else 0,
+                    'pickup':r.get('pickup_location') or '',
+                    'total':r.get('total') or 0})
+    return out
+
+async def admin_bookings_api(request):
+    admin_web_auth_or_403(request)
+    out=await asyncio.to_thread(admin_bookings_sync)
+    return mini_json({'bookings':out,'fleet_count':len(active_cars())})
 
 
 def _finance_date(value, default):
@@ -7187,8 +7108,7 @@ async def admin_expense_delete_api(request):
         print(f"[ADMIN/EXPENSE] DELETE FAILED: {type(exc).__name__}: {exc!r}",flush=True)
         return mini_json({'message':'Не удалось удалить расход.'},400)
 
-async def admin_reviews_api(request):
-    admin_web_auth_or_403(request)
+def admin_reviews_web_sync():
     con = db()
     try:
         with con.cursor() as cur:
@@ -7198,16 +7118,21 @@ async def admin_reviews_api(request):
                 FROM reviews r LEFT JOIN bookings b ON b.id=r.booking_id
                 ORDER BY r.created_at DESC LIMIT 200
             """).fetchall()
-        reviews=[]
-        for r in rows:
-            reviews.append({'id':r['id'],'booking_id':r['booking_id'],'rating':r['rating'],
-                            'text':r.get('review_text') or '','name':r.get('name') or 'Клиент',
-                            'car_name':CARS.get(r.get('car_id'),{}).get('name',r.get('car_id') or 'Автомобиль'),
-                            'created_at':ensure_tz(r['created_at']).strftime('%d.%m.%Y %H:%M') if r.get('created_at') else ''})
-        avg=round(sum(float(x['rating']) for x in reviews)/len(reviews),1) if reviews else None
-        return mini_json({'reviews':reviews,'average':avg})
     finally:
         con.close()
+    reviews=[]
+    for r in rows:
+        reviews.append({'id':r['id'],'booking_id':r['booking_id'],'rating':r['rating'],
+                        'text':r.get('review_text') or '','name':r.get('name') or 'Клиент',
+                        'car_name':CARS.get(r.get('car_id'),{}).get('name',r.get('car_id') or 'Автомобиль'),
+                        'created_at':ensure_tz(r['created_at']).strftime('%d.%m.%Y %H:%M') if r.get('created_at') else ''})
+    return reviews
+
+async def admin_reviews_api(request):
+    admin_web_auth_or_403(request)
+    reviews=await asyncio.to_thread(admin_reviews_web_sync)
+    avg=round(sum(float(x['rating']) for x in reviews)/len(reviews),1) if reviews else None
+    return mini_json({'reviews':reviews,'average':avg})
 
 
 async def mini_app_routes(app):
