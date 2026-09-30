@@ -72,13 +72,13 @@ function renderBookingList(){
   const filtered=bookingsCache.filter(b=>bookingStatusMatch(b)&&bookingSearchMatch(b));
   const list=filtered.length?filtered.map(b=>`<div class="item bookingItem">
     <div class="bookingMain"><div><b>№${b.id} · ${esc(b.car_name)}</b><div class="muted">${esc(b.name||'Клиент')} · ${esc(b.phone||'')}</div></div><span class="status ${esc(b.status)}">${esc(b.status_label)}</span></div>
-    <div class="bookingMeta"><div>📅 ${esc(b.start_label)} → ${esc(b.end_label)}</div><div>💰 <b>${Number(b.total||0).toLocaleString('ru-RU')} ₽</b></div>${b.pickup?`<div>📍 ${esc(b.pickup)}</div>`:''}</div>
+    <div class="bookingMeta"><div>📅 ${esc(b.start_label)} → ${esc(b.end_label)}</div><div>💰 <b>${Number(b.total||0).toLocaleString('ru-RU')} ₽</b></div>${b.pickup?`<div>📍 ${esc(b.pickup)}</div>`:''}${b.payment_label||b.payment_method?`<div>💳 ${esc(b.payment_label||b.payment_method)}</div>`:''}</div>
     <div class="bookingActions"><button class="miniBtn" onclick="showBookingFromList(${Number(b.id)})">Подробнее</button></div>
   </div>`).join(''):`<div class="emptyFiltered">По выбранным условиям бронирований не найдено.</div>`;
   $('bookingList').innerHTML=list;
   document.querySelectorAll('.filters button').forEach(btn=>btn.classList.toggle('active',btn.dataset.filter===bookingFilter));
 }
-function showBookingFromList(id){const b=bookingsCache.find(x=>Number(x.id)===Number(id));if(!b)return;const box=document.getElementById('bookingDetail');box.innerHTML=`<div class="detail"><button class="close" onclick="this.parentElement.innerHTML=''">×</button><h3>Бронирование №${b.id}</h3><div><b>${esc(b.car_name)}</b> · <span class="status ${esc(b.status)}">${esc(b.status_label)}</span></div><div class="muted">👤 ${esc(b.name||'Клиент')} · 📞 ${esc(b.phone||'')}</div><div class="muted">📅 ${esc(b.start_label)} → ${esc(b.end_label)}</div>${b.pickup?`<div class="muted">📍 ${esc(b.pickup)}</div>`:''}<div class="muted">💰 ${Number(b.total||0).toLocaleString('ru-RU')} ₽</div></div>`;box.scrollIntoView({behavior:'smooth',block:'nearest'})}
+function showBookingFromList(id){const b=bookingsCache.find(x=>Number(x.id)===Number(id));if(!b)return;const box=document.getElementById('bookingDetail');box.innerHTML=`<div class="detail"><button class="close" onclick="this.parentElement.innerHTML=''">×</button><h3>Бронирование №${b.id}</h3><div><b>${esc(b.car_name)}</b> · <span class="status ${esc(b.status)}">${esc(b.status_label)}</span></div><div class="muted">👤 ${esc(b.name||'Клиент')} · 📞 ${esc(b.phone||'')}</div><div class="muted">📅 ${esc(b.start_label)} → ${esc(b.end_label)}</div>${b.pickup?`<div class="muted">📍 ${esc(b.pickup)}</div>`:''}${b.payment_label||b.payment_method?`<div class="muted">💳 ${esc(b.payment_label||b.payment_method)}</div>`:''}<div class="muted">💰 ${Number(b.total||0).toLocaleString('ru-RU')} ₽</div></div>`;box.scrollIntoView({behavior:'smooth',block:'nearest'})}
 function setBookingFilter(f){bookingFilter=f;renderBookingList()}
 function setBookingSearch(v){bookingSearch=v;renderBookingList()}
 function drawBookingStats(){
