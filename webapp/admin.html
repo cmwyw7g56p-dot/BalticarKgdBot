@@ -61,7 +61,12 @@ for(const car of d.cars){html+=`<div class="carRow"><div class="carLabel">🚗 $
 function moveMonth(n){cursor.setMonth(cursor.getMonth()+n);renderCalendar(viewToken)}
 function showBooking(id){const b=(currentData.bookings||[]).find(x=>Number(x.id)===Number(id));if(!b)return;const el=document.getElementById('detail');el.innerHTML=`<div class="detail"><button class="close" onclick="this.parentElement.innerHTML=''">×</button><h3>Бронирование №${b.id}</h3><div><b>${esc(b.car_name)}</b> · <span class="status ${esc(b.status)}">${b.status==='confirmed'?'подтверждено':b.status==='pending'?'ожидает':b.status==='maintenance'?'обслуживание':b.status}</span></div>${b.name?`<div class="muted">👤 ${esc(b.name)} · 📞 ${esc(b.phone||'')}</div>`:''}<div class="muted">📅 ${esc(b.start_label)} → ${esc(b.end_label)}</div>${b.pickup?`<div class="muted">📍 ${esc(b.pickup)}</div>`:''}${b.total!=null?`<div class="muted">💰 ${Number(b.total).toLocaleString('ru-RU')} ₽</div>`:''}</div>`;el.scrollIntoView({behavior:'smooth',block:'nearest'})}
 let bookingsCache=[];let bookingFilter='all';let bookingSearch='';
-function bookingStatusMatch(b){return bookingFilter==='all'||b.status===bookingFilter}
+function bookingStatusMatch(b){
+  if(bookingFilter==='all')return true;
+  if(bookingFilter==='rejected')return b.status==='rejected'||b.status==='cancelled';
+  if(bookingFilter==='completed')return b.status==='completed';
+  return b.status===bookingFilter;
+}
 function bookingSearchMatch(b){const q=bookingSearch.trim().toLowerCase();if(!q)return true;return [b.id,b.car_name,b.name,b.phone,b.start_label,b.end_label].some(v=>String(v??'').toLowerCase().includes(q))}
 function renderBookingList(){
   const filtered=bookingsCache.filter(b=>bookingStatusMatch(b)&&bookingSearchMatch(b));
@@ -95,7 +100,7 @@ async function renderBookings(token=viewToken){
     bookingsCache=d.bookings||[]; bookingFilter='all'; bookingSearch='';
     // The endpoint includes enough information for the dashboard; fleet count is supplied with the response when available.
     window.__fleetCount=Number(d.fleet_count||0);
-    $('content').innerHTML=`<div class="stats" id="stats"></div><div class="panel"><div class="panelHead"><div><h1>Бронирования</h1><div class="muted">${bookingsCache.length} последних заявок · порядок по номеру</div></div></div><div class="bookingTools"><input class="search" placeholder="🔎 Имя, телефон, № заявки или автомобиль" oninput="setBookingSearch(this.value)"><div class="filters"><button data-filter="all" onclick="setBookingFilter('all')">Все</button><button data-filter="pending" onclick="setBookingFilter('pending')">🟡 Новые</button><button data-filter="confirmed" onclick="setBookingFilter('confirmed')">🔵 Подтверждены</button><button data-filter="completed" onclick="setBookingFilter('completed')">🟢 Завершены</button><button data-filter="rejected" onclick="setBookingFilter('rejected')">🔴 Отменены</button></div></div><div class="list" id="bookingList"></div><div id="bookingDetail"></div></div>`;
+    $('content').innerHTML=`<div class="stats" id="stats"></div><div class="panel"><div class="panelHead"><div><h1>Бронирования</h1><div class="muted">${bookingsCache.length} последних заявок · порядок по номеру</div></div></div><div class="bookingTools"><input class="search" placeholder="🔎 Имя, телефон, № заявки или автомобиль" oninput="setBookingSearch(this.value)"><div class="filters"><button data-filter="all" onclick="setBookingFilter('all')">Все</button><button data-filter="pending" onclick="setBookingFilter('pending')">🟡 Новые</button><button data-filter="confirmed" onclick="setBookingFilter('confirmed')">🔵 Подтверждены</button><button data-filter="completed" onclick="setBookingFilter('completed')">🟢 Завершены</button><button data-filter="rejected" onclick="setBookingFilter('rejected')">🔴 Отменены/отклонены</button></div></div><div class="list" id="bookingList"></div><div id="bookingDetail"></div></div>`;
     drawBookingStats(); renderBookingList();
   }catch(e){if(token!==viewToken||tab!=='bookings')return;$('content').innerHTML=`<div class="panel"><div class="empty">${esc(e.message)}</div></div>`}
 }
