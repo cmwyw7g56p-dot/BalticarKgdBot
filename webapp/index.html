@@ -197,9 +197,9 @@ html.dark .carPrice .label,html.dark .carPrice small,html.dark .locMain span,htm
 
 /* Clean home: the hero photo contains no text or overlays. */
 .homePremium{margin:6px 0 14px;border-radius:24px;overflow:hidden;background:var(--surface);border:1px solid var(--line);box-shadow:0 12px 32px rgba(16,32,48,.08)}
-.homePhoto{height:235px;background:#dce5eb;position:relative;overflow:hidden}
+.homePhoto{height:280px;background:#dce5eb;position:relative;overflow:hidden}
 .homePhoto img{width:100%;height:100%;object-fit:cover;display:block}
-.homePhotoShade,.homePhotoTop{display:none}
+.homePhotoShade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(4,12,18,.46) 0%,rgba(4,12,18,.08) 42%,rgba(4,12,18,.30) 100%);pointer-events:none}.heroBrand{position:absolute;z-index:2;left:18px;top:17px;color:#fff;text-shadow:0 2px 14px rgba(0,0,0,.35)}.heroBrand b{display:block;font-size:24px;line-height:1;font-weight:950;letter-spacing:.20em}.heroBrand span{display:block;margin-top:7px;font-size:9px;font-weight:850;letter-spacing:.20em;opacity:.9}.homePhotoTop{display:none}
 .homePanel{padding:20px 17px 17px}
 .homePanel .eyebrow{margin-bottom:7px}
 .homePanel h1{color:var(--text);font-size:34px;line-height:1.03;letter-spacing:-.035em;margin:0 0 9px;font-weight:900}
@@ -492,9 +492,11 @@ function renderHome(){
   $('home').innerHTML=`<section class="homePremium">
     <div class="homePhoto">
       <img src="/photos/balticar_hero.jpg" alt="BALTICAR — аренда автомобилей">
+      <div class="homePhotoShade"></div>
+      <div class="heroBrand"><b>BALTICAR</b><span>КАЛИНИНГРАД</span></div>
     </div>
     <div class="homePanel">
-      <div class="eyebrow">BALTICAR · КАЛИНИНГРАД</div>
+      <div class="eyebrow">АРЕНДА АВТОМОБИЛЕЙ</div>
       <h1>Свобода<br>в каждом маршруте.</h1>
       <p>Аренда автомобилей в Калининграде и области. Выберите автомобиль и даты — заявку оформим за несколько минут.</p>
       <button class="homeMainCta" onclick="openCars()"><span>Выбрать автомобиль</span><b>→</b></button>
