@@ -30,6 +30,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
+    MenuButtonWebApp,
     Update,
     WebAppInfo,
 )
@@ -1137,16 +1138,39 @@ def status_label(status):
 # ============================================================
 
 def main_keyboard():
-    # Клиентский /start ведёт только в Mini App. Старое inline-меню
-    # больше не показываем, чтобы не дублировать навигацию Mini App.
+    # Основная кнопка всегда открывает свежий Mini App.
+    # Отдельно при старте бота устанавливается постоянная кнопка меню Telegram.
     return InlineKeyboardMarkup(
-        inline_keyboard=[[
-            InlineKeyboardButton(
-                text="🚗 Открыть BALTICAR Mini App",
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🚗 Открыть BALTICAR Mini App",
+                    web_app=WebAppInfo(url=MINIAPP_URL),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📋 Мои бронирования",
+                    callback_data="mybookings"
+                )
+            ],
+        ]
+    )
+
+
+async def configure_client_menu(bot: Bot):
+    """Постоянная кнопка Mini App в меню чата Telegram."""
+    try:
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(
+                text="🚗 BALTICAR",
                 web_app=WebAppInfo(url=MINIAPP_URL),
             )
-        ]]
-    )
+        )
+        print(f"[TELEGRAM] Mini App menu button configured: {MINIAPP_URL}")
+    except Exception as exc:
+        # Не блокируем запуск бота, если Telegram временно не принял настройку меню.
+        print(f"[TELEGRAM] Failed to configure Mini App menu button: {type(exc).__name__}: {exc}")
 
 
 def welcome_text():
@@ -5701,8 +5725,28 @@ async def report_result(callback:CallbackQuery):
 # REMINDERS
 # ============================================================
 
+def complete_past_bookings_sync():
+    """confirmed с прошедшим end_at -> completed."""
+    con=db()
+    try:
+        with con.cursor() as cur:
+            cur.execute("""
+                UPDATE bookings
+                SET status='completed'
+                WHERE status='confirmed'
+                  AND end_at IS NOT NULL
+                  AND end_at < NOW()
+            """)
+            n = cur.rowcount
+        con.commit()
+        return n
+    finally:
+        con.close()
+
+
 def reminder_candidates_sync():
     cleanup_pending()
+    complete_past_bookings_sync()
     con=db()
     try:
         with con.cursor() as cur:
@@ -5830,6 +5874,10 @@ async def main():
         )
     )
     MINI_BOT = bot
+
+    # Постоянная кнопка BALTICAR в меню Telegram.
+    # Клиент сможет открыть Mini App повторно даже после закрытия старого окна.
+    await configure_client_menu(bot)
 
     dp = Dispatcher()
 
@@ -6328,6 +6376,12 @@ PAYMENT_METHODS = {
     "bank": "🏦 Безналичный перевод",
 }
 
+EXTRA_SERVICES = {
+    "child_seat": ("👶 Детское кресло", None),
+    "second_driver": ("👤 Второй водитель", None),
+    "full_tank": ("⛽ Полный бак при выдаче", None),
+}
+
 
 def mini_validate_init_data(init_data: str):
     """Validate Telegram WebApp initData and return user id when available."""
@@ -6432,7 +6486,7 @@ def mini_slots_sync(car_id, year, month, start_at=None):
     return {"mode":"end" if start_dt else "start", "slots":slots}
 
 
-def mini_create_booking_sync(user_id, cid, start_at, end_at, name, phone, comment, location_type, location_note, payment_method="cash"):
+def mini_create_booking_sync(user_id, cid, start_at, end_at, name, phone, comment, location_type, location_note, payment_method="cash", extras=None, terms_accepted=False):
     start_at=mini_parse_local_iso(start_at)
     end_at=mini_parse_local_iso(end_at)
     name = (name or "").strip()
@@ -6458,6 +6512,20 @@ def mini_create_booking_sync(user_id, cid, start_at, end_at, name, phone, commen
     payment_method = (payment_method or "cash").strip().lower()
     if payment_method not in PAYMENT_METHODS:
         return {"ok":False,"reason":"payment"}
+    if not terms_accepted:
+        return {"ok":False,"reason":"terms"}
+    extras_list = []
+    if extras:
+        if isinstance(extras, str):
+            try:
+                extras = json.loads(extras)
+            except Exception:
+                extras = []
+        for key in extras:
+            key = str(key).strip()
+            if key in EXTRA_SERVICES:
+                extras_list.append(key)
+    extras_json = json.dumps(extras_list, ensure_ascii=False)
     days=rental_days(start_at,end_at)
     daily=rate_for_days(cid,days)
     rental_total=days*daily
@@ -6474,12 +6542,13 @@ def mini_create_booking_sync(user_id, cid, start_at, end_at, name, phone, commen
             if overlap:
                 con.rollback(); return {"ok":False,"reason":"overlap"}
             expires=datetime.now(TZ)+timedelta(minutes=HOLD_MINUTES)
-            cur.execute("""INSERT INTO bookings (user_id,username,car_id,start_date,end_date,start_at,end_at,name,phone,comment,total,status,created_at,expires_at,pickup_location,pickup_location_type,pickup_location_note,pickup_location_fee,payment_method) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending',%s,%s,%s,%s,%s,%s,%s) RETURNING id""",(
+            cur.execute("""INSERT INTO bookings (user_id,username,car_id,start_date,end_date,start_at,end_at,name,phone,comment,total,status,created_at,expires_at,pickup_location,pickup_location_type,pickup_location_note,pickup_location_fee,payment_method,extras,terms_accepted) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending',%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",(
                 user_id,"",cid,start_at.date(),end_at.date(),start_at,end_at,name,phone,comment,rental_total,datetime.now(TZ),expires,
-                LOCATION_TYPES[location_type][0],location_type,location_note or "",location_fee,payment_method))
+                LOCATION_TYPES[location_type][0],location_type,location_note or "",location_fee,payment_method,extras_json,bool(terms_accepted)))
             bid=cur.fetchone()["id"]
         con.commit()
-        return {"ok":True,"bid":bid,"days":days,"total":rental_total,"rental_total":rental_total,"location_fee":location_fee,"location":LOCATION_TYPES[location_type][0],"payment_method":payment_method,"payment_label":PAYMENT_METHODS[payment_method],"expires":expires.isoformat()}
+        extras_labels = [EXTRA_SERVICES[k][0] for k in extras_list]
+        return {"ok":True,"bid":bid,"days":days,"total":rental_total,"rental_total":rental_total,"location_fee":location_fee,"location":LOCATION_TYPES[location_type][0],"payment_method":payment_method,"payment_label":PAYMENT_METHODS[payment_method],"extras":extras_list,"extras_labels":extras_labels,"expires":expires.isoformat()}
     except Exception:
         con.rollback(); raise
     finally:
@@ -6496,6 +6565,8 @@ def mini_add_location_columns():
                 "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_location_note TEXT",
                 "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_location_fee INTEGER",
                 "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_method TEXT",
+                "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS extras TEXT",
+                "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS terms_accepted BOOLEAN DEFAULT FALSE",
             ]:
                 cur.execute(sql)
         con.commit()
@@ -6586,7 +6657,16 @@ def mini_mybookings_sync(uid):
     for r in rows:
         sa=ensure_tz(r.get("start_at")) if r.get("start_at") else local_dt(r["start_date"],time(10,0))
         ea=ensure_tz(r.get("end_at")) if r.get("end_at") else local_dt(r["end_date"],time(17,0))
-        pm=r.get("payment_method") or ""; out.append({"id":r["id"],"status":r["status"],"car_name":CARS.get(r["car_id"],{}).get("name",r["car_id"]),"car_id":r["car_id"],"start_at":sa.strftime("%d.%m.%Y · %H:%M"),"end_at":ea.strftime("%d.%m.%Y · %H:%M"),"total":r["total"],"past":ea < now,"reviewed":bool(r.get("review_id")),"comment":r.get("comment") or "","pickup_location":r.get("pickup_location") or "","pickup_location_type":r.get("pickup_location_type") or "","pickup_location_note":r.get("pickup_location_note") or "","pickup_location_fee":r.get("pickup_location_fee"),"payment_method":pm,"payment_label":PAYMENT_METHODS.get(pm, pm)})
+        pm=r.get("payment_method") or ""
+        raw_ex=r.get("extras") or "[]"
+        try:
+            ex_list=json.loads(raw_ex) if isinstance(raw_ex,str) else (raw_ex or [])
+        except Exception:
+            ex_list=[]
+        if not isinstance(ex_list, list):
+            ex_list=[]
+        ex_labels=[EXTRA_SERVICES[k][0] for k in ex_list if k in EXTRA_SERVICES]
+        out.append({"id":r["id"],"status":r["status"],"car_name":CARS.get(r["car_id"],{}).get("name",r["car_id"]),"car_id":r["car_id"],"start_at":sa.strftime("%d.%m.%Y · %H:%M"),"end_at":ea.strftime("%d.%m.%Y · %H:%M"),"total":r["total"],"past":ea < now,"reviewed":bool(r.get("review_id")),"comment":r.get("comment") or "","pickup_location":r.get("pickup_location") or "","pickup_location_type":r.get("pickup_location_type") or "","pickup_location_note":r.get("pickup_location_note") or "","pickup_location_fee":r.get("pickup_location_fee"),"payment_method":pm,"payment_label":PAYMENT_METHODS.get(pm, pm),"extras":ex_list,"extras_labels":ex_labels})
     return out
 
 async def mini_mybookings(request):
@@ -6608,10 +6688,12 @@ async def mini_bookings(request):
         location_type=str(data.get("pickup_location_type",data.get("location_type","airport"))).strip()
         location_note=str(data.get("pickup_location_note",data.get("location_note",""))).strip()
         payment_method=str(data.get("payment_method","cash")).strip().lower()
-        result=await asyncio.to_thread(mini_create_booking_sync,uid,cid,str(data.get("start_at")),str(data.get("end_at")),name,phone,comment,location_type,location_note,payment_method)
+        extras=data.get("extras") or []
+        terms_accepted=bool(data.get("terms_accepted"))
+        result=await asyncio.to_thread(mini_create_booking_sync,uid,cid,str(data.get("start_at")),str(data.get("end_at")),name,phone,comment,location_type,location_note,payment_method,extras,terms_accepted)
         if not result["ok"]:
             print(f"[MINI/BOOKING] REJECTED reason={result.get('reason')}", flush=True)
-            messages={"car":"Автомобиль недоступен.","period":"Проверьте даты и время.","past":"Выбранное время уже прошло.","time":"Выдача и возврат доступны с 08:00 до 20:00.","location":"Выберите место подачи.","location_note":"Укажите адрес или комментарий для другого места.","maintenance":"Автомобиль недоступен в выбранный период.","overlap":"Эти даты или время уже заняты. Выберите другой вариант.","contact":"Введите имя и корректный телефон (не менее 10 цифр).","payment":"Выберите способ оплаты."}
+            messages={"car":"Автомобиль недоступен.","period":"Проверьте даты и время.","past":"Выбранное время уже прошло.","time":"Выдача и возврат доступны с 08:00 до 20:00.","location":"Выберите место подачи.","location_note":"Укажите адрес или комментарий для другого места.","maintenance":"Автомобиль недоступен в выбранный период.","overlap":"Эти даты или время уже заняты. Выберите другой вариант.","contact":"Введите имя и корректный телефон (не менее 10 цифр).","payment":"Выберите способ оплаты.","terms":"Подтвердите согласие с условиями аренды."}
             return mini_json({"message":messages.get(result["reason"],"Не удалось создать заявку.")},409)
         print(f"[MINI/BOOKING] CREATED bid={result['bid']} car={cid} uid={uid}", flush=True)
         # V15: уведомление напрямую через Telegram Bot API.
@@ -6629,6 +6711,9 @@ async def mini_bookings(request):
             if location_note:
                 loc_line += f"\n📝 {escape_html(location_note)}"
             pay_label = result.get("payment_label") or PAYMENT_METHODS.get(result.get("payment_method"), "—")
+            extras_line = ""
+            if result.get("extras_labels"):
+                extras_line = "\n✨ " + ", ".join(escape_html(x) for x in result["extras_labels"])
             admin_text=(
                 f"📥 <b>Новая заявка из Mini App №{result['bid']}</b>\n\n"
                 f"🚗 <b>{escape_html(CARS[cid]['name'])}</b>\n"
@@ -6637,7 +6722,8 @@ async def mini_bookings(request):
                 f"📅 {mini_parse_local_iso(str(data.get('start_at'))).strftime('%d.%m.%Y %H:%M')} → "
                 f"{mini_parse_local_iso(str(data.get('end_at'))).strftime('%d.%m.%Y %H:%M')}\n"
                 f"{loc_line}\n"
-                f"💳 Оплата: <b>{escape_html(pay_label)}</b>\n"
+                f"💳 Оплата: <b>{escape_html(pay_label)}</b>"
+                f"{extras_line}\n"
                 f"💰 Аренда: <b>{money(result['rental_total'])}</b>\n"
                 f"🔐 Залог: <b>{money(DEPOSIT_AMOUNT)}</b>"
             )
@@ -6675,7 +6761,7 @@ async def mini_bookings(request):
             print(f"[MINI/ADMIN_NOTIFY] SENT bid={result['bid']} admin={ADMIN_ID}", flush=True)
         except Exception as exc:
             print(f"[MINI/ADMIN_NOTIFY] FAILED bid={result.get('bid')}: {type(exc).__name__}: {exc!r}", flush=True)
-        return mini_json({"id":result["bid"],"days":result["days"],"total":result["total"],"location_fee":result["location_fee"],"location":result["location"],"payment_method":result.get("payment_method"),"payment_label":result.get("payment_label"),"expires":result["expires"]})
+        return mini_json({"id":result["bid"],"days":result["days"],"total":result["total"],"location_fee":result["location_fee"],"location":result["location"],"payment_method":result.get("payment_method"),"payment_label":result.get("payment_label"),"extras":result.get("extras"),"extras_labels":result.get("extras_labels"),"expires":result["expires"]})
     except Exception as exc:
         print(f"[MINI/BOOKING] {type(exc).__name__}: {exc}", flush=True)
         return mini_json({"message":"Не удалось отправить заявку. Попробуйте ещё раз."},500)
@@ -6889,6 +6975,17 @@ async def admin_calendar_api(request):
         return mini_json({'message':f'Не удалось загрузить календарь: {type(exc).__name__}'}, 500)
 
 
+def _parse_extras_labels(raw):
+    try:
+        if isinstance(raw, str):
+            raw = json.loads(raw or "[]")
+        if not isinstance(raw, list):
+            return []
+        return [EXTRA_SERVICES[k][0] for k in raw if k in EXTRA_SERVICES]
+    except Exception:
+        return []
+
+
 def admin_bookings_sync():
     con = db()
     try:
@@ -6896,7 +6993,7 @@ def admin_bookings_sync():
             rows = cur.execute("""
                 SELECT id, car_id, status, name, phone, start_at, end_at, total, created_at,
                        pickup_location, pickup_location_type, pickup_location_note, pickup_location_fee,
-                       payment_method
+                       payment_method, extras
                 FROM bookings ORDER BY id DESC LIMIT 200
             """).fetchall()
     finally:
@@ -6920,6 +7017,8 @@ def admin_bookings_sync():
                     'pickup':r.get('pickup_location') or '',
                     'payment_method':r.get('payment_method') or '',
                     'payment_label':PAYMENT_METHODS.get(r.get('payment_method') or '', r.get('payment_method') or ''),
+                    'extras_labels':_parse_extras_labels(r.get('extras')),
+                    'pickup_location_fee': r.get('pickup_location_fee'),
                     'total':r.get('total') or 0})
     return out
 
@@ -7190,12 +7289,148 @@ async def admin_reviews_api(request):
     return mini_json({'reviews':reviews,'average':avg})
 
 
+
+# ============================================================
+# PROFILE + ADMIN WEB ACTIONS
+# ============================================================
+
+def mini_profile_sync(uid):
+    """Последние имя/телефон клиента для автозаполнения формы."""
+    con = db()
+    try:
+        with con.cursor() as cur:
+            row = cur.execute(
+                """
+                SELECT name, phone FROM bookings
+                WHERE user_id=%s AND name IS NOT NULL AND phone IS NOT NULL
+                ORDER BY id DESC LIMIT 1
+                """,
+                (uid,),
+            ).fetchone()
+        if not row:
+            return {"name": "", "phone": ""}
+        return {"name": row.get("name") or "", "phone": row.get("phone") or ""}
+    finally:
+        con.close()
+
+
+async def mini_profile(request):
+    uid = mini_auth_or_401(request)
+    data = await asyncio.to_thread(mini_profile_sync, uid)
+    return mini_json(data)
+
+
+def admin_set_fee_sync(bid, fee):
+    con = db()
+    try:
+        with con.cursor() as cur:
+            lock_bookings(cur)
+            row = lock_booking_row(cur, bid)
+            if not row:
+                con.rollback()
+                return {"ok": False, "reason": "not_found"}
+            if fee is None:
+                cur.execute(
+                    "UPDATE bookings SET pickup_location_fee=NULL WHERE id=%s",
+                    (bid,),
+                )
+            else:
+                fee = int(fee)
+                if fee < 0:
+                    con.rollback()
+                    return {"ok": False, "reason": "invalid"}
+                cur.execute(
+                    "UPDATE bookings SET pickup_location_fee=%s WHERE id=%s",
+                    (fee, bid),
+                )
+        con.commit()
+        return {"ok": True, "id": bid, "fee": fee}
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+
+
+async def admin_booking_action_api(request):
+    """Подтвердить / отклонить / отменить бронь из веб-админки."""
+    admin_web_auth_or_403(request)
+    try:
+        data = await request.json()
+        bid = int(data.get("id", 0))
+        action = str(data.get("action", "")).strip().lower()
+        if action not in ("confirm", "reject", "cancel") or bid <= 0:
+            return mini_json({"message": "Некорректный запрос."}, 400)
+        result = await asyncio.to_thread(admin_action_sync, action, bid)
+        if not result.get("ok"):
+            reason = result.get("reason")
+            messages = {
+                "not_found": "Заявка не найдена.",
+                "already_processed": f"Заявка уже обработана ({result.get('status')}).",
+                "overlap": "Пересечение с другой бронью — заявка отклонена.",
+                "maintenance": "Период обслуживания — заявка отклонена.",
+            }
+            return mini_json({"message": messages.get(reason, "Не удалось выполнить действие.")}, 409)
+        row = result["row"]
+        try:
+            if result["action"] == "confirm":
+                text = (
+                    f"✅ <b>Бронирование №{bid} подтверждено</b>\n\n"
+                    f"🚗 {escape_html(CARS.get(row['car_id'], {}).get('name', row['car_id']))}\n"
+                    f"📅 {format_date_time(result['start_at'])} → {format_date_time(result['end_at'])}\n"
+                    f"💰 {money(row.get('total') or 0)}\n\n"
+                    "Менеджер свяжется с вами по деталям выдачи."
+                )
+            elif result["action"] == "cancel":
+                text = (
+                    f"⚫ <b>Бронирование №{bid} отменено</b>\n\n"
+                    "Если нужна новая дата — оформите заявку в Mini App."
+                )
+            else:
+                text = (
+                    f"❌ <b>Заявка №{bid} отклонена</b>\n\n"
+                    "Выберите другие даты или свяжитесь с менеджером."
+                )
+            async with ClientSession() as session:
+                await session.post(
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                    json={"chat_id": row["user_id"], "text": text, "parse_mode": "HTML"},
+                    timeout=ClientTimeout(total=15),
+                )
+        except Exception as exc:
+            print(f"[ADMIN/WEB/ACTION] notify failed: {type(exc).__name__}: {exc}", flush=True)
+        return mini_json({"ok": True, "action": result["action"], "id": bid})
+    except Exception as exc:
+        print(f"[ADMIN/WEB/ACTION] {type(exc).__name__}: {exc!r}", flush=True)
+        return mini_json({"message": "Ошибка сервера."}, 500)
+
+
+async def admin_booking_fee_api(request):
+    admin_web_auth_or_403(request)
+    try:
+        data = await request.json()
+        bid = int(data.get("id", 0))
+        fee_raw = data.get("fee", None)
+        fee = None if fee_raw is None or fee_raw == "" else int(fee_raw)
+        if bid <= 0:
+            return mini_json({"message": "Некорректный id."}, 400)
+        result = await asyncio.to_thread(admin_set_fee_sync, bid, fee)
+        if not result.get("ok"):
+            return mini_json({"message": "Не удалось сохранить стоимость подачи."}, 409)
+        return mini_json(result)
+    except Exception as exc:
+        print(f"[ADMIN/WEB/FEE] {type(exc).__name__}: {exc!r}", flush=True)
+        return mini_json({"message": "Ошибка сервера."}, 500)
+
+
 async def mini_app_routes(app):
     mini_add_location_columns()
     app.router.add_get("/app", mini_app)
     app.router.add_get("/admin", admin_web_page)
     app.router.add_get("/api/admin/calendar", admin_calendar_api)
     app.router.add_get("/api/admin/bookings", admin_bookings_api)
+    app.router.add_post("/api/admin/booking/action", admin_booking_action_api)
+    app.router.add_post("/api/admin/booking/fee", admin_booking_fee_api)
     app.router.add_get("/api/admin/finance", admin_finance_api)
     app.router.add_get("/api/admin/expenses", admin_expenses_api)
     app.router.add_post("/api/admin/expenses", admin_expenses_api)
@@ -7206,6 +7441,7 @@ async def mini_app_routes(app):
     app.router.add_get("/api/availability", mini_availability)
     app.router.add_get("/api/slots", mini_slots)
     app.router.add_get("/api/mybookings", mini_mybookings)
+    app.router.add_get("/api/profile", mini_profile)
     app.router.add_post("/api/bookings", mini_bookings)
     app.router.add_post("/api/bookings/cancel", mini_cancel_booking)
     app.router.add_get("/api/reviews", mini_reviews_get)
