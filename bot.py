@@ -104,7 +104,7 @@ INIT_DATA_MAX_AGE = int(
 
 _RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
 MINIAPP_URL = (_RENDER_URL + "/app") if _RENDER_URL else "https://balticarkgdbot.onrender.com/app"
-ADMIN_WEBAPP_URL = (_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin"
+ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=46"
 
 
 # ============================================================
@@ -6841,7 +6841,7 @@ async def admin_web_page(request):
     p = WEBAPP_DIR / "admin.html"
     if not p.is_file():
         raise web.HTTPNotFound(text="Admin app not found")
-    return web.FileResponse(p)
+    return web.FileResponse(p, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache"})
 
 
 def admin_calendar_payload_sync(year, month):
