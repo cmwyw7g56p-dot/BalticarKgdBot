@@ -1154,7 +1154,30 @@ def main_keyboard():
 
 
 async def configure_client_menu(bot: Bot):
-    """Постоянная кнопка Mini App в меню чата Telegram."""
+    """Настройка стартового экрана бота и постоянной кнопки Mini App в меню чата Telegram.
+
+    Описание и краткое описание отображаются на экране «Что умеет этот бот?»
+    до нажатия кнопки «Старт» (как в стандартном интерфейсе Telegram).
+    """
+    # Полное описание бота (до 512 символов) — экран «Что умеет этот бот?»
+    bot_description = (
+        "Официальный бот аренды автомобилей BALTICAR в Калининграде.\n\n"
+        "Каталог автомобилей, наличие в реальном времени, "
+        "онлайн-бронирование и связь с менеджером."
+    )
+    # Краткое описание (до 120 символов) — отображается в списке чатов / поиске
+    bot_short_description = (
+        "Аренда автомобилей в Калининграде. "
+        "Каталог, свободные даты, онлайн-бронирование."
+    )
+
+    try:
+        await bot.set_my_description(description=bot_description)
+        await bot.set_my_short_description(short_description=bot_short_description)
+        print("[TELEGRAM] Bot description and short description set")
+    except Exception as exc:
+        print(f"[TELEGRAM] Failed to set bot description: {type(exc).__name__}: {exc}")
+
     try:
         await bot.set_chat_menu_button(
             menu_button=MenuButtonWebApp(
