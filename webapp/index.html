@@ -20,7 +20,7 @@
   window.__BALTICAR_BOOT_OK=false;
   window.__BALTICAR_REOPEN=function(){
     var base=location.pathname||'/app';
-    location.replace(base+'?v=49&reopen='+Date.now());
+    location.replace(base+'?v=50&reopen='+Date.now());
   };
   window.__BALTICAR_HIDE_BOOT=function(){
     window.__BALTICAR_BOOT_OK=true;
@@ -55,12 +55,14 @@ html.dark{
   --shadow:0 16px 40px rgba(0,0,0,.24);
 }
 *{box-sizing:border-box}
-html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
-body{background:linear-gradient(180deg,var(--bg) 0,var(--bg) 100%)}
+html,body{margin:0;min-height:100%;min-height:100dvh;height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+body{background:linear-gradient(180deg,var(--bg) 0,var(--bg) 100%);overflow-x:hidden}
 button,input,textarea{font:inherit;color:inherit}
 button{border:0;cursor:pointer}
-#app{max-width:760px;margin:auto;padding:env(safe-area-inset-top) 14px calc(28px + env(safe-area-inset-bottom))}
+/* safe-area: системный + Telegram (--tg-*) в fullscreen */
+#app{max-width:760px;margin:auto;min-height:100%;padding:max(env(safe-area-inset-top,0px),var(--tg-safe-area-inset-top,0px),var(--tg-content-safe-area-inset-top,0px)) 14px calc(28px + max(env(safe-area-inset-bottom,0px),var(--tg-safe-area-inset-bottom,0px)))}
 .top{height:58px;display:grid;grid-template-columns:44px 1fr 44px;align-items:center;position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 90%,transparent);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+html.tg-fullscreen #app{min-height:100dvh}
 .brand{text-align:center;font-size:17px;font-weight:900;letter-spacing:.12em}
 .topbtn{width:40px;height:40px;border-radius:13px;background:var(--surface);border:1px solid var(--line);box-shadow:0 4px 14px rgba(0,0,0,.05);font-size:22px}
 .screen{display:none}.screen.active{display:block;animation:fadeUp .22s ease}
@@ -429,8 +431,16 @@ window.BALTICAR_applyTheme=function(){
   const scheme=window.Telegram?.WebApp?.colorScheme || (window.matchMedia?.('(prefers-color-scheme: light)').matches?'light':'dark');
   document.documentElement.classList.toggle('light',scheme==='light');
   document.documentElement.classList.toggle('dark',scheme!=='light');
+  const bg=scheme==='light'?'#f5f7fa':'#07111b';
   const meta=document.querySelector('meta[name="theme-color"]');
-  if(meta)meta.content=scheme==='light'?'#f5f7fa':'#07111b';
+  if(meta)meta.content=bg;
+  // Цвета шапки/фона Telegram = фон приложения, верхняя полоска визуально сливается
+  try{
+    const tw=window.Telegram?.WebApp;
+    if(!tw)return;
+    if(typeof tw.setHeaderColor==='function')tw.setHeaderColor(bg);
+    if(typeof tw.setBackgroundColor==='function')tw.setBackgroundColor(bg);
+  }catch(e){}
 };
 try{
   Telegram?.WebApp?.onEvent?.('themeChanged',window.BALTICAR_applyTheme);
@@ -466,11 +476,31 @@ window.BALTICAR_applyTheme();
 
 <script>
 const tg=window.Telegram?.WebApp;
+function setupFullscreen(){
+  // Максимально «как страница»: expand + requestFullscreen (Bot API 8.0+).
+  // На старых клиентах остаётся expand — шапка Telegram может остаться.
+  try{
+    if(!tg)return;
+    tg.ready();
+    tg.expand();
+    if(typeof tg.disableVerticalSwipes==='function')tg.disableVerticalSwipes();
+    if(typeof tg.requestFullscreen==='function'){
+      try{tg.requestFullscreen()}catch(e){}
+    }
+    // Повтор через кадр — часть клиентов принимает fullscreen только после ready/expand
+    requestAnimationFrame(()=>{
+      try{
+        tg.expand();
+        if(typeof tg.requestFullscreen==='function' && !tg.isFullscreen)tg.requestFullscreen();
+      }catch(e){}
+    });
+  }catch(e){}
+}
 function reopenMiniApp(){
-  try{tg?.ready();tg?.expand()}catch(e){}
+  setupFullscreen();
   if(window.__BALTICAR_REOPEN){window.__BALTICAR_REOPEN();return;}
   const base=location.pathname||'/app';
-  location.replace(base+'?v=48&reopen='+Date.now());
+  location.replace(base+'?v=50&reopen='+Date.now());
 }
 function closeMiniApp(){try{tg?.close()}catch(e){}}
 function showFatalError(message){
@@ -480,8 +510,12 @@ function showFatalError(message){
   if(text&&message)text.textContent='Приложение загрузилось с ошибкой. '+String(message).slice(0,160);
   box.style.display='flex';
 }
-function refreshTelegramWebApp(){try{tg?.ready();tg?.expand()}catch(e){}}
+function refreshTelegramWebApp(){setupFullscreen();try{window.BALTICAR_applyTheme?.()}catch(e){}}
 refreshTelegramWebApp();
+try{
+  tg?.onEvent?.('fullscreenChanged',()=>{document.documentElement.classList.toggle('tg-fullscreen',!!tg?.isFullscreen)});
+  tg?.onEvent?.('fullscreenFailed',()=>{/* клиент не поддерживает — остаётся expand */});
+}catch(e){}
 window.addEventListener('pageshow',e=>{
   refreshTelegramWebApp();
   if(e.persisted)setTimeout(()=>reopenMiniApp(),50);
