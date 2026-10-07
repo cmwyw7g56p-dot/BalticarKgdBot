@@ -20,7 +20,7 @@
   window.__BALTICAR_BOOT_OK=false;
   window.__BALTICAR_REOPEN=function(){
     var base=location.pathname||'/app';
-    location.replace(base+'?v=48&reopen='+Date.now());
+    location.replace(base+'?v=49&reopen='+Date.now());
   };
   window.__BALTICAR_HIDE_BOOT=function(){
     window.__BALTICAR_BOOT_OK=true;
@@ -441,7 +441,7 @@ window.BALTICAR_applyTheme();
 </script>
 </head>
 <body>
-<div id="bootOverlay"><div class="bootBox"><div class="bootLogo">BALTICAR</div><div class="bootText">Загрузка Mini App…</div><button id="bootRetry" class="bootRetry" type="button" onclick="window.__BALTICAR_REOPEN()">↻ Открыть заново</button></div></div>
+<div id="bootOverlay"><div class="bootBox"><div class="bootLogo">BALTICAR</div><div class="bootText">Загрузка Mini App…<br><span style="font-size:12px;opacity:.75">Если сервис просыпался после простоя — подождите 30–60 сек</span></div><button id="bootRetry" class="bootRetry" type="button" onclick="window.__BALTICAR_REOPEN()">↻ Открыть заново</button></div></div>
 <div id="app">
   <header class="top">
     <button class="topbtn" id="backBtn" onclick="goBack()">‹</button>
