@@ -104,7 +104,7 @@ INIT_DATA_MAX_AGE = int(
 
 _RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
 MINIAPP_BASE_URL = (_RENDER_URL + "/app") if _RENDER_URL else "https://balticarkgdbot.onrender.com/app"
-MINIAPP_URL = MINIAPP_BASE_URL + "?v=49"
+MINIAPP_URL = MINIAPP_BASE_URL + "?v=50"
 ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=46"
 
 
