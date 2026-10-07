@@ -103,7 +103,8 @@ INIT_DATA_MAX_AGE = int(
 )
 
 _RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
-MINIAPP_URL = (_RENDER_URL + "/app") if _RENDER_URL else "https://balticarkgdbot.onrender.com/app"
+MINIAPP_BASE_URL = (_RENDER_URL + "/app") if _RENDER_URL else "https://balticarkgdbot.onrender.com/app"
+MINIAPP_URL = MINIAPP_BASE_URL + "?v=47"
 ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=46"
 
 
@@ -1138,22 +1139,16 @@ def status_label(status):
 # ============================================================
 
 def main_keyboard():
-    # Основная кнопка всегда открывает свежий Mini App.
-    # Отдельно при старте бота устанавливается постоянная кнопка меню Telegram.
+    # Минимальное стартовое меню: одна кнопка открывает Mini App.
+    # Доступ к Mini App также постоянно есть в меню чата Telegram.
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🚗 Открыть BALTICAR Mini App",
+                    text="🚗 Открыть BALTICAR",
                     web_app=WebAppInfo(url=MINIAPP_URL),
                 )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="📋 Мои бронирования",
-                    callback_data="mybookings"
-                )
-            ],
+            ]
         ]
     )
 
@@ -6583,7 +6578,14 @@ def mini_auth_or_401(request):
 async def mini_app(request):
     if not WEBAPP_DIR.exists():
         raise web.HTTPNotFound(text="Mini App not found")
-    return web.FileResponse(WEBAPP_DIR / "index.html")
+    return web.FileResponse(
+        WEBAPP_DIR / "index.html",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 async def mini_photo(request):
     name=request.match_info.get("name","")
