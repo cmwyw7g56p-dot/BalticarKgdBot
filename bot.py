@@ -104,7 +104,7 @@ INIT_DATA_MAX_AGE = int(
 
 _RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
 MINIAPP_BASE_URL = (_RENDER_URL + "/app") if _RENDER_URL else "https://balticarkgdbot.onrender.com/app"
-MINIAPP_URL = MINIAPP_BASE_URL + "?v=48"
+MINIAPP_URL = MINIAPP_BASE_URL + "?v=49"
 ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=46"
 
 
@@ -5810,6 +5810,38 @@ async def reminder_loop(bot):
             print(f"[REMINDER LOOP] ERROR={type(exc).__name__}: {exc}")
         await asyncio.sleep(300)
 
+
+async def keepalive_loop():
+    """Периодический HTTP-пинг публичного /health, чтобы free-тариф Render
+    реже засыпал из-за отсутствия входящего трафика.
+
+    Полностью надёжно сон предотвращает только внешний мониторинг
+    (UptimeRobot / cron-job.org) раз в 5–10 минут.
+    """
+    base = (_RENDER_URL or "").strip().rstrip("/")
+    if not base:
+        print("[KEEPALIVE] RENDER_EXTERNAL_URL не задан — пинг отключён")
+        return
+
+    url = f"{base}/health"
+    # Интервал меньше типичного idle timeout Render free (~15 мин).
+    interval = int(os.getenv("KEEPALIVE_INTERVAL_SECONDS", "480"))  # 8 мин
+    print(f"[KEEPALIVE] started → {url} every {interval}s")
+
+    # Небольшая пауза после старта, чтобы сервер успел поднять порты.
+    await asyncio.sleep(30)
+
+    while True:
+        try:
+            timeout = ClientTimeout(total=20)
+            async with ClientSession(timeout=timeout) as session:
+                async with session.get(url) as resp:
+                    print(f"[KEEPALIVE] {url} → {resp.status}")
+        except Exception as exc:
+            print(f"[KEEPALIVE] ERROR={type(exc).__name__}: {exc}")
+        await asyncio.sleep(interval)
+
+
 # ============================================================
 # PUBLISH
 # ============================================================
@@ -5900,6 +5932,7 @@ async def main():
     dp = Dispatcher()
 
     spawn_task(reminder_loop(bot))
+    spawn_task(keepalive_loop())
 
     # ========================================================
     # COMMANDS
