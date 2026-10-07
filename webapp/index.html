@@ -7,6 +7,43 @@
 <title>BALTICAR — аренда автомобилей</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
+#bootOverlay{position:fixed;inset:0;z-index:100000;background:#f5f7fa;color:#13202b;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif}
+#bootOverlay .bootBox{width:min(360px,100%)}
+#bootOverlay .bootLogo{font-size:28px;font-weight:950;letter-spacing:.12em}
+#bootOverlay .bootText{margin-top:10px;color:#6f7f8d;font-size:14px;line-height:1.45}
+#bootOverlay .bootRetry{display:none;width:100%;margin-top:18px;padding:15px 16px;border:0;border-radius:16px;background:#1677e8;color:#fff;font-size:15px;font-weight:900}
+#bootOverlay.ready{display:none}
+</style>
+<script>
+(function(){
+  var hiddenAt=0;
+  window.__BALTICAR_BOOT_OK=false;
+  window.__BALTICAR_REOPEN=function(){
+    var base=location.pathname||'/app';
+    location.replace(base+'?v=47&reopen='+Date.now());
+  };
+  window.__BALTICAR_HIDE_BOOT=function(){
+    window.__BALTICAR_BOOT_OK=true;
+    var el=document.getElementById('bootOverlay');
+    if(el)el.classList.add('ready');
+  };
+  setTimeout(function(){
+    if(window.__BALTICAR_BOOT_OK)return;
+    var el=document.getElementById('bootOverlay');
+    var btn=document.getElementById('bootRetry');
+    if(el)el.style.display='flex';
+    if(btn)btn.style.display='block';
+  },10000);
+  document.addEventListener('visibilitychange',function(){
+    if(document.visibilityState==='hidden'){hiddenAt=Date.now();return;}
+    if(hiddenAt && Date.now()-hiddenAt>90000){
+      hiddenAt=0;
+      setTimeout(window.__BALTICAR_REOPEN,80);
+    }
+  });
+})();
+</script>
+<style>
 :root{
   --bg:#f5f7fa; --surface:#fff; --surface2:#eef2f6; --text:#13202b; --muted:#6f7f8d;
   --line:#dfe6ec; --blue:#1677e8; --blue-dark:#0d5fc4; --green:#1aa866; --amber:#d98a00;
@@ -404,7 +441,7 @@ window.BALTICAR_applyTheme();
 </script>
 </head>
 <body>
-
+<div id="bootOverlay"><div class="bootBox"><div class="bootLogo">BALTICAR</div><div class="bootText">Загрузка Mini App…</div><button id="bootRetry" class="bootRetry" type="button" onclick="window.__BALTICAR_REOPEN()">↻ Открыть заново</button></div></div>
 <div id="app">
   <header class="top">
     <button class="topbtn" id="backBtn" onclick="goBack()">‹</button>
@@ -431,8 +468,9 @@ window.BALTICAR_applyTheme();
 const tg=window.Telegram?.WebApp;
 function reopenMiniApp(){
   try{tg?.ready();tg?.expand()}catch(e){}
+  if(window.__BALTICAR_REOPEN){window.__BALTICAR_REOPEN();return;}
   const base=location.pathname||'/app';
-  location.replace(base+'?reopen='+Date.now());
+  location.replace(base+'?v=47&reopen='+Date.now());
 }
 function closeMiniApp(){try{tg?.close()}catch(e){}}
 function showFatalError(message){
@@ -448,7 +486,9 @@ window.addEventListener('pageshow',e=>{
   refreshTelegramWebApp();
   if(e.persisted)setTimeout(()=>reopenMiniApp(),50);
 });
-window.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')refreshTelegramWebApp()});
+window.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible')refreshTelegramWebApp();
+});
 window.addEventListener('error',e=>showFatalError(e?.error?.message||e?.message||'Неизвестная ошибка'));
 window.addEventListener('unhandledrejection',e=>showFatalError(e?.reason?.message||e?.reason||'Ошибка загрузки'));
 const $=id=>document.getElementById(id);
@@ -482,7 +522,6 @@ function renderHome(){
     </div>
   </section>
   <section class="homeShortcuts">
-    <button class="homeBooking" onclick="openBookings()"><span class="shortcutIcon">📋</span><span><b>Мои бронирования</b><small>Статус, даты и детали</small></span><strong>›</strong></button>
     <button class="homeReview" onclick="openReviews()"><span class="reviewIcon">⭐</span><span><b>Отзывы клиентов</b><small>Что говорят о BALTICAR</small></span><span class="arrow">›</span></button>
     <button class="homeContact" onclick="openContact()">💬 Связаться с менеджером</button>
   </section>
@@ -570,7 +609,7 @@ async function submitReview(id){
   }catch(e){toast(e.message)}
 }
 function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
-renderHome();$('backBtn').style.visibility='hidden';try{loadProfile()}catch(e){}
+renderHome();$('backBtn').style.visibility='hidden';window.__BALTICAR_HIDE_BOOT?.();try{loadProfile()}catch(e){}
 </script>
 <div id="fatalOverlay" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(5,12,18,.97);color:#fff;padding:28px 20px;align-items:center;justify-content:center;text-align:center;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif"><div style="width:min(360px,100%)"><div style="font-size:30px;font-weight:900;letter-spacing:.08em">BALTICAR</div><div style="margin-top:10px;font-size:17px;font-weight:800">Не удалось открыть Mini App</div><div id="fatalText" style="margin-top:9px;color:#b8c3cc;font-size:13px;line-height:1.5">Попробуйте открыть приложение заново.</div><button type="button" onclick="reopenMiniApp()" style="width:100%;margin-top:20px;padding:15px;border:0;border-radius:15px;background:#fff;color:#111;font-size:15px;font-weight:850">↻ Открыть заново</button><button type="button" onclick="closeMiniApp()" style="width:100%;margin-top:9px;padding:13px;border:1px solid rgba(255,255,255,.18);border-radius:15px;background:transparent;color:#fff;font-size:14px;font-weight:750">Закрыть</button></div></div>
 </body>
