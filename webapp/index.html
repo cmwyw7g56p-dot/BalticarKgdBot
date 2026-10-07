@@ -20,7 +20,7 @@
   window.__BALTICAR_BOOT_OK=false;
   window.__BALTICAR_REOPEN=function(){
     var base=location.pathname||'/app';
-    location.replace(base+'?v=47&reopen='+Date.now());
+    location.replace(base+'?v=48&reopen='+Date.now());
   };
   window.__BALTICAR_HIDE_BOOT=function(){
     window.__BALTICAR_BOOT_OK=true;
@@ -470,7 +470,7 @@ function reopenMiniApp(){
   try{tg?.ready();tg?.expand()}catch(e){}
   if(window.__BALTICAR_REOPEN){window.__BALTICAR_REOPEN();return;}
   const base=location.pathname||'/app';
-  location.replace(base+'?v=47&reopen='+Date.now());
+  location.replace(base+'?v=48&reopen='+Date.now());
 }
 function closeMiniApp(){try{tg?.close()}catch(e){}}
 function showFatalError(message){
@@ -522,6 +522,7 @@ function renderHome(){
     </div>
   </section>
   <section class="homeShortcuts">
+    <button class="homeReview" onclick="openBookings()"><span class="reviewIcon">📋</span><span><b>Мои бронирования</b><small>Личный кабинет · заявки и брони</small></span><span class="arrow">›</span></button>
     <button class="homeReview" onclick="openReviews()"><span class="reviewIcon">⭐</span><span><b>Отзывы клиентов</b><small>Что говорят о BALTICAR</small></span><span class="arrow">›</span></button>
     <button class="homeContact" onclick="openContact()">💬 Связаться с менеджером</button>
   </section>
