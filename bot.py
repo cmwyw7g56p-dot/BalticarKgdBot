@@ -105,7 +105,7 @@ INIT_DATA_MAX_AGE = int(
 _RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
 MINIAPP_BASE_URL = (_RENDER_URL + "/app") if _RENDER_URL else "https://balticarkgdbot.onrender.com/app"
 MINIAPP_URL = MINIAPP_BASE_URL + "?v=50"
-ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=51"
+ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=52"
 
 
 # ============================================================
@@ -6920,7 +6920,7 @@ def admin_calendar_payload_sync(year, month):
             booking_rows = cur.execute("""
                 SELECT id, car_id, status, start_at, end_at
                 FROM bookings
-                WHERE status IN ('pending','confirmed')
+                WHERE status IN ('pending','confirmed','completed')
                   AND start_at < %s AND end_at > %s
                 ORDER BY car_id, start_at, id
             """, (month_end, month_start)).fetchall()
@@ -7127,11 +7127,13 @@ def admin_finance_sync(start_day, end_day):
                 """, (start_day, end_day)
             ).fetchall()
 
-        confirmed = [r for r in rows if r.get('status') == 'confirmed']
+        # Выручка и загрузка: confirmed + completed (после конца аренды статус становится completed)
+        revenue_statuses = ('confirmed', 'completed')
+        confirmed = [r for r in rows if r.get('status') in revenue_statuses]
         pending = [r for r in rows if r.get('status') == 'pending']
-        rejected = [r for r in rows if r.get('status') == 'rejected']
+        rejected = [r for r in rows if r.get('status') in ('rejected', 'cancelled')]
 
-        # Revenue for the selected period: confirmed rentals beginning in the period.
+        # Revenue for the selected period: confirmed/completed rentals beginning in the period.
         period_confirmed = [r for r in confirmed if r.get('start_at') and start_dt <= ensure_tz(r['start_at']) < end_dt]
         revenue = sum(int(r.get('total') or 0) for r in period_confirmed)
         booking_count = len(period_confirmed)
