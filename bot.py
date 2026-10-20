@@ -105,7 +105,7 @@ INIT_DATA_MAX_AGE = int(
 _RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
 MINIAPP_BASE_URL = (_RENDER_URL + "/app") if _RENDER_URL else "https://balticarkgdbot.onrender.com/app"
 MINIAPP_URL = MINIAPP_BASE_URL + "?v=50"
-ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=52"
+ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=53"
 
 
 # ============================================================
@@ -6965,6 +6965,8 @@ def admin_calendar_payload_sync(year, month):
         if maintenance:
             return {
                 'id': row['id'], 'status': 'maintenance', 'name': row.get('reason') or 'ТО',
+                'car_id': row.get('car_id') or '',
+                'car_name': CARS.get(row.get('car_id'), {}).get('name', row.get('car_id') or ''),
                 'phone': '', 'total': None, 'pickup': '',
                 'start_label': sa.strftime('%d.%m.%Y %H:%M'),
                 'end_label': ea.strftime('%d.%m.%Y %H:%M'),
@@ -7483,6 +7485,79 @@ async def admin_booking_fee_api(request):
         return mini_json({"message": "Ошибка сервера."}, 500)
 
 
+
+async def admin_block_create_api(request):
+    """Ручная занятость: бронь с сайта / внешняя бронь / ТО.
+
+    Пишет в car_maintenance — период блокируется для клиентов бота.
+    """
+    admin_web_auth_or_403(request)
+    try:
+        data = await request.json()
+    except Exception:
+        return mini_json({"message": "Некорректный JSON."}, 400)
+
+    cid = str(data.get("car_id") or "").strip()
+    reason = str(data.get("reason") or "Бронь с сайта").strip() or "Бронь с сайта"
+    start_date = str(data.get("start_date") or "").strip()
+    end_date = str(data.get("end_date") or "").strip()
+    start_time = str(data.get("start_time") or "10:00").strip()
+    end_time = str(data.get("end_time") or "10:00").strip()
+
+    if cid not in CARS:
+        return mini_json({"message": "Автомобиль не найден."}, 400)
+    if not CARS[cid].get("active", True):
+        return mini_json({"message": "Автомобиль отключён."}, 400)
+
+    try:
+        sd = date.fromisoformat(start_date)
+        ed = date.fromisoformat(end_date)
+        sh, sm = [int(x) for x in start_time.split(":")[:2]]
+        eh, em = [int(x) for x in end_time.split(":")[:2]]
+        start_at = local_dt(sd, time(sh, sm))
+        end_at = local_dt(ed, time(eh, em))
+    except Exception:
+        return mini_json({"message": "Проверьте даты и время (ГГГГ-ММ-ДД и ЧЧ:ММ)."}, 400)
+
+    if end_at <= start_at:
+        return mini_json({"message": "Конец периода должен быть позже начала."}, 400)
+    if (end_at - start_at).days > 60:
+        return mini_json({"message": "Период блокировки не больше 60 дней."}, 400)
+
+    try:
+        row = await asyncio.to_thread(add_maintenance_sync, cid, start_at, end_at, reason)
+        return mini_json({
+            "ok": True,
+            "id": row["id"],
+            "car_id": cid,
+            "car_name": CARS[cid].get("name", cid),
+            "start_label": ensure_tz(row["start_at"]).strftime("%d.%m.%Y %H:%M"),
+            "end_label": ensure_tz(row["end_at"]).strftime("%d.%m.%Y %H:%M"),
+            "reason": row.get("reason") or reason,
+        })
+    except Exception as exc:
+        print(f"[ADMIN/WEB/BLOCK] {type(exc).__name__}: {exc!r}", flush=True)
+        return mini_json({"message": "Не удалось сохранить занятость."}, 500)
+
+
+async def admin_block_delete_api(request):
+    """Удалить ручную занятость / ТО из веб-админки."""
+    admin_web_auth_or_403(request)
+    try:
+        data = await request.json()
+        mid = int(data.get("id", 0))
+    except Exception:
+        return mini_json({"message": "Некорректный запрос."}, 400)
+    if mid <= 0:
+        return mini_json({"message": "Некорректный id."}, 400)
+    try:
+        await asyncio.to_thread(delete_maintenance_sync, mid)
+        return mini_json({"ok": True, "id": mid})
+    except Exception as exc:
+        print(f"[ADMIN/WEB/BLOCK/DEL] {type(exc).__name__}: {exc!r}", flush=True)
+        return mini_json({"message": "Не удалось удалить блок."}, 500)
+
+
 async def mini_app_routes(app):
     mini_add_location_columns()
     app.router.add_get("/app", mini_app)
@@ -7491,6 +7566,8 @@ async def mini_app_routes(app):
     app.router.add_get("/api/admin/bookings", admin_bookings_api)
     app.router.add_post("/api/admin/booking/action", admin_booking_action_api)
     app.router.add_post("/api/admin/booking/fee", admin_booking_fee_api)
+    app.router.add_post("/api/admin/block", admin_block_create_api)
+    app.router.add_post("/api/admin/block/delete", admin_block_delete_api)
     app.router.add_get("/api/admin/finance", admin_finance_api)
     app.router.add_get("/api/admin/expenses", admin_expenses_api)
     app.router.add_post("/api/admin/expenses", admin_expenses_api)
