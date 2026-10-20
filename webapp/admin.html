@@ -110,12 +110,98 @@ function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&l
 function isoDate(y,m,d){return `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`}
 function setTab(x){tab=x;const token=++viewToken;document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));const btn=document.getElementById('tab'+x[0].toUpperCase()+x.slice(1));if(btn)btn.classList.add('active');if(x==='calendar')renderCalendar(token);if(x==='bookings')renderBookings(token);if(x==='finance')renderFinance(token);if(x==='reviews')renderReviews(token)}
 async function renderCalendar(token=viewToken){const y=cursor.getFullYear(),m=cursor.getMonth();$('content').innerHTML='<div class="panel"><div class="loader">Загружаю календарь…</div></div>';try{currentData=await api(`/api/admin/calendar?year=${y}&month=${m+1}`);if(token!==viewToken||tab!=='calendar')return;drawCalendar()}catch(e){if(token!==viewToken||tab!=='calendar')return;$('content').innerHTML=`<div class="panel"><div class="empty">${esc(e.message)}</div></div>`}}
-function drawCalendar(){const d=currentData, y=cursor.getFullYear(),m=cursor.getMonth(),days=d.days;let html=`<div class="panel"><div class="panelHead"><div><h1>Занятость автопарка</h1><div class="muted">Все автомобили · пересечения видно сразу</div></div><div class="monthNav"><button onclick="moveMonth(-1)">‹</button><div class="monthTitle">${months[m]} ${y}</div><button onclick="moveMonth(1)">›</button></div></div><div class="legend"><span class="dot"><i class="d-confirmed"></i> подтверждено</span><span class="dot"><i class="d-pending"></i> ожидает</span><span class="dot"><i class="d-completed"></i> завершено</span><span class="dot"><i class="d-maint"></i> обслуживание</span><span class="dot"><i class="d-free"></i> свободно</span></div>`;
-
+function drawCalendar(){const d=currentData, y=cursor.getFullYear(),m=cursor.getMonth(),days=d.days;let html=`<div class="panel"><div class="panelHead"><div><h1>Занятость автопарка</h1><div class="muted">Все автомобили · пересечения видно сразу</div></div><div class="monthNav"><button onclick="moveMonth(-1)">‹</button><div class="monthTitle">${months[m]} ${y}</div><button onclick="moveMonth(1)">›</button></div></div><div class="legend"><span class="dot"><i class="d-confirmed"></i> подтверждено</span><span class="dot"><i class="d-pending"></i> ожидает</span><span class="dot"><i class="d-completed"></i> завершено</span><span class="dot"><i class="d-maint"></i> занято вручную / ТО</span><span class="dot"><i class="d-free"></i> свободно</span></div>`;
+html+=`<div class="blockForm panel" style="margin:0;border-radius:0;border-left:0;border-right:0;box-shadow:none">
+  <div class="panelHead" style="border-bottom:1px solid var(--line)"><div><h1 style="font-size:16px">Занять даты вручную</h1><div class="muted">Бронь с сайта, телефон, Авито — период станет недоступен клиентам бота</div></div></div>
+  <div style="padding:12px 16px;display:grid;gap:10px">
+    <div class="row" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <label style="display:grid;gap:4px;font-size:12px;font-weight:800;color:var(--muted)">Автомобиль
+        <select id="blkCar" style="border:1px solid var(--line);border-radius:11px;padding:10px;background:var(--surface);color:var(--text);font-weight:700"></select>
+      </label>
+      <label style="display:grid;gap:4px;font-size:12px;font-weight:800;color:var(--muted)">Комментарий
+        <input id="blkReason" type="text" value="Бронь с сайта" placeholder="Бронь с сайта / ТО / телефон" style="border:1px solid var(--line);border-radius:11px;padding:10px;background:var(--surface);color:var(--text);font-weight:700">
+      </label>
+    </div>
+    <div class="row" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">
+      <label style="display:grid;gap:4px;font-size:12px;font-weight:800;color:var(--muted)">Начало (дата)
+        <input id="blkStartDate" type="date" style="border:1px solid var(--line);border-radius:11px;padding:10px;background:var(--surface);color:var(--text);font-weight:700">
+      </label>
+      <label style="display:grid;gap:4px;font-size:12px;font-weight:800;color:var(--muted)">Время
+        <select id="blkStartTime" style="border:1px solid var(--line);border-radius:11px;padding:10px;background:var(--surface);color:var(--text);font-weight:700"></select>
+      </label>
+      <label style="display:grid;gap:4px;font-size:12px;font-weight:800;color:var(--muted)">Конец (дата)
+        <input id="blkEndDate" type="date" style="border:1px solid var(--line);border-radius:11px;padding:10px;background:var(--surface);color:var(--text);font-weight:700">
+      </label>
+      <label style="display:grid;gap:4px;font-size:12px;font-weight:800;color:var(--muted)">Время
+        <select id="blkEndTime" style="border:1px solid var(--line);border-radius:11px;padding:10px;background:var(--surface);color:var(--text);font-weight:700"></select>
+      </label>
+    </div>
+    <button class="miniBtn primary" style="justify-self:start;padding:11px 16px" onclick="createManualBlock()">🔒 Занять период</button>
+  </div>
+</div>`;
 html+='<div class="calendarScroll"><div class="calendar" style="--days:'+days+'"><div class="dayHead"><div class="carLabel">Автомобиль</div>';for(let n=1;n<=days;n++){const dt=new Date(y,m,n),week=dt.getDay(),today=new Date();const isToday=dt.toDateString()===today.toDateString();html+=`<div class="day ${week===0||week===6?'weekend':''} ${isToday?'today':''}"><b>${n}</b><span>${wd[week]}</span></div>`}html+='</div>';
-for(const car of d.cars){html+=`<div class="carRow"><div class="carLabel">🚗 ${esc(car.name)}<span class="carSub">${esc(car.gear||'')}</span></div><div class="track">`;for(const b of car.blocks){const start=Math.max(1,b.start_day),end=Math.min(days,b.end_day);if(end<1||start>days)continue;const left=(start-1)*100/days,width=(end-start+1)*100/days;html+=`<div class="booking ${esc(b.status)}" style="left:${left}%;width:${width}%" onclick="showBooking(${Number(b.id)})"><b style="color:#000 !important;-webkit-text-fill-color:#000 !important;text-shadow:none !important">${b.status==='maintenance'?'🔧 ТО':esc(b.name||'Без имени')}</b><span style="color:#000 !important;-webkit-text-fill-color:#000 !important;text-shadow:none !important">№${b.id} · ${b.status==='pending'?'ожидает':(b.status==='completed'?'завершена':(b.status==='maintenance'?'ТО':'бронь'))}</span></div>`}html+='</div></div>'}html+='</div></div></div>';html+=`<div id="detail"></div></div>`;$('content').innerHTML=html}
+for(const car of d.cars){html+=`<div class="carRow"><div class="carLabel">🚗 ${esc(car.name)}<span class="carSub">${esc(car.gear||'')}</span></div><div class="track">`;for(const b of car.blocks){const start=Math.max(1,b.start_day),end=Math.min(days,b.end_day);if(end<1||start>days)continue;const left=(start-1)*100/days,width=(end-start+1)*100/days;html+=`<div class="booking ${esc(b.status)}" style="left:${left}%;width:${width}%" onclick="showBooking(${Number(b.id)}, '${esc(b.status)}')"><b style="color:#000 !important;-webkit-text-fill-color:#000 !important;text-shadow:none !important">${b.status==='maintenance'?'🔒 '+(b.name||'Занято'):esc(b.name||'Без имени')}</b><span style="color:#000 !important;-webkit-text-fill-color:#000 !important;text-shadow:none !important">№${b.id} · ${b.status==='pending'?'ожидает':(b.status==='completed'?'завершена':(b.status==='maintenance'?'ТО':'бронь'))}</span></div>`}html+='</div></div>'}html+='</div></div></div>';html+=`<div id="detail"></div></div>`;$('content').innerHTML=html; fillBlockForm();}
 function moveMonth(n){cursor.setMonth(cursor.getMonth()+n);renderCalendar(viewToken)}
-function showBooking(id){const b=(currentData.bookings||[]).find(x=>Number(x.id)===Number(id));if(!b)return;const el=document.getElementById('detail');el.innerHTML=`<div class="detail"><button class="close" onclick="this.parentElement.innerHTML=''">×</button><h3>Бронирование №${b.id}</h3><div><b>${esc(b.car_name)}</b> · <span class="status ${esc(b.status)}">${b.status==='confirmed'?'подтверждено':b.status==='pending'?'ожидает':b.status==='maintenance'?'обслуживание':b.status}</span></div>${b.name?`<div class="muted">👤 ${esc(b.name)} · 📞 ${esc(b.phone||'')}</div>`:''}<div class="muted">📅 ${esc(b.start_label)} → ${esc(b.end_label)}</div>${b.pickup?`<div class="muted">📍 ${esc(b.pickup)}</div>`:''}${b.total!=null?`<div class="muted">💰 ${Number(b.total).toLocaleString('ru-RU')} ₽</div>`:''}</div>`;el.scrollIntoView({behavior:'smooth',block:'nearest'})}
+
+function hourOptions(selected){
+  let h='';
+  for(let i=8;i<=20;i++){
+    const v=String(i).padStart(2,'0')+':00';
+    h+=`<option value="${v}" ${v===selected?'selected':''}>${v}</option>`;
+  }
+  return h;
+}
+function fillBlockForm(){
+  const carSel=$('blkCar'); if(!carSel)return;
+  const cars=(currentData&&currentData.cars)||[];
+  carSel.innerHTML=cars.map(c=>`<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')||'<option value="">Нет авто</option>';
+  const st=$('blkStartTime'), et=$('blkEndTime');
+  if(st&&!st.options.length){st.innerHTML=hourOptions('10:00');}
+  if(et&&!et.options.length){et.innerHTML=hourOptions('10:00');}
+  const y=cursor.getFullYear(), m=cursor.getMonth();
+  const iso=d=>{const mm=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');return `${d.getFullYear()}-${mm}-${dd}`};
+  const today=new Date(); const base=new Date(y,m,Math.min(today.getDate(),28));
+  if($('blkStartDate')&&!$('blkStartDate').value)$('blkStartDate').value=iso(base);
+  if($('blkEndDate')&&!$('blkEndDate').value){const e=new Date(base);e.setDate(e.getDate()+1);$('blkEndDate').value=iso(e);}
+}
+async function createManualBlock(){
+  const car_id=$('blkCar')?.value;
+  const reason=($('blkReason')?.value||'Бронь с сайта').trim();
+  const start_date=$('blkStartDate')?.value;
+  const end_date=$('blkEndDate')?.value;
+  const start_time=$('blkStartTime')?.value||'10:00';
+  const end_time=$('blkEndTime')?.value||'10:00';
+  if(!car_id||!start_date||!end_date){alert('Выберите автомобиль и даты');return;}
+  try{
+    await api('/api/admin/block',{method:'POST',body:JSON.stringify({car_id,reason,start_date,end_date,start_time,end_time})});
+    alert('Период занят. Клиенты бота его не забронируют.');
+    renderCalendar(viewToken);
+  }catch(e){alert(e.message||'Ошибка')}
+}
+async function deleteManualBlock(id){
+  if(!confirm('Снять занятость №'+id+'?'))return;
+  try{
+    await api('/api/admin/block/delete',{method:'POST',body:JSON.stringify({id})});
+    renderCalendar(viewToken);
+  }catch(e){alert(e.message||'Ошибка')}
+}
+
+function showBooking(id,status){const b=(currentData.bookings||[]).find(x=>Number(x.id)===Number(id)&&(status?x.status===status:true));if(!b)return;const el=document.getElementById('detail');
+  if(b.status==='maintenance'){
+    el.innerHTML=`<div class="detail"><button class="close" onclick="this.parentElement.innerHTML=''">×</button>
+      <h3>🔒 Занятость №${b.id}</h3>
+      <div><b>${esc(b.car_name||'Автомобиль')}</b> · <span class="status rejected">вручную / ТО</span></div>
+      <div class="muted">📝 ${esc(b.name||'Без комментария')}</div>
+      <div class="muted">📅 ${esc(b.start_label)} → ${esc(b.end_label)}</div>
+      <div class="bookingActions" style="margin-top:12px">
+        <button class="miniBtn danger" onclick="deleteManualBlock(${Number(b.id)})">🗑 Снять занятость</button>
+      </div>
+    </div>`;
+  } else {
+    el.innerHTML=`<div class="detail"><button class="close" onclick="this.parentElement.innerHTML=''">×</button><h3>Бронирование №${b.id}</h3><div><b>${esc(b.car_name||'')}</b> · <span class="status ${esc(b.status)}">${b.status==='confirmed'?'подтверждено':b.status==='pending'?'ожидает':b.status==='completed'?'завершена':b.status}</span></div>${b.name?`<div class="muted">👤 ${esc(b.name)} · 📞 ${esc(b.phone||'')}</div>`:''}<div class="muted">📅 ${esc(b.start_label)} → ${esc(b.end_label)}</div>${b.pickup?`<div class="muted">📍 ${esc(b.pickup)}</div>`:''}${b.total!=null?`<div class="muted">💰 ${Number(b.total).toLocaleString('ru-RU')} ₽</div>`:''}</div>`;
+  }
+  el.scrollIntoView({behavior:'smooth',block:'nearest'})
+}
 let bookingsCache=[];let bookingFilter='all';let bookingSearch='';
 function bookingStatusMatch(b){
   if(bookingFilter==='all')return true;
