@@ -104,7 +104,7 @@ INIT_DATA_MAX_AGE = int(
 
 _RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
 MINIAPP_BASE_URL = (_RENDER_URL + "/app") if _RENDER_URL else "https://balticarkgdbot.onrender.com/app"
-MINIAPP_URL = MINIAPP_BASE_URL + "?v=50"
+MINIAPP_URL = MINIAPP_BASE_URL + "?v=55"
 ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=54"
 
 
@@ -138,6 +138,16 @@ BUFFER_HOURS = int(
     os.getenv(
         "BUFFER_HOURS",
         "2"
+    )
+)
+
+# Льготный период после полных суток: возврат с опозданием до N часов
+# не добавляет следующие оплачиваемые сутки.
+# Пример: 20.10 09:00 → 23.10 09:00 = 3 суток; до 23.10 12:00 всё ещё 3 суток.
+DAY_GRACE_HOURS = int(
+    os.getenv(
+        "DAY_GRACE_HOURS",
+        "3"
     )
 )
 
@@ -632,26 +642,29 @@ def rental_days(
     end_at
 ):
     """
-    Оплачиваемые сутки считаются вверх.
+    Оплачиваемые сутки с льготным периодом DAY_GRACE_HOURS.
 
-    02.09 10:00 → 06.09 10:00 = 4 суток
+    Полные 24 ч = 1 сутки. Опоздание до DAY_GRACE_HOURS после
+    кратного 24 ч не добавляет следующие сутки.
 
-    02.09 10:00 → 06.09 17:00 = 5 суток
+    При DAY_GRACE_HOURS=3:
+      20.10 09:00 → 23.10 09:00 = 3 суток (ровно 72 ч)
+      20.10 09:00 → 23.10 12:00 = 3 суток (72+3 ч)
+      20.10 09:00 → 23.10 13:00 = 4 суток
     """
 
     hours = rental_hours(
         start_at,
         end_at
     )
+    if hours <= 0:
+        return 1
 
-    days = int(
-        (hours + 23.999999) // 24
-    )
+    # Вычитаем льготу, затем округляем сутки вверх
+    billable = max(0.0, hours - float(DAY_GRACE_HOURS))
+    days = int((billable + 23.999999) // 24)
 
-    return max(
-        1,
-        days
-    )
+    return max(1, days)
 
 
 # ============================================================
