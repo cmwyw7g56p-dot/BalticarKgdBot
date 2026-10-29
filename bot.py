@@ -105,7 +105,7 @@ INIT_DATA_MAX_AGE = int(
 _RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
 MINIAPP_BASE_URL = (_RENDER_URL + "/app") if _RENDER_URL else "https://balticarkgdbot.onrender.com/app"
 MINIAPP_URL = MINIAPP_BASE_URL + "?v=55"
-ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=54"
+ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=56"
 
 
 # ============================================================
@@ -267,11 +267,34 @@ def spawn_task(coro):
 # ============================================================
 
 def db():
+    """Подключение к Neon/Postgres с запасом на cold start."""
     return psycopg.connect(
         DATABASE_URL,
         row_factory=dict_row,
-        connect_timeout=10
+        connect_timeout=30,
+        keepalives=1,
+        keepalives_idle=30,
+        keepalives_interval=10,
+        keepalives_count=3,
     )
+
+
+def db_with_retry(fn, attempts=3, delay=1.5):
+    """Повтор при кратковременных сбоях Neon (OperationalError / InterfaceError)."""
+    last = None
+    for i in range(attempts):
+        try:
+            return fn()
+        except Exception as exc:
+            last = exc
+            name = type(exc).__name__
+            if name not in ("OperationalError", "InterfaceError", "DatabaseError") and "connection" not in str(exc).lower():
+                raise
+            print(f"[DB RETRY] {i+1}/{attempts} {name}: {exc}", flush=True)
+            if i + 1 < attempts:
+                import time as _time
+                _time.sleep(delay * (i + 1))
+    raise last
 
 
 def init_db():
@@ -6918,53 +6941,55 @@ async def admin_web_page(request):
 def admin_calendar_payload_sync(year, month):
     """Данные для веб-календаря автопарка.
 
-    Используем только поля, которые гарантированно есть в рабочей схеме,
-    а дополнительные данные (имя/телефон/место) подхватываем безопасно.
-    Это не должно ломать календарь из-за одной необязательной колонки.
+    Один запрос по броням (без ANY) + обслуживание.
+    Повтор при кратковременном падении Neon.
     """
     first = date(year, month, 1)
     next_first = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
     month_start = local_dt(first, time(0, 0))
     month_end = local_dt(next_first, time(0, 0))
-    con = db()
-    try:
-        with con.cursor() as cur:
-            # Базовые поля — те же, что используются существующим календарём.
-            booking_rows = cur.execute("""
-                SELECT id, car_id, status, start_at, end_at
-                FROM bookings
-                WHERE status IN ('pending','confirmed','completed')
-                  AND start_at < %s AND end_at > %s
-                ORDER BY car_id, start_at, id
-            """, (month_end, month_start)).fetchall()
 
-            # Дополнительные данные нужны только для карточки при нажатии.
-            extra = {}
-            if booking_rows:
-                ids = [r['id'] for r in booking_rows]
+    def _load():
+        con = db()
+        try:
+            with con.cursor() as cur:
                 try:
-                    rows = cur.execute("""
-                        SELECT id, name, phone, total, pickup_location, payment_method
-                        FROM bookings WHERE id = ANY(%s)
-                    """, (ids,)).fetchall()
-                    extra = {r['id']: r for r in rows}
+                    booking_rows = cur.execute("""
+                        SELECT id, car_id, status, start_at, end_at,
+                               name, phone, total, pickup_location, payment_method
+                        FROM bookings
+                        WHERE status IN ('pending','confirmed','completed')
+                          AND start_at < %s AND end_at > %s
+                        ORDER BY car_id, start_at, id
+                    """, (month_end, month_start)).fetchall()
                 except Exception as exc:
-                    print(f"[ADMIN/WEB/CALENDAR] optional booking fields skipped: {type(exc).__name__}: {exc}", flush=True)
+                    print(f"[ADMIN/WEB/CALENDAR] full booking select failed, fallback: {type(exc).__name__}: {exc}", flush=True)
                     con.rollback()
+                    booking_rows = cur.execute("""
+                        SELECT id, car_id, status, start_at, end_at
+                        FROM bookings
+                        WHERE status IN ('pending','confirmed','completed')
+                          AND start_at < %s AND end_at > %s
+                        ORDER BY car_id, start_at, id
+                    """, (month_end, month_start)).fetchall()
 
-            try:
-                maintenance_rows = cur.execute("""
-                    SELECT id, car_id, start_at, end_at, reason
-                    FROM car_maintenance
-                    WHERE start_at < %s AND end_at > %s
-                    ORDER BY car_id, start_at, id
-                """, (month_end, month_start)).fetchall()
-            except Exception as exc:
-                print(f"[ADMIN/WEB/CALENDAR] maintenance skipped: {type(exc).__name__}: {exc}", flush=True)
-                con.rollback()
-                maintenance_rows = []
-    finally:
-        con.close()
+                try:
+                    maintenance_rows = cur.execute("""
+                        SELECT id, car_id, start_at, end_at, reason
+                        FROM car_maintenance
+                        WHERE start_at < %s AND end_at > %s
+                        ORDER BY car_id, start_at, id
+                    """, (month_end, month_start)).fetchall()
+                except Exception as exc:
+                    print(f"[ADMIN/WEB/CALENDAR] maintenance skipped: {type(exc).__name__}: {exc}", flush=True)
+                    con.rollback()
+                    maintenance_rows = []
+            return list(booking_rows or []), list(maintenance_rows or [])
+        finally:
+            con.close()
+
+    booking_rows, maintenance_rows = db_with_retry(_load)
+    extra = {r['id']: r for r in booking_rows}
 
     days = (next_first - first).days
     by_car = {cid: [] for cid in active_cars()}
@@ -7045,7 +7070,13 @@ async def admin_calendar_api(request):
         return mini_json(await asyncio.to_thread(admin_calendar_payload_sync, year, month))
     except Exception as exc:
         print(f"[ADMIN/WEB/CALENDAR] {type(exc).__name__}: {exc!r}", flush=True)
-        return mini_json({'message':f'Не удалось загрузить календарь: {type(exc).__name__}'}, 500)
+        msg = str(exc).strip() or type(exc).__name__
+        # Не светим внутренности БД клиенту целиком, но даём понятный текст
+        if type(exc).__name__ in ("OperationalError", "InterfaceError"):
+            user_msg = "Нет связи с базой данных (временный сбой). Закройте админку и откройте снова через 10–20 сек."
+        else:
+            user_msg = f"Не удалось загрузить календарь: {type(exc).__name__}"
+        return mini_json({'message': user_msg, 'detail': msg[:200]}, 500)
 
 
 def _parse_extras_labels(raw):
