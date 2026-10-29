@@ -5821,7 +5821,9 @@ async def reminder_loop(bot):
                     print(f"[REMINDER] booking={row['id']} ERROR={type(exc).__name__}: {exc}")
         except Exception as exc:
             print(f"[REMINDER LOOP] ERROR={type(exc).__name__}: {exc}")
-        await asyncio.sleep(300)
+        # Проверяем напоминания раз в 15 минут, чтобы не будить Neon каждые 5 минут.
+        # Напоминания могут отправляться с задержкой до 15 минут.
+        await asyncio.sleep(900)
 
 
 async def keepalive_loop():
