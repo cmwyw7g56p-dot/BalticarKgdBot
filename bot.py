@@ -104,7 +104,7 @@ INIT_DATA_MAX_AGE = int(
 
 _RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
 MINIAPP_BASE_URL = (_RENDER_URL + "/app") if _RENDER_URL else "https://balticarkgdbot.onrender.com/app"
-MINIAPP_URL = MINIAPP_BASE_URL + "?v=56"
+MINIAPP_URL = MINIAPP_BASE_URL + "?v=55"
 ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=54"
 
 
@@ -5776,20 +5776,34 @@ def complete_past_bookings_sync():
 
 
 def reminder_candidates_sync():
-    cleanup_pending()
-    complete_past_bookings_sync()
-    con=db()
+    """Одним соединением обслуживает просроченные заявки и выбирает напоминания."""
+    con = db()
     try:
         with con.cursor() as cur:
-            rows=cur.execute("""
+            # Раньше эти две операции открывали отдельные соединения.
+            # Теперь все фоновые проверки выполняются в одной транзакции.
+            expire_pending(cur)
+            cur.execute("""
+                UPDATE bookings
+                SET status='completed'
+                WHERE status='confirmed'
+                  AND end_at IS NOT NULL
+                  AND end_at < NOW()
+            """)
+            rows = cur.execute("""
                 SELECT * FROM bookings
                 WHERE status='confirmed'
                   AND ((start_at > NOW() AND start_at <= NOW()+interval '2 hours' AND reminder_2_sent=FALSE)
                     OR (start_at > NOW()+interval '2 hours' AND start_at <= NOW()+interval '24 hours' AND reminder_24_sent=FALSE))
                 ORDER BY start_at
             """).fetchall()
-            return rows
-    finally: con.close()
+        con.commit()
+        return rows
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
 
 
 def mark_reminder_sync(bid,kind):
@@ -5821,9 +5835,9 @@ async def reminder_loop(bot):
                     print(f"[REMINDER] booking={row['id']} ERROR={type(exc).__name__}: {exc}")
         except Exception as exc:
             print(f"[REMINDER LOOP] ERROR={type(exc).__name__}: {exc}")
-        # Проверяем напоминания раз в 15 минут, чтобы не будить Neon каждые 5 минут.
-        # Напоминания могут отправляться с задержкой до 15 минут.
-        await asyncio.sleep(900)
+        # Проверяем напоминания раз в 30 минут: меньше фоновых обращений к Neon.
+        # Клиентские напоминания могут отправляться с задержкой до 30 минут.
+        await asyncio.sleep(1800)
 
 
 async def keepalive_loop():
@@ -6489,7 +6503,8 @@ def mini_json(data, status=200):
 
 
 def mini_car_payload():
-    load_car_settings()
+    # Настройки уже загружены при старте и обновляются после действий администратора.
+    # Не открываем новое соединение с Neon на каждый запрос каталога Mini App.
     base = Path(__file__).resolve().parent
     result=[]
     for cid, c in active_cars().items():
