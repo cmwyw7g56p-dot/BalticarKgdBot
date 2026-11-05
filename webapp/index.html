@@ -13,6 +13,19 @@
 #bootOverlay .bootText{margin-top:10px;color:#6f7f8d;font-size:14px;line-height:1.45}
 #bootOverlay .bootRetry{display:none;width:100%;margin-top:18px;padding:15px 16px;border:0;border-radius:16px;background:#1677e8;color:#fff;font-size:15px;font-weight:900}
 #bootOverlay.ready{display:none}
+
+/* BALTICAR FIX — show complete vehicle photos without cropping */
+.gallery, .carGallery, .detailGallery { background: #fff !important; }
+.galleryImg, .carGallery .galleryImg, .detailGallery .galleryImg {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+  object-position: center center !important;
+  background: #fff !important;
+  transform: none !important;
+}
+
 </style>
 <script>
 (function(){
