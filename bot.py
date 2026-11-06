@@ -6539,31 +6539,110 @@ def mini_parse_local_iso(value):
 
 
 def mini_slots_sync(car_id, year, month, start_at=None):
+    """
+    Формирует часы календаря с пакетной загрузкой занятости.
+
+    Раньше booking_overlaps() вызывался для каждого часа и каждый раз
+    открывал несколько соединений с Neon. Теперь истёкшие заявки
+    очищаются один раз, а брони и техобслуживание читаются пакетно.
+    Финальная проверка при создании брони остаётся без изменений.
+    """
     if car_id not in active_cars():
         return {"mode":"start", "slots":{}}
-    slots={}
-    days=calendar.monthrange(year, month)[1]
-    now=datetime.now(TZ)
-    start_dt=mini_parse_local_iso(start_at) if start_at else None
-    for day_n in range(1, days+1):
-        d=date(year,month,day_n)
-        arr=[]
-        for hour in range(PICKUP_START_HOUR, PICKUP_END_HOUR+1):
-            candidate=local_dt(d,time(hour,0))
+
+    slots = {}
+    days = calendar.monthrange(year, month)[1]
+    now = datetime.now(TZ)
+    start_dt = mini_parse_local_iso(start_at) if start_at else None
+
+    month_start = local_dt(date(year, month, 1), time(0, 0))
+    if month == 12:
+        next_month = date(year + 1, 1, 1)
+    else:
+        next_month = date(year, month + 1, 1)
+    month_end = local_dt(next_month, time(0, 0))
+
+    # В режиме выбора даты окончания интервал может начинаться
+    # до первого числа отображаемого месяца.
+    range_start = start_dt if start_dt is not None else month_start
+    bookings_start = range_start - timedelta(hours=BUFFER_HOURS)
+    bookings_end = month_end + timedelta(hours=BUFFER_HOURS)
+
+    con = db()
+    try:
+        with con.cursor() as cur:
+            # Раньше эта операция выполнялась при каждой проверке часа.
+            expire_pending(cur)
+
+            bookings = cur.execute(
+                """
+                SELECT id, status, start_at, end_at
+                FROM bookings
+                WHERE car_id=%s
+                  AND status IN ('pending', 'confirmed')
+                  AND start_at < %s
+                  AND end_at > %s
+                ORDER BY start_at
+                """,
+                (car_id, bookings_end, bookings_start)
+            ).fetchall()
+
+            maintenance = cur.execute(
+                """
+                SELECT id, start_at, end_at
+                FROM car_maintenance
+                WHERE car_id=%s
+                  AND start_at < %s
+                  AND end_at > %s
+                ORDER BY start_at
+                """,
+                (car_id, month_end, range_start)
+            ).fetchall()
+
+        con.commit()
+    finally:
+        con.close()
+
+    def overlaps_maintenance(check_start, check_end):
+        check_start = ensure_tz(check_start)
+        check_end = ensure_tz(check_end)
+        for row in maintenance:
+            maintenance_start = ensure_tz(row["start_at"])
+            maintenance_end = ensure_tz(row["end_at"])
+            if maintenance_start < check_end and maintenance_end > check_start:
+                return True
+        return False
+
+    for day_n in range(1, days + 1):
+        current_day = date(year, month, day_n)
+        available_hours = []
+
+        for hour in range(PICKUP_START_HOUR, PICKUP_END_HOUR + 1):
+            candidate = local_dt(current_day, time(hour, 0))
+
             if start_dt is None:
                 if candidate <= now:
                     continue
                 if candidate < now + timedelta(hours=0):
                     continue
-                if booking_overlaps(car_id,candidate,candidate+timedelta(hours=1)):
-                    continue
+                check_start = candidate
+                check_end = candidate + timedelta(hours=1)
             else:
                 if candidate <= start_dt:
                     continue
-                if booking_overlaps(car_id,start_dt,candidate):
-                    continue
-            arr.append(hour)
-        slots[d.isoformat()]=arr
+                check_start = start_dt
+                check_end = candidate
+
+            if overlaps_maintenance(check_start, check_end):
+                continue
+
+            if interval_overlaps_bookings(check_start, check_end, bookings):
+                continue
+
+            available_hours.append(hour)
+
+        slots[current_day.isoformat()] = available_hours
+
     return {"mode":"end" if start_dt else "start", "slots":slots}
 
 
