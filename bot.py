@@ -105,7 +105,7 @@ INIT_DATA_MAX_AGE = int(
 _RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
 MINIAPP_BASE_URL = (_RENDER_URL + "/app") if _RENDER_URL else "https://balticarkgdbot.onrender.com/app"
 MINIAPP_URL = MINIAPP_BASE_URL + "?v=55"
-ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=60"
+ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=61"
 
 
 # ============================================================
@@ -475,7 +475,18 @@ def init_db():
             cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS issued_at TIMESTAMPTZ")
             cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS returned_at TIMESTAMPTZ")
             cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS issue_notes TEXT")
+
             cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS return_notes TEXT")
+
+            # Dynamic fleet fields on car_settings
+            for sql in (
+                "ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS gear TEXT DEFAULT 'АКПП'",
+                "ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS fuel TEXT DEFAULT 'Бензин'",
+                "ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS seats INTEGER DEFAULT 5",
+                "ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''",
+                "ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS is_custom BOOLEAN NOT NULL DEFAULT FALSE",
+            ):
+                cur.execute(sql)
 
             for cid, car in CARS.items():
                 cur.execute(
@@ -494,20 +505,46 @@ def init_db():
 
 
 def load_car_settings():
-    """Загружает сохранённые настройки автомобилей из PostgreSQL."""
+    """Загружает настройки и кастомные автомобили из PostgreSQL в CARS."""
     con = db()
     try:
         with con.cursor() as cur:
             rows = cur.execute("SELECT * FROM car_settings").fetchall()
+        known = set(CARS.keys())
         for row in rows:
-            if row['car_id'] in CARS:
-                CARS[row['car_id']]['name'] = row['name']
-                CARS[row['car_id']]['rates'] = (row['rate_1_3'], row['rate_4_6'], row['rate_7_plus'])
-                CARS[row['car_id']]['active'] = row['active']
+            cid = row['car_id']
+            rates = (row['rate_1_3'], row['rate_4_6'], row['rate_7_plus'])
+            if cid in CARS:
+                CARS[cid]['name'] = row['name']
+                CARS[cid]['rates'] = rates
+                CARS[cid]['active'] = row['active']
+                if row.get('gear'):
+                    CARS[cid]['gear'] = row['gear']
+                if row.get('fuel'):
+                    CARS[cid]['fuel'] = row['fuel']
+                if row.get('seats'):
+                    CARS[cid]['seats'] = row['seats']
+                if row.get('description') is not None:
+                    CARS[cid]['description'] = row['description'] or CARS[cid].get('description', '')
+            else:
+                # custom car added from admin
+                CARS[cid] = {
+                    'name': row['name'],
+                    'gear': row.get('gear') or 'АКПП',
+                    'fuel': row.get('fuel') or 'Бензин',
+                    'seats': row.get('seats') or 5,
+                    'rates': rates,
+                    'active': row['active'],
+                    'photos': [],
+                    'description': row.get('description') or '',
+                    'is_custom': True,
+                }
+        # soft-remove custom cars deleted from DB
+        for cid in list(CARS.keys()):
+            if cid not in known and not any(r['car_id'] == cid for r in rows):
+                CARS.pop(cid, None)
     finally:
         con.close()
-
-
 
 # ============================================================
 # CLIENTS CRM
@@ -8229,6 +8266,157 @@ async def admin_block_delete_api(request):
 
 
 
+
+def admin_list_cars_sync():
+    load_car_settings()
+    out = []
+    for cid, car in CARS.items():
+        out.append({
+            'car_id': cid,
+            'name': car.get('name', cid),
+            'gear': car.get('gear', 'АКПП'),
+            'fuel': car.get('fuel', 'Бензин'),
+            'seats': car.get('seats', 5),
+            'rates': list(car.get('rates', (0, 0, 0))),
+            'active': bool(car.get('active', True)),
+            'description': car.get('description') or '',
+            'is_custom': bool(car.get('is_custom')) or cid not in ('solaris21', 'solaris20', 'solaris17', 'i30'),
+        })
+    out.sort(key=lambda x: x['name'])
+    return out
+
+
+def admin_save_car_sync(data):
+    """Create or update car in car_settings and CARS."""
+    car_id = (data.get('car_id') or '').strip()
+    name = (data.get('name') or '').strip()
+    if not name:
+        return {'ok': False, 'reason': 'name'}
+    is_new = not car_id
+    if is_new:
+        base = re.sub(r'[^a-z0-9]+', '', name.lower())[:16] or 'car'
+        car_id = base
+        n = 1
+        while car_id in CARS:
+            n += 1
+            car_id = f'{base}{n}'
+    try:
+        r1 = int(data.get('rate_1_3') or data.get('rates', [0])[0])
+        r2 = int(data.get('rate_4_6') or data.get('rates', [0, 0])[1])
+        r3 = int(data.get('rate_7_plus') or data.get('rates', [0, 0, 0])[2])
+    except (TypeError, ValueError, IndexError):
+        return {'ok': False, 'reason': 'rates'}
+    if min(r1, r2, r3) <= 0:
+        return {'ok': False, 'reason': 'rates'}
+    gear = (data.get('gear') or 'АКПП').strip()
+    fuel = (data.get('fuel') or 'Бензин').strip()
+    try:
+        seats = int(data.get('seats') or 5)
+    except (TypeError, ValueError):
+        seats = 5
+    description = (data.get('description') or '').strip()
+    active = bool(data.get('active', True))
+    is_custom = car_id not in ('solaris21', 'solaris20', 'solaris17', 'i30')
+
+    con = db()
+    try:
+        with con.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO car_settings (
+                    car_id, name, active, rate_1_3, rate_4_6, rate_7_plus,
+                    gear, fuel, seats, description, is_custom, updated_at
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                ON CONFLICT (car_id) DO UPDATE SET
+                    name=EXCLUDED.name,
+                    active=EXCLUDED.active,
+                    rate_1_3=EXCLUDED.rate_1_3,
+                    rate_4_6=EXCLUDED.rate_4_6,
+                    rate_7_plus=EXCLUDED.rate_7_plus,
+                    gear=EXCLUDED.gear,
+                    fuel=EXCLUDED.fuel,
+                    seats=EXCLUDED.seats,
+                    description=EXCLUDED.description,
+                    updated_at=NOW()
+                """,
+                (car_id, name, active, r1, r2, r3, gear, fuel, seats, description, is_custom)
+            )
+        con.commit()
+    finally:
+        con.close()
+    load_car_settings()
+    return {'ok': True, 'car_id': car_id}
+
+
+def admin_delete_car_sync(car_id):
+    if car_id in ('solaris21', 'solaris20', 'solaris17', 'i30'):
+        # built-in: soft disable instead of delete
+        con = db()
+        try:
+            with con.cursor() as cur:
+                cur.execute(
+                    "UPDATE car_settings SET active=FALSE, updated_at=NOW() WHERE car_id=%s",
+                    (car_id,)
+                )
+            con.commit()
+        finally:
+            con.close()
+        load_car_settings()
+        return {'ok': True, 'soft': True}
+    con = db()
+    try:
+        with con.cursor() as cur:
+            active = cur.execute(
+                """
+                SELECT id FROM bookings
+                WHERE car_id=%s AND status IN ('pending','confirmed')
+                LIMIT 1
+                """,
+                (car_id,)
+            ).fetchone()
+            if active:
+                return {'ok': False, 'reason': 'has_bookings'}
+            cur.execute("DELETE FROM car_settings WHERE car_id=%s", (car_id,))
+            cur.execute("DELETE FROM car_maintenance WHERE car_id=%s", (car_id,))
+        con.commit()
+    finally:
+        con.close()
+    CARS.pop(car_id, None)
+    load_car_settings()
+    return {'ok': True, 'soft': False}
+
+
+def admin_create_client_sync(full_name, phone, notes='', username=''):
+    full_name = (full_name or '').strip()
+    phone = (phone or '').strip()
+    if len(full_name) < 2 or len(phone) < 5:
+        return {'ok': False, 'reason': 'fields'}
+    existing = get_client_sync(phone=phone)
+    if existing:
+        return {'ok': False, 'reason': 'exists', 'id': existing['id']}
+    con = db()
+    try:
+        with con.cursor() as cur:
+            row = cur.execute(
+                """
+                INSERT INTO clients (full_name, phone, username, notes)
+                VALUES (%s, %s, %s, %s)
+                RETURNING *
+                """,
+                (full_name, phone, username or None, notes or None)
+            ).fetchone()
+        con.commit()
+        return {'ok': True, 'client': {
+            'id': row['id'],
+            'full_name': row['full_name'],
+            'phone': row['phone'],
+            'notes': row.get('notes') or '',
+            'blacklisted': False,
+        }}
+    finally:
+        con.close()
+
+
 def admin_planner_sync():
     pickups = get_today_pickups_sync()
     returns = get_today_returns_sync()
@@ -8365,6 +8553,66 @@ async def admin_client_action_api(request):
 
 
 
+
+async def admin_cars_api(request):
+    admin_web_auth_or_403(request)
+    rows = await asyncio.to_thread(admin_list_cars_sync)
+    return mini_json({'cars': rows})
+
+
+async def admin_car_save_api(request):
+    admin_web_auth_or_403(request)
+    try:
+        data = await request.json()
+    except Exception:
+        return mini_json({'message': 'Некорректный JSON'}, 400)
+    result = await asyncio.to_thread(admin_save_car_sync, data)
+    if not result.get('ok'):
+        msg = {
+            'name': 'Укажите название автомобиля',
+            'rates': 'Проверьте тарифы (числа > 0)',
+        }.get(result.get('reason'), 'Не удалось сохранить')
+        return mini_json({'message': msg}, 400)
+    return mini_json(result)
+
+
+async def admin_car_delete_api(request):
+    admin_web_auth_or_403(request)
+    try:
+        data = await request.json()
+        car_id = str(data.get('car_id') or '').strip()
+    except Exception:
+        return mini_json({'message': 'Некорректный запрос'}, 400)
+    if not car_id:
+        return mini_json({'message': 'car_id обязателен'}, 400)
+    result = await asyncio.to_thread(admin_delete_car_sync, car_id)
+    if not result.get('ok'):
+        if result.get('reason') == 'has_bookings':
+            return mini_json({'message': 'Есть активные брони — сначала отмените их или отключите авто.'}, 409)
+        return mini_json({'message': 'Не удалось удалить'}, 400)
+    return mini_json(result)
+
+
+async def admin_client_create_api(request):
+    admin_web_auth_or_403(request)
+    try:
+        data = await request.json()
+    except Exception:
+        return mini_json({'message': 'Некорректный JSON'}, 400)
+    result = await asyncio.to_thread(
+        admin_create_client_sync,
+        data.get('full_name'),
+        data.get('phone'),
+        data.get('notes') or '',
+        data.get('username') or '',
+    )
+    if not result.get('ok'):
+        if result.get('reason') == 'exists':
+            return mini_json({'message': 'Клиент с таким телефоном уже есть', 'id': result.get('id')}, 409)
+        return mini_json({'message': 'Укажите ФИО и телефон'}, 400)
+    return mini_json(result)
+
+
 async def mini_app_routes(app):
     mini_add_location_columns()
     app.router.add_get("/app", mini_app)
@@ -8384,6 +8632,10 @@ async def mini_app_routes(app):
     app.router.add_get("/api/admin/clients", admin_clients_api)
     app.router.add_get("/api/admin/client", admin_client_detail_api)
     app.router.add_post("/api/admin/client/action", admin_client_action_api)
+    app.router.add_post("/api/admin/client/create", admin_client_create_api)
+    app.router.add_get("/api/admin/cars", admin_cars_api)
+    app.router.add_post("/api/admin/cars/save", admin_car_save_api)
+    app.router.add_post("/api/admin/cars/delete", admin_car_delete_api)
     app.router.add_get("/photos/{name:.*}", mini_photo)
     app.router.add_get("/api/cars", mini_cars)
     app.router.add_get("/api/availability", mini_availability)
