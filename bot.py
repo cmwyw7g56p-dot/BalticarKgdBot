@@ -105,7 +105,7 @@ INIT_DATA_MAX_AGE = int(
 _RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
 MINIAPP_BASE_URL = (_RENDER_URL + "/app") if _RENDER_URL else "https://balticarkgdbot.onrender.com/app"
 MINIAPP_URL = MINIAPP_BASE_URL + "?v=55"
-ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=54"
+ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=60"
 
 
 # ============================================================
@@ -2291,38 +2291,9 @@ def admin_panel_keyboard():
             ],
             [
                 InlineKeyboardButton(
-                    text="📅 Календарь занятости",
-                    callback_data="admin:calendar"
+                    text="🖥 Открыть панель учёта",
+                    web_app=WebAppInfo(url=ADMIN_WEBAPP_URL)
                 )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="📋 Все бронирования",
-                    callback_data="admin:bookings"
-                )
-            ],
-            [
-                InlineKeyboardButton(text="📅 Планировщик", callback_data="admin:planner"),
-                InlineKeyboardButton(text="👥 Клиенты", callback_data="admin:clients"),
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🚗 Автомобили",
-                    callback_data="admin:cars"
-                )
-            ],
-            [
-                InlineKeyboardButton(text="⭐ Отзывы", callback_data="admin:reviews")
-            ],
-            [
-                InlineKeyboardButton(text="🔎 Поиск / фильтр", callback_data="admin:filter"),
-                InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")
-            ],
-            [
-                InlineKeyboardButton(text="💰 Отчёт по доходам", callback_data="admin:report")
-            ],
-            [
-                InlineKeyboardButton(text="🖥 Открыть веб-админку", web_app=WebAppInfo(url=ADMIN_WEBAPP_URL))
             ],
         ]
     )
@@ -8110,8 +8081,18 @@ async def admin_booking_action_api(request):
         data = await request.json()
         bid = int(data.get("id", 0))
         action = str(data.get("action", "")).strip().lower()
-        if action not in ("confirm", "reject", "cancel") or bid <= 0:
+        if action not in ("confirm", "reject", "cancel", "issue", "return") or bid <= 0:
             return mini_json({"message": "Некорректный запрос."}, 400)
+        if action == "issue":
+            row = await asyncio.to_thread(mark_issued_sync, bid)
+            if not row:
+                return mini_json({"message": "Не удалось отметить выдачу."}, 409)
+            return mini_json({"ok": True, "action": "issue", "id": bid})
+        if action == "return":
+            row = await asyncio.to_thread(mark_returned_sync, bid)
+            if not row:
+                return mini_json({"message": "Не удалось отметить возврат (нужна выдача)."}, 409)
+            return mini_json({"ok": True, "action": "return", "id": bid})
         result = await asyncio.to_thread(admin_action_sync, action, bid)
         if not result.get("ok"):
             reason = result.get("reason")
@@ -8247,6 +8228,143 @@ async def admin_block_delete_api(request):
         return mini_json({"message": "Не удалось удалить блок."}, 500)
 
 
+
+def admin_planner_sync():
+    pickups = get_today_pickups_sync()
+    returns = get_today_returns_sync()
+    tomorrow = get_tomorrow_pickups_sync()
+    in_progress = get_in_progress_rentals_sync()
+
+    def pack(rows):
+        out = []
+        for r in rows:
+            sa = ensure_tz(r.get("start_at")) if r.get("start_at") else None
+            ea = ensure_tz(r.get("end_at")) if r.get("end_at") else None
+            out.append({
+                "id": r["id"],
+                "car_id": r["car_id"],
+                "car_name": CARS.get(r["car_id"], {}).get("name", r["car_id"]),
+                "name": r.get("name") or "",
+                "phone": r.get("phone") or "",
+                "status": r.get("status"),
+                "issued_at": ensure_tz(r["issued_at"]).isoformat() if r.get("issued_at") else None,
+                "returned_at": ensure_tz(r["returned_at"]).isoformat() if r.get("returned_at") else None,
+                "start_label": sa.strftime("%d.%m.%Y %H:%M") if sa else "",
+                "end_label": ea.strftime("%d.%m.%Y %H:%M") if ea else "",
+                "total": r.get("total") or 0,
+            })
+        return out
+
+    return {
+        "pickups": pack(pickups),
+        "returns": pack(returns),
+        "tomorrow": pack(tomorrow),
+        "in_progress": pack(in_progress),
+    }
+
+
+async def admin_planner_api(request):
+    admin_web_auth_or_403(request)
+    data = await asyncio.to_thread(admin_planner_sync)
+    return mini_json(data)
+
+
+def admin_clients_list_sync(query=None, limit=50):
+    if query and query.strip():
+        rows = search_clients_sync(query.strip(), limit)
+    else:
+        rows = list_recent_clients_sync(limit)
+    out = []
+    for c in rows:
+        out.append({
+            "id": c["id"],
+            "full_name": c.get("full_name") or "",
+            "phone": c.get("phone") or "",
+            "username": c.get("username") or "",
+            "user_id": c.get("user_id"),
+            "notes": c.get("notes") or "",
+            "blacklisted": bool(c.get("blacklisted")),
+            "updated_at": ensure_tz(c["updated_at"]).strftime("%d.%m.%Y %H:%M") if c.get("updated_at") else "",
+        })
+    return out
+
+
+async def admin_clients_api(request):
+    admin_web_auth_or_403(request)
+    q = request.query.get("q") or request.query.get("query") or ""
+    rows = await asyncio.to_thread(admin_clients_list_sync, q, 50)
+    return mini_json({"clients": rows})
+
+
+def admin_client_detail_sync(client_id):
+    client = get_client_sync(client_id=client_id)
+    if not client:
+        return None
+    bookings = client_bookings_sync(client_id, 30)
+    b_out = []
+    for b in bookings:
+        sa = ensure_tz(b.get("start_at")) if b.get("start_at") else None
+        ea = ensure_tz(b.get("end_at")) if b.get("end_at") else None
+        b_out.append({
+            "id": b["id"],
+            "car_name": CARS.get(b["car_id"], {}).get("name", b["car_id"]),
+            "status": b.get("status"),
+            "status_label": status_label(b.get("status")),
+            "start_label": sa.strftime("%d.%m.%Y %H:%M") if sa else "",
+            "end_label": ea.strftime("%d.%m.%Y %H:%M") if ea else "",
+            "total": b.get("total") or 0,
+        })
+    return {
+        "client": {
+            "id": client["id"],
+            "full_name": client.get("full_name") or "",
+            "phone": client.get("phone") or "",
+            "username": client.get("username") or "",
+            "user_id": client.get("user_id"),
+            "notes": client.get("notes") or "",
+            "blacklisted": bool(client.get("blacklisted")),
+        },
+        "bookings": b_out,
+    }
+
+
+async def admin_client_detail_api(request):
+    admin_web_auth_or_403(request)
+    try:
+        cid = int(request.query.get("id") or 0)
+    except ValueError:
+        return mini_json({"message": "Некорректный id"}, 400)
+    data = await asyncio.to_thread(admin_client_detail_sync, cid)
+    if not data:
+        return mini_json({"message": "Клиент не найден"}, 404)
+    return mini_json(data)
+
+
+async def admin_client_action_api(request):
+    admin_web_auth_or_403(request)
+    try:
+        data = await request.json()
+        cid = int(data.get("id", 0))
+        action = str(data.get("action", "")).strip().lower()
+    except Exception:
+        return mini_json({"message": "Некорректный запрос"}, 400)
+    if cid <= 0:
+        return mini_json({"message": "Некорректный id"}, 400)
+    if action == "blacklist":
+        client = await asyncio.to_thread(get_client_sync, client_id=cid)
+        if not client:
+            return mini_json({"message": "Клиент не найден"}, 404)
+        new_val = not bool(client.get("blacklisted"))
+        await asyncio.to_thread(set_client_blacklist_sync, cid, new_val)
+        return mini_json({"ok": True, "blacklisted": new_val})
+    if action == "notes":
+        notes = str(data.get("notes", "")).strip()
+        await asyncio.to_thread(set_client_notes_sync, cid, notes)
+        return mini_json({"ok": True})
+    return mini_json({"message": "Неизвестное действие"}, 400)
+
+
+
 async def mini_app_routes(app):
     mini_add_location_columns()
     app.router.add_get("/app", mini_app)
@@ -8262,6 +8380,10 @@ async def mini_app_routes(app):
     app.router.add_post("/api/admin/expenses", admin_expenses_api)
     app.router.add_post("/api/admin/expenses/delete", admin_expense_delete_api)
     app.router.add_get("/api/admin/reviews", admin_reviews_api)
+    app.router.add_get("/api/admin/planner", admin_planner_api)
+    app.router.add_get("/api/admin/clients", admin_clients_api)
+    app.router.add_get("/api/admin/client", admin_client_detail_api)
+    app.router.add_post("/api/admin/client/action", admin_client_action_api)
     app.router.add_get("/photos/{name:.*}", mini_photo)
     app.router.add_get("/api/cars", mini_cars)
     app.router.add_get("/api/availability", mini_availability)
