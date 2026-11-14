@@ -35,8 +35,9 @@ html.dark .close{background:var(--surface2);color:var(--text)}
   .blockForm input,.blockForm select{font-size:16px}
 }
 .planGrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px}@media(max-width:800px){.planGrid{grid-template-columns:1fr}}.planCard{border:1px solid var(--line);border-radius:14px;padding:12px;background:var(--surface)}.planCard h3{margin:0 0 8px;font-size:14px}.planItem{border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:8px}.planItem .row{display:flex;justify-content:space-between;gap:8px;align-items:center}.planItem b{font-size:13px}.planActions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}.clientTools{padding:12px;display:flex;gap:8px;border-bottom:1px solid var(--line)}.clientTools input{flex:1;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:11px;padding:10px 12px}.clientRow{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:10px;align-items:center;cursor:pointer}.clientRow:active{background:var(--surface2)}
+.carForm{padding:12px;display:grid;gap:8px;border-bottom:1px solid var(--line)}.carForm input,.carForm select,.carForm textarea{border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:11px;padding:10px 12px;width:100%}.carForm textarea{min-height:64px}.carForm .row2{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}@media(max-width:700px){.carForm .row2{grid-template-columns:1fr}}.carItem{padding:12px 14px;border-bottom:1px solid var(--line)}.carItem .rates{font-size:12px;color:var(--muted);margin-top:4px}
 </style>
-</head><body><div class="wrap"><div class="top"><div><div class="brand">BALTICAR</div><small>Администратор · автопарк</small></div><button class="close" onclick="closeApp()">Закрыть</button></div><div class="nav"><button id="tabToday" class="active" onclick="setTab('today')">📅 Сегодня</button><button id="tabCal" onclick="setTab('calendar')">🗓 Календарь</button><button id="tabBookings" onclick="setTab('bookings')">📋 Брони</button><button id="tabClients" onclick="setTab('clients')">👥 Клиенты</button><button id="tabFinance" onclick="setTab('finance')">💰 Финансы</button><button id="tabReviews" onclick="setTab('reviews')">⭐ Отзывы</button></div><section id="content"></section></div>
+</head><body><div class="wrap"><div class="top"><div><div class="brand">BALTICAR</div><small>Администратор · автопарк</small></div><button class="close" onclick="closeApp()">Закрыть</button></div><div class="nav"><button id="tabToday" class="active" onclick="setTab('today')">📅 Сегодня</button><button id="tabCal" onclick="setTab('calendar')">🗓 Календарь</button><button id="tabBookings" onclick="setTab('bookings')">📋 Брони</button><button id="tabCars" onclick="setTab('cars')">🚗 Авто</button><button id="tabClients" onclick="setTab('clients')">👥 Клиенты</button><button id="tabFinance" onclick="setTab('finance')">💰 Финансы</button><button id="tabReviews" onclick="setTab('reviews')">⭐ Отзывы</button></div><section id="content"></section></div>
 <script>
 const tg=window.Telegram?.WebApp;
 function setupFullscreen(){
@@ -126,7 +127,7 @@ async function api(url,opt={}){
 const months=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];const wd=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];let tab='today',cursor=new Date();cursor.setDate(1);let currentData=null;let viewToken=0;
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
 function isoDate(y,m,d){return `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`}
-function setTab(x){tab=x;const token=++viewToken;document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));const map={today:'tabToday',calendar:'tabCal',bookings:'tabBookings',clients:'tabClients',finance:'tabFinance',reviews:'tabReviews'};const btn=document.getElementById(map[x]||('tab'+x[0].toUpperCase()+x.slice(1)));if(btn)btn.classList.add('active');if(x==='today')renderToday(token);if(x==='calendar')renderCalendar(token);if(x==='bookings')renderBookings(token);if(x==='clients')renderClients(token);if(x==='finance')renderFinance(token);if(x==='reviews')renderReviews(token)}
+function setTab(x){tab=x;const token=++viewToken;document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));const map={today:'tabToday',calendar:'tabCal',bookings:'tabBookings',cars:'tabCars',clients:'tabClients',finance:'tabFinance',reviews:'tabReviews'};const btn=document.getElementById(map[x]||('tab'+x[0].toUpperCase()+x.slice(1)));if(btn)btn.classList.add('active');if(x==='today')renderToday(token);if(x==='calendar')renderCalendar(token);if(x==='bookings')renderBookings(token);if(x==='cars')renderCars(token);if(x==='clients')renderClients(token);if(x==='finance')renderFinance(token);if(x==='reviews')renderReviews(token)}
 async function renderToday(token=viewToken){
   $('content').innerHTML='<div class="panel"><div class="loader">Загружаю планировщик…</div></div>';
   try{
@@ -160,7 +161,7 @@ async function renderClients(token=viewToken,q=''){
     if(token!==viewToken||tab!=='clients')return;
     clientsCache=d.clients||[];
     const rows=(d.clients||[]).map(c=>`<div class="clientRow" onclick="openClient(${c.id})"><div><b>${c.blacklisted?'🚫 ':''}${esc(c.full_name)}</b><div class="muted">${esc(c.phone)} ${c.username?'@'+esc(c.username):''}</div></div><div class="muted">${esc(c.updated_at||'')}</div></div>`).join('')||'<div class="empty">Клиентов пока нет</div>';
-    $('content').innerHTML=`<div class="panel"><div class="panelHead"><h1>Клиенты</h1></div><div class="clientTools"><input id="clientQ" placeholder="Поиск: имя, телефон, @username" value="${esc(q)}"><button class="miniBtn primary" onclick="renderClients(viewToken,$('clientQ').value)">Найти</button></div><div>${rows}</div></div>`;
+    $('content').innerHTML=`<div class="panel"><div class="panelHead"><h1>Клиенты</h1><button class="miniBtn primary" onclick="showAddClient()">➕ Клиент</button></div><div class="clientTools"><input id="clientQ" placeholder="Поиск: имя, телефон, @username" value="${esc(q)}"><button class="miniBtn primary" onclick="renderClients(viewToken,$('clientQ').value)">Найти</button></div><div>${rows}</div></div>`;
     const inp=$('clientQ');if(inp)inp.addEventListener('keydown',e=>{if(e.key==='Enter')renderClients(viewToken,inp.value)});
   }catch(e){if(token!==viewToken||tab!=='clients')return;$('content').innerHTML=`<div class="panel"><div class="empty">${esc(e.message||e)}</div></div>`}
 }
@@ -436,6 +437,120 @@ async function deleteExpense(id){
 }
 
 async function renderReviews(token=viewToken){ $('content').innerHTML='<div class="panel"><div class="loader">Загружаю отзывы…</div></div>';try{const d=await api('/api/admin/reviews');if(token!==viewToken||tab!=='reviews')return;$('content').innerHTML='<div class="panel"><div class="panelHead"><div><h1>Отзывы клиентов</h1><div class="muted">Средняя оценка: '+(d.average||'—')+' ★ · '+d.reviews.length+'</div></div></div><div class="list">'+(d.reviews.length?d.reviews.map(r=>`<div class="item"><div class="stars">${'★'.repeat(Number(r.rating||0))}${'☆'.repeat(5-Number(r.rating||0))}</div><div style="margin-top:8px">${esc(r.text||'Без текста')}</div><div class="muted">${esc(r.name||'Клиент')} · ${esc(r.car_name||'Автомобиль')} · бронь №${r.booking_id} · ${esc(r.created_at||'')}</div></div>`).join(''):'<div class="empty">Отзывов пока нет.</div>')+'</div></div>'}catch(e){if(token!==viewToken||tab!=='reviews')return;$('content').innerHTML=`<div class="panel"><div class="empty">${esc(e.message)}</div></div>`}}
+
+async function renderCars(token=viewToken){
+  $('content').innerHTML='<div class="panel"><div class="loader">Загружаю автопарк…</div></div>';
+  try{
+    const d=await api('/api/admin/cars');
+    if(token!==viewToken||tab!=='cars')return;
+    window._carsCache=d.cars||[];
+    const cars=window._carsCache;
+    const list=cars.map((c,i)=>`
+      <div class="carItem">
+        <div class="row" style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+          <div>
+            <b>${c.active?'🟢':'⚪'} ${esc(c.name)}</b>
+            <div class="muted">${esc(c.gear)} · ${esc(c.fuel)} · ${c.seats} мест · <code>${esc(c.car_id)}</code></div>
+            <div class="rates">1–3 сут: <b>${c.rates[0]}</b> · 4–6: <b>${c.rates[1]}</b> · 7+: <b>${c.rates[2]}</b> ₽</div>
+          </div>
+          <div class="planActions">
+            <button class="miniBtn" onclick="editCarIdx(${i})">✏️</button>
+            <button class="miniBtn danger" onclick="deleteCar('${esc(c.car_id)}',${c.is_custom?1:0})">${c.is_custom?'🗑':'⛔'}</button>
+          </div>
+        </div>
+      </div>`).join('')||'<div class="empty">Нет автомобилей</div>';
+    $('content').innerHTML=`
+      <div class="panel">
+        <div class="panelHead"><h1>Автопарк</h1><button class="miniBtn primary" onclick="editCar(null)">➕ Добавить</button></div>
+        <div id="carFormBox"></div>
+        <div>${list}</div>
+      </div>`;
+  }catch(e){if(token!==viewToken||tab!=='cars')return;$('content').innerHTML=`<div class="panel"><div class="empty">${esc(e.message||e)}</div></div>`}
+}
+function editCarIdx(i){editCar((window._carsCache||[])[i])}
+function editCar(c){
+  const box=$('carFormBox'); if(!box)return;
+  const v=c||{car_id:'',name:'',gear:'АКПП',fuel:'Бензин',seats:5,rates:[2500,2400,2300],description:'',active:true};
+  box.innerHTML=`
+    <div class="carForm">
+      <b>${c?'Изменить':'Новый автомобиль'}</b>
+      <input id="cf_name" placeholder="Название *" value="${esc(v.name)}">
+      <div class="row2">
+        <input id="cf_r1" type="number" placeholder="1–3 сут" value="${v.rates[0]}">
+        <input id="cf_r2" type="number" placeholder="4–6 сут" value="${v.rates[1]}">
+        <input id="cf_r3" type="number" placeholder="7+ сут" value="${v.rates[2]}">
+      </div>
+      <div class="row2">
+        <input id="cf_gear" placeholder="КПП" value="${esc(v.gear)}">
+        <input id="cf_fuel" placeholder="Топливо" value="${esc(v.fuel)}">
+        <input id="cf_seats" type="number" placeholder="Мест" value="${v.seats}">
+      </div>
+      <textarea id="cf_desc" placeholder="Описание">${esc(v.description||'')}</textarea>
+      <label style="display:flex;gap:8px;align-items:center"><input id="cf_active" type="checkbox" ${v.active?'checked':''}> Активен (виден клиентам)</label>
+      <div class="planActions">
+        <button class="miniBtn primary" onclick="saveCar('${esc(v.car_id||'')}')">💾 Сохранить</button>
+        <button class="miniBtn" onclick="$('carFormBox').innerHTML=''">Отмена</button>
+      </div>
+    </div>`;
+}
+async function saveCar(carId){
+  const payload={
+    car_id:carId||'',
+    name:$('cf_name').value.trim(),
+    rate_1_3:+$('cf_r1').value,
+    rate_4_6:+$('cf_r2').value,
+    rate_7_plus:+$('cf_r3').value,
+    gear:$('cf_gear').value.trim(),
+    fuel:$('cf_fuel').value.trim(),
+    seats:+$('cf_seats').value||5,
+    description:$('cf_desc').value.trim(),
+    active:$('cf_active').checked
+  };
+  try{
+    await api('/api/admin/cars/save',{method:'POST',body:JSON.stringify(payload)});
+    tg?.HapticFeedback?.notificationOccurred?.('success');
+    renderCars();
+  }catch(e){alert(e.message||e)}
+}
+async function deleteCar(carId,isCustom){
+  const msg=isCustom?'Удалить автомобиль?':'Отключить базовый автомобиль (удаление из кода недоступно)?';
+  if(!confirm(msg))return;
+  try{
+    const r=await api('/api/admin/cars/delete',{method:'POST',body:JSON.stringify({car_id:carId})});
+    alert(r.soft?'Автомобиль отключён':'Удалено');
+    renderCars();
+  }catch(e){alert(e.message||e)}
+}
+
+async function showAddClient(){
+  $('content').innerHTML=`
+    <div class="panel">
+      <div class="panelHead"><h1>Новый клиент</h1><button class="miniBtn" onclick="renderClients()">←</button></div>
+      <div class="carForm">
+        <input id="nc_name" placeholder="ФИО *">
+        <input id="nc_phone" placeholder="Телефон *">
+        <input id="nc_user" placeholder="@username (необязательно)">
+        <textarea id="nc_notes" placeholder="Заметки"></textarea>
+        <div class="planActions">
+          <button class="miniBtn primary" onclick="createClient()">💾 Сохранить</button>
+          <button class="miniBtn" onclick="renderClients()">Отмена</button>
+        </div>
+      </div>
+    </div>`;
+}
+async function createClient(){
+  try{
+    await api('/api/admin/client/create',{method:'POST',body:JSON.stringify({
+      full_name:$('nc_name').value.trim(),
+      phone:$('nc_phone').value.trim(),
+      username:$('nc_user').value.trim().replace(/^@/,''),
+      notes:$('nc_notes').value.trim()
+    })});
+    tg?.HapticFeedback?.notificationOccurred?.('success');
+    renderClients();
+  }catch(e){alert(e.message||e)}
+}
+
 function closeApp(){tg?.close?.()||history.back()}
 async function boot(){
   $('content').innerHTML='<div class="panel"><div class="loader">Подключаюсь к админке…</div></div>';
