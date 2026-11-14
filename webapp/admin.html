@@ -34,8 +34,9 @@ html.dark .close{background:var(--surface2);color:var(--text)}
   .blockForm .blkRow2{grid-template-columns:1fr}
   .blockForm input,.blockForm select{font-size:16px}
 }
+.planGrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px}@media(max-width:800px){.planGrid{grid-template-columns:1fr}}.planCard{border:1px solid var(--line);border-radius:14px;padding:12px;background:var(--surface)}.planCard h3{margin:0 0 8px;font-size:14px}.planItem{border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:8px}.planItem .row{display:flex;justify-content:space-between;gap:8px;align-items:center}.planItem b{font-size:13px}.planActions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}.clientTools{padding:12px;display:flex;gap:8px;border-bottom:1px solid var(--line)}.clientTools input{flex:1;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:11px;padding:10px 12px}.clientRow{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:10px;align-items:center;cursor:pointer}.clientRow:active{background:var(--surface2)}
 </style>
-</head><body><div class="wrap"><div class="top"><div><div class="brand">BALTICAR</div><small>Администратор · автопарк</small></div><button class="close" onclick="closeApp()">Закрыть</button></div><div class="nav"><button id="tabCal" class="active" onclick="setTab('calendar')">📅 Календарь</button><button id="tabBookings" onclick="setTab('bookings')">📋 Брони</button><button id="tabFinance" onclick="setTab('finance')">💰 Финансы</button><button id="tabReviews" onclick="setTab('reviews')">⭐ Отзывы</button></div><section id="content"></section></div>
+</head><body><div class="wrap"><div class="top"><div><div class="brand">BALTICAR</div><small>Администратор · автопарк</small></div><button class="close" onclick="closeApp()">Закрыть</button></div><div class="nav"><button id="tabToday" class="active" onclick="setTab('today')">📅 Сегодня</button><button id="tabCal" onclick="setTab('calendar')">🗓 Календарь</button><button id="tabBookings" onclick="setTab('bookings')">📋 Брони</button><button id="tabClients" onclick="setTab('clients')">👥 Клиенты</button><button id="tabFinance" onclick="setTab('finance')">💰 Финансы</button><button id="tabReviews" onclick="setTab('reviews')">⭐ Отзывы</button></div><section id="content"></section></div>
 <script>
 const tg=window.Telegram?.WebApp;
 function setupFullscreen(){
@@ -122,10 +123,63 @@ async function api(url,opt={}){
     throw e;
   }finally{clearTimeout(timer)}
 }
-const months=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];const wd=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];let tab='calendar',cursor=new Date();cursor.setDate(1);let currentData=null;let viewToken=0;
+const months=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];const wd=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];let tab='today',cursor=new Date();cursor.setDate(1);let currentData=null;let viewToken=0;
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
 function isoDate(y,m,d){return `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`}
-function setTab(x){tab=x;const token=++viewToken;document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));const btn=document.getElementById('tab'+x[0].toUpperCase()+x.slice(1));if(btn)btn.classList.add('active');if(x==='calendar')renderCalendar(token);if(x==='bookings')renderBookings(token);if(x==='finance')renderFinance(token);if(x==='reviews')renderReviews(token)}
+function setTab(x){tab=x;const token=++viewToken;document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));const map={today:'tabToday',calendar:'tabCal',bookings:'tabBookings',clients:'tabClients',finance:'tabFinance',reviews:'tabReviews'};const btn=document.getElementById(map[x]||('tab'+x[0].toUpperCase()+x.slice(1)));if(btn)btn.classList.add('active');if(x==='today')renderToday(token);if(x==='calendar')renderCalendar(token);if(x==='bookings')renderBookings(token);if(x==='clients')renderClients(token);if(x==='finance')renderFinance(token);if(x==='reviews')renderReviews(token)}
+async function renderToday(token=viewToken){
+  $('content').innerHTML='<div class="panel"><div class="loader">Загружаю планировщик…</div></div>';
+  try{
+    const d=await api('/api/admin/planner');
+    if(token!==viewToken||tab!=='today')return;
+    const block=(title,items,kind)=>{
+      if(!items||!items.length) return `<div class="planCard"><h3>${title}</h3><div class="muted">нет</div></div>`;
+      return `<div class="planCard"><h3>${title}</h3>`+items.map(it=>{
+        let acts='';
+        if(kind==='pickup') acts=`<button class="miniBtn primary" onclick="plannerAction(${it.id},'issue')">✅ Выдать</button>`;
+        if(kind==='return'||kind==='progress') acts=`<button class="miniBtn primary" onclick="plannerAction(${it.id},'return')">📥 Принять</button>`;
+        return `<div class="planItem"><div class="row"><b>№${it.id} · ${esc(it.car_name)}</b><span class="muted">${kind==='return'||kind==='progress'?esc(it.end_label):esc(it.start_label)}</span></div><div class="muted">${esc(it.name)} · ${esc(it.phone)}</div><div class="planActions">${acts}<button class="miniBtn" onclick="openBookingFromPlanner(${it.id})">Открыть</button></div></div>`;
+      }).join('')+`</div>`;
+    };
+    $('content').innerHTML=`<div class="panel"><div class="panelHead"><h1>Планировщик</h1><button class="miniBtn" onclick="renderToday()">🔄</button></div><div class="planGrid">${block('🔑 Выдачи сегодня',d.pickups,'pickup')}${block('↩️ Возвраты сегодня',d.returns,'return')}${block('🚗 Сейчас в аренде',d.in_progress,'progress')}${block('📌 Выдачи завтра',d.tomorrow,'none')}</div></div>`;
+  }catch(e){if(token!==viewToken||tab!=='today')return;$('content').innerHTML=`<div class="panel"><div class="empty">${esc(e.message||e)}</div></div>`}
+}
+async function plannerAction(id,action){
+  try{
+    await api('/api/admin/booking/action',{method:'POST',body:JSON.stringify({id,action})});
+    tg?.HapticFeedback?.notificationOccurred?.('success');
+    renderToday();
+  }catch(e){alert(e.message||e)}
+}
+function openBookingFromPlanner(id){setTab('bookings');setTimeout(()=>{try{const el=[...document.querySelectorAll('.bookingItem')].find(n=>n.textContent.includes('№'+id));el?.scrollIntoView({behavior:'smooth',block:'center'})}catch(e){}},600)}
+let clientsCache=[];
+async function renderClients(token=viewToken,q=''){
+  $('content').innerHTML='<div class="panel"><div class="loader">Загружаю клиентов…</div></div>';
+  try{
+    const d=await api('/api/admin/clients'+(q?('?q='+encodeURIComponent(q)):''));
+    if(token!==viewToken||tab!=='clients')return;
+    clientsCache=d.clients||[];
+    const rows=(d.clients||[]).map(c=>`<div class="clientRow" onclick="openClient(${c.id})"><div><b>${c.blacklisted?'🚫 ':''}${esc(c.full_name)}</b><div class="muted">${esc(c.phone)} ${c.username?'@'+esc(c.username):''}</div></div><div class="muted">${esc(c.updated_at||'')}</div></div>`).join('')||'<div class="empty">Клиентов пока нет</div>';
+    $('content').innerHTML=`<div class="panel"><div class="panelHead"><h1>Клиенты</h1></div><div class="clientTools"><input id="clientQ" placeholder="Поиск: имя, телефон, @username" value="${esc(q)}"><button class="miniBtn primary" onclick="renderClients(viewToken,$('clientQ').value)">Найти</button></div><div>${rows}</div></div>`;
+    const inp=$('clientQ');if(inp)inp.addEventListener('keydown',e=>{if(e.key==='Enter')renderClients(viewToken,inp.value)});
+  }catch(e){if(token!==viewToken||tab!=='clients')return;$('content').innerHTML=`<div class="panel"><div class="empty">${esc(e.message||e)}</div></div>`}
+}
+async function openClient(id){
+  try{
+    const d=await api('/api/admin/client?id='+id);
+    const c=d.client;const books=(d.bookings||[]).map(b=>`<div class="item"><div class="itemTop"><b>№${b.id} · ${esc(b.car_name)}</b><span class="status">${esc(b.status_label||b.status)}</span></div><div class="muted">${esc(b.start_label)} → ${esc(b.end_label)} · ${b.total||0} ₽</div></div>`).join('')||'<div class="muted">Истории нет</div>';
+    $('content').innerHTML=`<div class="panel"><div class="panelHead"><h1>${c.blacklisted?'🚫':''}${esc(c.full_name)}</h1><button class="miniBtn" onclick="renderClients()">←</button></div><div class="detail"><div>📞 ${esc(c.phone)}</div><div>🆔 <code>${c.user_id||'—'}</code> ${c.username?'@'+esc(c.username):''}</div><div style="margin-top:8px">📝 ${esc(c.notes||'—')}</div><div class="bookingActions" style="margin-top:12px"><button class="miniBtn danger" onclick="toggleClientBL(${c.id})">${c.blacklisted?'Убрать из ЧС':'В чёрный список'}</button><button class="miniBtn" onclick="editClientNotes(${c.id})">Заметка</button></div><h3 style="margin-top:16px">История аренд</h3>${books}</div></div>`;
+  }catch(e){alert(e.message||e)}
+}
+async function toggleClientBL(id){
+  try{await api('/api/admin/client/action',{method:'POST',body:JSON.stringify({id,action:'blacklist'})});openClient(id)}catch(e){alert(e.message||e)}
+}
+async function editClientNotes(id){
+  const notes=prompt('Заметка по клиенту (пусто = очистить):','');
+  if(notes===null)return;
+  try{await api('/api/admin/client/action',{method:'POST',body:JSON.stringify({id,action:'notes',notes})});openClient(id)}catch(e){alert(e.message||e)}
+}
+
 async function renderCalendar(token=viewToken){const y=cursor.getFullYear(),m=cursor.getMonth();$('content').innerHTML='<div class="panel"><div class="loader">Загружаю календарь…</div></div>';try{currentData=await api(`/api/admin/calendar?year=${y}&month=${m+1}`);if(token!==viewToken||tab!=='calendar')return;drawCalendar()}catch(e){if(token!==viewToken||tab!=='calendar')return;$('content').innerHTML=`<div class="panel"><div class="empty">${esc(e.message)}</div></div>`}}
 function drawCalendar(){const d=currentData, y=cursor.getFullYear(),m=cursor.getMonth(),days=d.days;let html=`<div class="panel"><div class="panelHead"><div><h1>Занятость автопарка</h1><div class="muted">Все автомобили · пересечения видно сразу</div></div><div class="monthNav"><button onclick="moveMonth(-1)">‹</button><div class="monthTitle">${months[m]} ${y}</div><button onclick="moveMonth(1)">›</button></div></div><div class="legend"><span class="dot"><i class="d-confirmed"></i> подтверждено</span><span class="dot"><i class="d-pending"></i> ожидает</span><span class="dot"><i class="d-completed"></i> завершено</span><span class="dot"><i class="d-maint"></i> занято вручную / ТО</span><span class="dot"><i class="d-free"></i> свободно</span></div>`;
 html+=`<div class="blockForm panel" style="margin:0;border-radius:0;border-left:0;border-right:0;box-shadow:none">
