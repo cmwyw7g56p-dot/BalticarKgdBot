@@ -244,6 +244,8 @@ class AdminFeature(StatesGroup):
     car_name = State()
     car_rates = State()
     maintenance = State()
+    client_search = State()
+    client_notes = State()
 
 
 # ============================================================
@@ -449,6 +451,32 @@ def init_db():
                 """
             )
 
+
+            # --- Clients CRM + planner columns ---
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS clients (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT UNIQUE,
+                    full_name TEXT NOT NULL,
+                    phone TEXT NOT NULL,
+                    username TEXT,
+                    notes TEXT,
+                    blacklisted BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients (phone)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_clients_name ON clients (full_name)")
+
+            cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS client_id BIGINT")
+            cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS issued_at TIMESTAMPTZ")
+            cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS returned_at TIMESTAMPTZ")
+            cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS issue_notes TEXT")
+            cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS return_notes TEXT")
+
             for cid, car in CARS.items():
                 cur.execute(
                     """
@@ -476,6 +504,293 @@ def load_car_settings():
                 CARS[row['car_id']]['name'] = row['name']
                 CARS[row['car_id']]['rates'] = (row['rate_1_3'], row['rate_4_6'], row['rate_7_plus'])
                 CARS[row['car_id']]['active'] = row['active']
+    finally:
+        con.close()
+
+
+
+# ============================================================
+# CLIENTS CRM
+# ============================================================
+
+def upsert_client_sync(user_id, username, full_name, phone, notes=None):
+    """Find client by user_id or phone, update or create."""
+    con = db()
+    try:
+        with con.cursor() as cur:
+            row = None
+            if user_id:
+                row = cur.execute(
+                    "SELECT * FROM clients WHERE user_id=%s",
+                    (user_id,)
+                ).fetchone()
+            if not row and phone:
+                row = cur.execute(
+                    "SELECT * FROM clients WHERE phone=%s ORDER BY id DESC LIMIT 1",
+                    (phone,)
+                ).fetchone()
+
+            if row:
+                cur.execute(
+                    """
+                    UPDATE clients
+                    SET full_name=%s,
+                        phone=%s,
+                        username=COALESCE(%s, username),
+                        notes=COALESCE(%s, notes),
+                        updated_at=NOW()
+                    WHERE id=%s
+                    RETURNING *
+                    """,
+                    (full_name, phone, username, notes, row["id"])
+                )
+                client = cur.fetchone()
+            else:
+                client = cur.execute(
+                    """
+                    INSERT INTO clients (user_id, full_name, phone, username, notes)
+                    VALUES (%s, %s, %s, %s, %s)
+                    RETURNING *
+                    """,
+                    (user_id, full_name, phone, username, notes)
+                ).fetchone()
+        con.commit()
+        return client
+    finally:
+        con.close()
+
+
+def get_client_sync(client_id=None, user_id=None, phone=None):
+    con = db()
+    try:
+        with con.cursor() as cur:
+            if client_id is not None:
+                return cur.execute("SELECT * FROM clients WHERE id=%s", (client_id,)).fetchone()
+            if user_id is not None:
+                return cur.execute("SELECT * FROM clients WHERE user_id=%s", (user_id,)).fetchone()
+            if phone:
+                return cur.execute(
+                    "SELECT * FROM clients WHERE phone=%s ORDER BY id DESC LIMIT 1",
+                    (phone,)
+                ).fetchone()
+            return None
+    finally:
+        con.close()
+
+
+def search_clients_sync(query, limit=30):
+    q = f"%{(query or '').strip()}%"
+    con = db()
+    try:
+        with con.cursor() as cur:
+            return cur.execute(
+                """
+                SELECT *
+                FROM clients
+                WHERE full_name ILIKE %s
+                   OR phone ILIKE %s
+                   OR COALESCE(username,'') ILIKE %s
+                ORDER BY updated_at DESC
+                LIMIT %s
+                """,
+                (q, q, q, limit)
+            ).fetchall()
+    finally:
+        con.close()
+
+
+def client_bookings_sync(client_id, limit=20):
+    con = db()
+    try:
+        with con.cursor() as cur:
+            return cur.execute(
+                """
+                SELECT *
+                FROM bookings
+                WHERE client_id=%s
+                   OR (
+                        client_id IS NULL
+                        AND phone = (SELECT phone FROM clients WHERE id=%s)
+                   )
+                ORDER BY COALESCE(start_at, created_at) DESC
+                LIMIT %s
+                """,
+                (client_id, client_id, limit)
+            ).fetchall()
+    finally:
+        con.close()
+
+
+def set_client_blacklist_sync(client_id, value: bool):
+    con = db()
+    try:
+        with con.cursor() as cur:
+            cur.execute(
+                "UPDATE clients SET blacklisted=%s, updated_at=NOW() WHERE id=%s",
+                (value, client_id)
+            )
+        con.commit()
+    finally:
+        con.close()
+
+
+def set_client_notes_sync(client_id, notes: str):
+    con = db()
+    try:
+        with con.cursor() as cur:
+            cur.execute(
+                "UPDATE clients SET notes=%s, updated_at=NOW() WHERE id=%s",
+                (notes, client_id)
+            )
+        con.commit()
+    finally:
+        con.close()
+
+
+def list_recent_clients_sync(limit=30):
+    con = db()
+    try:
+        with con.cursor() as cur:
+            return cur.execute(
+                "SELECT * FROM clients ORDER BY updated_at DESC LIMIT %s",
+                (limit,)
+            ).fetchall()
+    finally:
+        con.close()
+
+
+# ============================================================
+# PLANNER (issue / return)
+# ============================================================
+
+def get_today_pickups_sync():
+    today = datetime.now(TZ).date()
+    day_start = local_dt(today, time(0, 0))
+    day_end = day_start + timedelta(days=1)
+    con = db()
+    try:
+        with con.cursor() as cur:
+            return cur.execute(
+                """
+                SELECT *
+                FROM bookings
+                WHERE status = 'confirmed'
+                  AND issued_at IS NULL
+                  AND start_at >= %s
+                  AND start_at < %s
+                ORDER BY start_at
+                """,
+                (day_start, day_end)
+            ).fetchall()
+    finally:
+        con.close()
+
+
+def get_today_returns_sync():
+    today = datetime.now(TZ).date()
+    day_start = local_dt(today, time(0, 0))
+    day_end = day_start + timedelta(days=1)
+    con = db()
+    try:
+        with con.cursor() as cur:
+            return cur.execute(
+                """
+                SELECT *
+                FROM bookings
+                WHERE status = 'confirmed'
+                  AND issued_at IS NOT NULL
+                  AND returned_at IS NULL
+                  AND end_at >= %s
+                  AND end_at < %s
+                ORDER BY end_at
+                """,
+                (day_start, day_end)
+            ).fetchall()
+    finally:
+        con.close()
+
+
+def get_tomorrow_pickups_sync():
+    day = datetime.now(TZ).date() + timedelta(days=1)
+    day_start = local_dt(day, time(0, 0))
+    day_end = day_start + timedelta(days=1)
+    con = db()
+    try:
+        with con.cursor() as cur:
+            return cur.execute(
+                """
+                SELECT *
+                FROM bookings
+                WHERE status = 'confirmed'
+                  AND issued_at IS NULL
+                  AND start_at >= %s
+                  AND start_at < %s
+                ORDER BY start_at
+                """,
+                (day_start, day_end)
+            ).fetchall()
+    finally:
+        con.close()
+
+
+def get_in_progress_rentals_sync():
+    con = db()
+    try:
+        with con.cursor() as cur:
+            return cur.execute(
+                """
+                SELECT *
+                FROM bookings
+                WHERE status = 'confirmed'
+                  AND issued_at IS NOT NULL
+                  AND returned_at IS NULL
+                ORDER BY end_at
+                """
+            ).fetchall()
+    finally:
+        con.close()
+
+
+def mark_issued_sync(bid, notes=None):
+    con = db()
+    try:
+        with con.cursor() as cur:
+            row = cur.execute(
+                """
+                UPDATE bookings
+                SET issued_at = NOW(),
+                    issue_notes = COALESCE(%s, issue_notes)
+                WHERE id=%s AND status='confirmed' AND issued_at IS NULL
+                RETURNING *
+                """,
+                (notes, bid)
+            ).fetchone()
+        con.commit()
+        return row
+    finally:
+        con.close()
+
+
+def mark_returned_sync(bid, notes=None):
+    con = db()
+    try:
+        with con.cursor() as cur:
+            row = cur.execute(
+                """
+                UPDATE bookings
+                SET returned_at = NOW(),
+                    return_notes = COALESCE(%s, return_notes),
+                    status = 'completed'
+                WHERE id=%s
+                  AND status='confirmed'
+                  AND issued_at IS NOT NULL
+                  AND returned_at IS NULL
+                RETURNING *
+                """,
+                (notes, bid)
+            ).fetchone()
+        con.commit()
+        return row
     finally:
         con.close()
 
@@ -1987,6 +2302,10 @@ def admin_panel_keyboard():
                 )
             ],
             [
+                InlineKeyboardButton(text="📅 Планировщик", callback_data="admin:planner"),
+                InlineKeyboardButton(text="👥 Клиенты", callback_data="admin:clients"),
+            ],
+            [
                 InlineKeyboardButton(
                     text="🚗 Автомобили",
                     callback_data="admin:cars"
@@ -3427,6 +3746,45 @@ def create_booking_sync(
             start_date = start_at.date()
             end_date = end_at.date()
 
+            # CRM: upsert client inside same transaction connection
+            client_row = None
+            if message_user_id:
+                client_row = cur.execute(
+                    "SELECT * FROM clients WHERE user_id=%s",
+                    (message_user_id,)
+                ).fetchone()
+            if not client_row and phone:
+                client_row = cur.execute(
+                    "SELECT * FROM clients WHERE phone=%s ORDER BY id DESC LIMIT 1",
+                    (phone,)
+                ).fetchone()
+            if client_row:
+                if client_row.get("blacklisted"):
+                    con.rollback()
+                    return {"ok": False, "reason": "blacklisted"}
+                cur.execute(
+                    """
+                    UPDATE clients
+                    SET full_name=%s,
+                        phone=%s,
+                        username=COALESCE(%s, username),
+                        updated_at=NOW()
+                    WHERE id=%s
+                    """,
+                    (name, phone, username, client_row["id"])
+                )
+                client_id = client_row["id"]
+            else:
+                client_row = cur.execute(
+                    """
+                    INSERT INTO clients (user_id, full_name, phone, username)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (message_user_id, name, phone, username)
+                ).fetchone()
+                client_id = client_row["id"]
+
             row = cur.execute(
                 """
                 INSERT INTO bookings (
@@ -3443,13 +3801,14 @@ def create_booking_sync(
                     total,
                     status,
                     created_at,
-                    expires_at
+                    expires_at,
+                    client_id
                 )
                 VALUES (
                     %s, %s, %s, %s, %s,
                     %s, %s,
                     %s, %s, %s, %s,
-                    'pending', %s, %s
+                    'pending', %s, %s, %s
                 )
                 RETURNING id
                 """,
@@ -3466,7 +3825,8 @@ def create_booking_sync(
                     comment,
                     total,
                     created_at,
-                    expires
+                    expires,
+                    client_id
                 )
             ).fetchone()
 
@@ -5917,6 +6277,278 @@ async def publish(
 # MAIN
 # ============================================================
 
+
+# ============================================================
+# ADMIN PLANNER + CLIENTS
+# ============================================================
+
+async def admin_planner(callback: CallbackQuery):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID:
+        return
+
+    pickups = await asyncio.to_thread(get_today_pickups_sync)
+    returns = await asyncio.to_thread(get_today_returns_sync)
+    tomorrow = await asyncio.to_thread(get_tomorrow_pickups_sync)
+    in_progress = await asyncio.to_thread(get_in_progress_rentals_sync)
+
+    lines = ["📅 <b>Планировщик</b>\n"]
+
+    lines.append("<b>🔑 Выдачи сегодня:</b>")
+    if not pickups:
+        lines.append("нет")
+    else:
+        for r in pickups:
+            car = CARS.get(r["car_id"], {}).get("name", r["car_id"])
+            lines.append(
+                f"• №{r['id']} {car}\n"
+                f"  {format_date_time(r['start_at'])} → {r['name']} / {r['phone']}"
+            )
+
+    lines.append("\n<b>↩️ Возвраты сегодня:</b>")
+    if not returns:
+        lines.append("нет")
+    else:
+        for r in returns:
+            car = CARS.get(r["car_id"], {}).get("name", r["car_id"])
+            lines.append(
+                f"• №{r['id']} {car}\n"
+                f"  {format_date_time(r['end_at'])} → {r['name']} / {r['phone']}"
+            )
+
+    lines.append("\n<b>🚗 Сейчас в аренде:</b>")
+    if not in_progress:
+        lines.append("нет")
+    else:
+        for r in in_progress[:15]:
+            car = CARS.get(r["car_id"], {}).get("name", r["car_id"])
+            lines.append(
+                f"• №{r['id']} {car} до {format_date_time(r['end_at'])} — {r['name']}"
+            )
+
+    lines.append("\n<b>📌 Выдачи завтра:</b>")
+    if not tomorrow:
+        lines.append("нет")
+    else:
+        for r in tomorrow[:10]:
+            car = CARS.get(r["car_id"], {}).get("name", r["car_id"])
+            lines.append(
+                f"• №{r['id']} {car} {format_date_time(r['start_at'])} — {r['name']}"
+            )
+
+    kb = []
+    for r in pickups:
+        kb.append([InlineKeyboardButton(
+            text=f"✅ Выдать №{r['id']}",
+            callback_data=f"issue:{r['id']}"
+        )])
+    for r in returns:
+        kb.append([InlineKeyboardButton(
+            text=f"📥 Принять №{r['id']}",
+            callback_data=f"returncar:{r['id']}"
+        )])
+    # allow return any in-progress
+    for r in in_progress:
+        if r not in returns:
+            kb.append([InlineKeyboardButton(
+                text=f"📥 Досрочный возврат №{r['id']}",
+                callback_data=f"returncar:{r['id']}"
+            )])
+    kb.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="admin:planner")])
+    kb.append([InlineKeyboardButton(text="◀️ В админ-панель", callback_data="admin:back")])
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+    )
+
+
+async def issue_booking(callback: CallbackQuery):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID:
+        return
+    try:
+        bid = int(callback.data.split(":")[1])
+    except (ValueError, IndexError):
+        await callback.message.answer("Некорректный номер брони.")
+        return
+    row = await asyncio.to_thread(mark_issued_sync, bid)
+    if not row:
+        await callback.message.answer("Не удалось отметить выдачу (уже выдано или статус другой).")
+        return
+    await callback.message.answer(f"✅ Бронь №{bid} отмечена как выданная.")
+    await admin_planner(callback)
+
+
+async def return_booking_cmd(callback: CallbackQuery):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID:
+        return
+    try:
+        bid = int(callback.data.split(":")[1])
+    except (ValueError, IndexError):
+        await callback.message.answer("Некорректный номер брони.")
+        return
+    row = await asyncio.to_thread(mark_returned_sync, bid)
+    if not row:
+        await callback.message.answer("Не удалось отметить возврат (сначала нужна выдача).")
+        return
+    await callback.message.answer(f"📥 Бронь №{bid} закрыта (возврат).")
+    await admin_planner(callback)
+
+
+async def admin_clients(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID:
+        return
+    recent = await asyncio.to_thread(list_recent_clients_sync, 20)
+    lines = ["👥 <b>Клиенты</b>\n", "Последние обновлённые:\n"]
+    kb = []
+    if not recent:
+        lines.append("База пока пуста — клиенты появятся после новых броней.")
+    else:
+        for c in recent:
+            flag = "🚫" if c.get("blacklisted") else "👤"
+            lines.append(f"{flag} {c['full_name']} — {c['phone']}")
+            kb.append([InlineKeyboardButton(
+                text=f"{flag} {c['full_name'][:28]}",
+                callback_data=f"client:{c['id']}"
+            )])
+    kb.append([InlineKeyboardButton(text="🔍 Поиск клиента", callback_data="admin:client_search")])
+    kb.append([InlineKeyboardButton(text="◀️ В админ-панель", callback_data="admin:back")])
+    await callback.message.edit_text(
+        "\n".join(lines),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+    )
+
+
+async def admin_client_search_start(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminFeature.client_search)
+    await callback.message.edit_text(
+        "🔍 <b>Поиск клиента</b>\n\nВведите имя, телефон или @username:",
+        reply_markup=admin_back_keyboard()
+    )
+
+
+async def admin_client_search_message(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    q = (message.text or "").strip()
+    if not q:
+        return
+    await state.clear()
+    rows = await asyncio.to_thread(search_clients_sync, q, 30)
+    if not rows:
+        await message.answer(
+            f"Ничего не найдено по запросу: <b>{q}</b>",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="👥 К клиентам", callback_data="admin:clients")],
+                [InlineKeyboardButton(text="◀️ В админ-панель", callback_data="admin:back")],
+            ])
+        )
+        return
+    kb = []
+    for c in rows:
+        flag = "🚫" if c.get("blacklisted") else "👤"
+        kb.append([InlineKeyboardButton(
+            text=f"{flag} {c['full_name'][:24]} · {c['phone']}",
+            callback_data=f"client:{c['id']}"
+        )])
+    kb.append([InlineKeyboardButton(text="👥 К клиентам", callback_data="admin:clients")])
+    await message.answer(
+        f"🔍 Найдено: <b>{len(rows)}</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+    )
+
+
+async def show_client_card(callback: CallbackQuery):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID:
+        return
+    try:
+        cid = int(callback.data.split(":")[1])
+    except (ValueError, IndexError):
+        return
+    client = await asyncio.to_thread(get_client_sync, client_id=cid)
+    if not client:
+        await callback.message.answer("Клиент не найден.")
+        return
+    bookings = await asyncio.to_thread(client_bookings_sync, cid, 15)
+    text = (
+        f"👤 <b>{client['full_name']}</b>\n"
+        f"📞 {client['phone']}\n"
+        f"🆔 TG: <code>{client['user_id'] or '—'}</code>\n"
+        f"@{client['username'] or '—'}\n"
+        f"{'🚫 В чёрном списке' if client['blacklisted'] else '✅ Обычный клиент'}\n"
+        f"📝 {client['notes'] or '—'}\n\n"
+        f"<b>История аренд ({len(bookings)}):</b>\n"
+    )
+    for b in bookings[:12]:
+        car = CARS.get(b["car_id"], {}).get("name", b["car_id"])
+        text += f"• №{b['id']} {car} — {status_label(b['status'])}\n"
+    kb = [
+        [InlineKeyboardButton(
+            text="🚫 В ЧС" if not client["blacklisted"] else "✅ Убрать из ЧС",
+            callback_data=f"clientbl:{cid}"
+        )],
+        [InlineKeyboardButton(text="📝 Заметка", callback_data=f"clientnote:{cid}")],
+        [InlineKeyboardButton(text="◀️ К клиентам", callback_data="admin:clients")],
+    ]
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+
+
+async def client_blacklist_toggle(callback: CallbackQuery):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID:
+        return
+    try:
+        cid = int(callback.data.split(":")[1])
+    except (ValueError, IndexError):
+        return
+    client = await asyncio.to_thread(get_client_sync, client_id=cid)
+    if not client:
+        return
+    new_val = not bool(client.get("blacklisted"))
+    await asyncio.to_thread(set_client_blacklist_sync, cid, new_val)
+    # refresh card
+    callback.data = f"client:{cid}"
+    await show_client_card(callback)
+
+
+async def client_notes_start(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
+    if callback.from_user.id != ADMIN_ID:
+        return
+    try:
+        cid = int(callback.data.split(":")[1])
+    except (ValueError, IndexError):
+        return
+    await state.set_state(AdminFeature.client_notes)
+    await state.update_data(edit_client_id=cid)
+    await callback.message.answer("Введите заметку по клиенту (или «-» чтобы очистить):")
+
+
+async def client_notes_message(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    data = await state.get_data()
+    cid = data.get("edit_client_id")
+    await state.clear()
+    if not cid:
+        return
+    notes = (message.text or "").strip()
+    if notes == "-":
+        notes = ""
+    await asyncio.to_thread(set_client_notes_sync, cid, notes)
+    await message.answer("✅ Заметка сохранена.")
+    # fake callback for card refresh is hard; just confirm
+
+
+
+
 async def main():
 
     if not BOT_TOKEN:
@@ -6202,6 +6834,14 @@ async def main():
         admin_action,
         F.data.startswith("cancel:")
     )
+    dp.callback_query.register(admin_planner, F.data == "admin:planner")
+    dp.callback_query.register(issue_booking, F.data.startswith("issue:"))
+    dp.callback_query.register(return_booking_cmd, F.data.startswith("returncar:"))
+    dp.callback_query.register(admin_clients, F.data == "admin:clients")
+    dp.callback_query.register(admin_client_search_start, F.data == "admin:client_search")
+    dp.callback_query.register(show_client_card, F.data.startswith("client:"))
+    dp.callback_query.register(client_blacklist_toggle, F.data.startswith("clientbl:"))
+    dp.callback_query.register(client_notes_start, F.data.startswith("clientnote:"))
     dp.callback_query.register(admin_reviews, F.data == "admin:reviews")
     dp.callback_query.register(admin_filter, F.data == "admin:filter")
     dp.callback_query.register(admin_stats, F.data == "admin:stats")
@@ -6238,6 +6878,8 @@ async def main():
     # ========================================================
 
     dp.message.register(admin_search_message, AdminFeature.search)
+    dp.message.register(admin_client_search_message, AdminFeature.client_search)
+    dp.message.register(client_notes_message, AdminFeature.client_notes)
     dp.message.register(car_rates_message, AdminFeature.car_rates)
     dp.message.register(car_name_message, AdminFeature.car_name)
     dp.message.register(maintenance_message, AdminFeature.maintenance)
@@ -6539,110 +7181,31 @@ def mini_parse_local_iso(value):
 
 
 def mini_slots_sync(car_id, year, month, start_at=None):
-    """
-    Формирует часы календаря с пакетной загрузкой занятости.
-
-    Раньше booking_overlaps() вызывался для каждого часа и каждый раз
-    открывал несколько соединений с Neon. Теперь истёкшие заявки
-    очищаются один раз, а брони и техобслуживание читаются пакетно.
-    Финальная проверка при создании брони остаётся без изменений.
-    """
     if car_id not in active_cars():
         return {"mode":"start", "slots":{}}
-
-    slots = {}
-    days = calendar.monthrange(year, month)[1]
-    now = datetime.now(TZ)
-    start_dt = mini_parse_local_iso(start_at) if start_at else None
-
-    month_start = local_dt(date(year, month, 1), time(0, 0))
-    if month == 12:
-        next_month = date(year + 1, 1, 1)
-    else:
-        next_month = date(year, month + 1, 1)
-    month_end = local_dt(next_month, time(0, 0))
-
-    # В режиме выбора даты окончания интервал может начинаться
-    # до первого числа отображаемого месяца.
-    range_start = start_dt if start_dt is not None else month_start
-    bookings_start = range_start - timedelta(hours=BUFFER_HOURS)
-    bookings_end = month_end + timedelta(hours=BUFFER_HOURS)
-
-    con = db()
-    try:
-        with con.cursor() as cur:
-            # Раньше эта операция выполнялась при каждой проверке часа.
-            expire_pending(cur)
-
-            bookings = cur.execute(
-                """
-                SELECT id, status, start_at, end_at
-                FROM bookings
-                WHERE car_id=%s
-                  AND status IN ('pending', 'confirmed')
-                  AND start_at < %s
-                  AND end_at > %s
-                ORDER BY start_at
-                """,
-                (car_id, bookings_end, bookings_start)
-            ).fetchall()
-
-            maintenance = cur.execute(
-                """
-                SELECT id, start_at, end_at
-                FROM car_maintenance
-                WHERE car_id=%s
-                  AND start_at < %s
-                  AND end_at > %s
-                ORDER BY start_at
-                """,
-                (car_id, month_end, range_start)
-            ).fetchall()
-
-        con.commit()
-    finally:
-        con.close()
-
-    def overlaps_maintenance(check_start, check_end):
-        check_start = ensure_tz(check_start)
-        check_end = ensure_tz(check_end)
-        for row in maintenance:
-            maintenance_start = ensure_tz(row["start_at"])
-            maintenance_end = ensure_tz(row["end_at"])
-            if maintenance_start < check_end and maintenance_end > check_start:
-                return True
-        return False
-
-    for day_n in range(1, days + 1):
-        current_day = date(year, month, day_n)
-        available_hours = []
-
-        for hour in range(PICKUP_START_HOUR, PICKUP_END_HOUR + 1):
-            candidate = local_dt(current_day, time(hour, 0))
-
+    slots={}
+    days=calendar.monthrange(year, month)[1]
+    now=datetime.now(TZ)
+    start_dt=mini_parse_local_iso(start_at) if start_at else None
+    for day_n in range(1, days+1):
+        d=date(year,month,day_n)
+        arr=[]
+        for hour in range(PICKUP_START_HOUR, PICKUP_END_HOUR+1):
+            candidate=local_dt(d,time(hour,0))
             if start_dt is None:
                 if candidate <= now:
                     continue
                 if candidate < now + timedelta(hours=0):
                     continue
-                check_start = candidate
-                check_end = candidate + timedelta(hours=1)
+                if booking_overlaps(car_id,candidate,candidate+timedelta(hours=1)):
+                    continue
             else:
                 if candidate <= start_dt:
                     continue
-                check_start = start_dt
-                check_end = candidate
-
-            if overlaps_maintenance(check_start, check_end):
-                continue
-
-            if interval_overlaps_bookings(check_start, check_end, bookings):
-                continue
-
-            available_hours.append(hour)
-
-        slots[current_day.isoformat()] = available_hours
-
+                if booking_overlaps(car_id,start_dt,candidate):
+                    continue
+            arr.append(hour)
+        slots[d.isoformat()]=arr
     return {"mode":"end" if start_dt else "start", "slots":slots}
 
 
@@ -6702,9 +7265,26 @@ def mini_create_booking_sync(user_id, cid, start_at, end_at, name, phone, commen
             if overlap:
                 con.rollback(); return {"ok":False,"reason":"overlap"}
             expires=datetime.now(TZ)+timedelta(minutes=HOLD_MINUTES)
-            cur.execute("""INSERT INTO bookings (user_id,username,car_id,start_date,end_date,start_at,end_at,name,phone,comment,total,status,created_at,expires_at,pickup_location,pickup_location_type,pickup_location_note,pickup_location_fee,payment_method,extras,terms_accepted) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending',%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",(
+            # CRM upsert for mini-app bookings
+            client_row = None
+            if user_id:
+                client_row = cur.execute("SELECT * FROM clients WHERE user_id=%s", (user_id,)).fetchone()
+            if not client_row and phone:
+                client_row = cur.execute("SELECT * FROM clients WHERE phone=%s ORDER BY id DESC LIMIT 1", (phone,)).fetchone()
+            if client_row:
+                if client_row.get("blacklisted"):
+                    con.rollback(); return {"ok": False, "reason": "blacklisted"}
+                cur.execute("UPDATE clients SET full_name=%s, phone=%s, updated_at=NOW() WHERE id=%s", (name, phone, client_row["id"]))
+                client_id = client_row["id"]
+            else:
+                client_row = cur.execute(
+                    "INSERT INTO clients (user_id, full_name, phone, username) VALUES (%s,%s,%s,%s) RETURNING id",
+                    (user_id, name, phone, "")
+                ).fetchone()
+                client_id = client_row["id"]
+            cur.execute("""INSERT INTO bookings (user_id,username,car_id,start_date,end_date,start_at,end_at,name,phone,comment,total,status,created_at,expires_at,pickup_location,pickup_location_type,pickup_location_note,pickup_location_fee,payment_method,extras,terms_accepted,client_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",(
                 user_id,"",cid,start_at.date(),end_at.date(),start_at,end_at,name,phone,comment,rental_total,datetime.now(TZ),expires,
-                LOCATION_TYPES[location_type][0],location_type,location_note or "",location_fee,payment_method,extras_json,bool(terms_accepted)))
+                LOCATION_TYPES[location_type][0],location_type,location_note or "",location_fee,payment_method,extras_json,bool(terms_accepted),client_id))
             bid=cur.fetchone()["id"]
         con.commit()
         extras_labels = [EXTRA_SERVICES[k][0] for k in extras_list]
