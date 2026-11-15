@@ -48,6 +48,19 @@ ADMIN_ID = int(
     os.getenv("ADMIN_ID", "0") or 0
 )
 
+ADMIN_IDS = {ADMIN_ID} if ADMIN_ID else set()
+for _aid in (os.getenv("ADMIN_IDS", "") or "").split(","):
+    _aid = _aid.strip()
+    if _aid.isdigit():
+        ADMIN_IDS.add(int(_aid))
+
+def is_admin(uid) -> bool:
+    try:
+        return int(uid) in ADMIN_IDS
+    except (TypeError, ValueError):
+        return False
+
+
 CHANNEL_USERNAME = os.getenv(
     "CHANNEL_USERNAME",
     "@Balticar_kgd"
@@ -105,7 +118,7 @@ INIT_DATA_MAX_AGE = int(
 _RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
 MINIAPP_BASE_URL = (_RENDER_URL + "/app") if _RENDER_URL else "https://balticarkgdbot.onrender.com/app"
 MINIAPP_URL = MINIAPP_BASE_URL + "?v=55"
-ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=61"
+ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=70"
 
 
 # ============================================================
@@ -478,6 +491,27 @@ def init_db():
 
             cur.execute("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS return_notes TEXT")
 
+            for sql in (
+                "ALTER TABLE clients ADD COLUMN IF NOT EXISTS passport_series TEXT",
+                "ALTER TABLE clients ADD COLUMN IF NOT EXISTS passport_number TEXT",
+                "ALTER TABLE clients ADD COLUMN IF NOT EXISTS passport_issued_by TEXT",
+                "ALTER TABLE clients ADD COLUMN IF NOT EXISTS passport_issued_date TEXT",
+                "ALTER TABLE clients ADD COLUMN IF NOT EXISTS license_number TEXT",
+                "ALTER TABLE clients ADD COLUMN IF NOT EXISTS license_issued_date TEXT",
+                "ALTER TABLE clients ADD COLUMN IF NOT EXISTS license_categories TEXT",
+                "ALTER TABLE clients ADD COLUMN IF NOT EXISTS address TEXT",
+                "ALTER TABLE clients ADD COLUMN IF NOT EXISTS birth_date TEXT",
+                "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_amount INTEGER DEFAULT 0",
+                "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS deposit_status TEXT DEFAULT 'none'",
+                "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS mileage_out INTEGER",
+                "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS mileage_in INTEGER",
+                "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS fuel_out TEXT",
+                "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS fuel_in TEXT",
+                "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS contract_number TEXT",
+            ):
+                cur.execute(sql)
+
+
             # Dynamic fleet fields on car_settings
             for sql in (
                 "ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS gear TEXT DEFAULT 'АКПП'",
@@ -788,7 +822,7 @@ def get_in_progress_rentals_sync():
         con.close()
 
 
-def mark_issued_sync(bid, notes=None):
+def mark_issued_sync(bid, notes=None, deposit_amount=None, mileage_out=None, fuel_out=None):
     con = db()
     try:
         with con.cursor() as cur:
@@ -796,11 +830,15 @@ def mark_issued_sync(bid, notes=None):
                 """
                 UPDATE bookings
                 SET issued_at = NOW(),
-                    issue_notes = COALESCE(%s, issue_notes)
+                    issue_notes = COALESCE(%s, issue_notes),
+                    deposit_amount = COALESCE(%s, deposit_amount, 0),
+                    deposit_status = CASE WHEN COALESCE(%s, deposit_amount, 0) > 0 THEN 'held' ELSE COALESCE(deposit_status, 'none') END,
+                    mileage_out = COALESCE(%s, mileage_out),
+                    fuel_out = COALESCE(%s, fuel_out)
                 WHERE id=%s AND status='confirmed' AND issued_at IS NULL
                 RETURNING *
                 """,
-                (notes, bid)
+                (notes, deposit_amount, deposit_amount, mileage_out, fuel_out, bid)
             ).fetchone()
         con.commit()
         return row
@@ -808,7 +846,7 @@ def mark_issued_sync(bid, notes=None):
         con.close()
 
 
-def mark_returned_sync(bid, notes=None):
+def mark_returned_sync(bid, notes=None, mileage_in=None, fuel_in=None, deposit_status=None):
     con = db()
     try:
         with con.cursor() as cur:
@@ -817,19 +855,23 @@ def mark_returned_sync(bid, notes=None):
                 UPDATE bookings
                 SET returned_at = NOW(),
                     return_notes = COALESCE(%s, return_notes),
-                    status = 'completed'
+                    status = 'completed',
+                    mileage_in = COALESCE(%s, mileage_in),
+                    fuel_in = COALESCE(%s, fuel_in),
+                    deposit_status = COALESCE(%s, deposit_status, deposit_status)
                 WHERE id=%s
                   AND status='confirmed'
                   AND issued_at IS NOT NULL
                   AND returned_at IS NULL
                 RETURNING *
                 """,
-                (notes, bid)
+                (notes, mileage_in, fuel_in, deposit_status, bid)
             ).fetchone()
         con.commit()
         return row
     finally:
         con.close()
+
 
 
 def active_cars():
@@ -7586,7 +7628,7 @@ def admin_web_auth_or_403(request):
     # so accept the same signed initData from the query string as a fallback.
     init_data = request.headers.get("X-Telegram-Init-Data", "") or request.query.get("init_data", "")
     uid = mini_validate_init_data(init_data)
-    if uid != ADMIN_ID:
+    if not is_admin(uid):
         raise web.HTTPForbidden(text="Admin authorization required")
     return uid
 
@@ -8121,12 +8163,32 @@ async def admin_booking_action_api(request):
         if action not in ("confirm", "reject", "cancel", "issue", "return") or bid <= 0:
             return mini_json({"message": "Некорректный запрос."}, 400)
         if action == "issue":
-            row = await asyncio.to_thread(mark_issued_sync, bid)
+            dep = data.get("deposit_amount")
+            try:
+                dep = int(dep) if dep is not None and str(dep).strip() != "" else None
+            except (TypeError, ValueError):
+                dep = None
+            mo = data.get("mileage_out")
+            try:
+                mo = int(mo) if mo is not None and str(mo).strip() != "" else None
+            except (TypeError, ValueError):
+                mo = None
+            fuel = (data.get("fuel_out") or None)
+            notes = data.get("notes")
+            row = await asyncio.to_thread(mark_issued_sync, bid, notes, dep, mo, fuel)
             if not row:
                 return mini_json({"message": "Не удалось отметить выдачу."}, 409)
             return mini_json({"ok": True, "action": "issue", "id": bid})
         if action == "return":
-            row = await asyncio.to_thread(mark_returned_sync, bid)
+            mi = data.get("mileage_in")
+            try:
+                mi = int(mi) if mi is not None and str(mi).strip() != "" else None
+            except (TypeError, ValueError):
+                mi = None
+            fuel = (data.get("fuel_in") or None)
+            dstat = data.get("deposit_status")
+            notes = data.get("notes")
+            row = await asyncio.to_thread(mark_returned_sync, bid, notes, mi, fuel, dstat)
             if not row:
                 return mini_json({"message": "Не удалось отметить возврат (нужна выдача)."}, 409)
             return mini_json({"ok": True, "action": "return", "id": bid})
@@ -8386,69 +8448,64 @@ def admin_delete_car_sync(car_id):
     return {'ok': True, 'soft': False}
 
 
-def admin_create_client_sync(full_name, phone, notes='', username=''):
+def admin_create_client_sync(full_name, phone, notes='', username='', **extra):
     full_name = (full_name or '').strip()
     phone = (phone or '').strip()
     if len(full_name) < 2 or len(phone) < 5:
         return {'ok': False, 'reason': 'fields'}
     existing = get_client_sync(phone=phone)
-    if existing:
-        return {'ok': False, 'reason': 'exists', 'id': existing['id']}
+    fields = {
+        'passport_series': (extra.get('passport_series') or '').strip() or None,
+        'passport_number': (extra.get('passport_number') or '').strip() or None,
+        'passport_issued_by': (extra.get('passport_issued_by') or '').strip() or None,
+        'passport_issued_date': (extra.get('passport_issued_date') or '').strip() or None,
+        'license_number': (extra.get('license_number') or '').strip() or None,
+        'license_issued_date': (extra.get('license_issued_date') or '').strip() or None,
+        'license_categories': (extra.get('license_categories') or '').strip() or None,
+        'address': (extra.get('address') or '').strip() or None,
+        'birth_date': (extra.get('birth_date') or '').strip() or None,
+        'notes': (notes or '').strip() or None,
+        'username': (username or '').strip() or None,
+    }
     con = db()
     try:
         with con.cursor() as cur:
-            row = cur.execute(
-                """
-                INSERT INTO clients (full_name, phone, username, notes)
-                VALUES (%s, %s, %s, %s)
-                RETURNING *
-                """,
-                (full_name, phone, username or None, notes or None)
-            ).fetchone()
+            if existing:
+                sets = ['full_name=%s', 'phone=%s', 'updated_at=NOW()']
+                vals = [full_name, phone]
+                for k, v in fields.items():
+                    if v is not None:
+                        sets.append(f'{k}=%s')
+                        vals.append(v)
+                vals.append(existing['id'])
+                row = cur.execute(
+                    f"UPDATE clients SET {', '.join(sets)} WHERE id=%s RETURNING *",
+                    vals,
+                ).fetchone()
+            else:
+                row = cur.execute(
+                    """
+                    INSERT INTO clients (
+                        full_name, phone, username, notes,
+                        passport_series, passport_number, passport_issued_by, passport_issued_date,
+                        license_number, license_issued_date, license_categories,
+                        address, birth_date
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    RETURNING *
+                    """,
+                    (
+                        full_name, phone, fields['username'], fields['notes'],
+                        fields['passport_series'], fields['passport_number'],
+                        fields['passport_issued_by'], fields['passport_issued_date'],
+                        fields['license_number'], fields['license_issued_date'],
+                        fields['license_categories'], fields['address'], fields['birth_date'],
+                    ),
+                ).fetchone()
         con.commit()
-        return {'ok': True, 'client': {
-            'id': row['id'],
-            'full_name': row['full_name'],
-            'phone': row['phone'],
-            'notes': row.get('notes') or '',
-            'blacklisted': False,
-        }}
+        return {'ok': True, 'client': dict(row)}
     finally:
         con.close()
 
-
-def admin_planner_sync():
-    pickups = get_today_pickups_sync()
-    returns = get_today_returns_sync()
-    tomorrow = get_tomorrow_pickups_sync()
-    in_progress = get_in_progress_rentals_sync()
-
-    def pack(rows):
-        out = []
-        for r in rows:
-            sa = ensure_tz(r.get("start_at")) if r.get("start_at") else None
-            ea = ensure_tz(r.get("end_at")) if r.get("end_at") else None
-            out.append({
-                "id": r["id"],
-                "car_id": r["car_id"],
-                "car_name": CARS.get(r["car_id"], {}).get("name", r["car_id"]),
-                "name": r.get("name") or "",
-                "phone": r.get("phone") or "",
-                "status": r.get("status"),
-                "issued_at": ensure_tz(r["issued_at"]).isoformat() if r.get("issued_at") else None,
-                "returned_at": ensure_tz(r["returned_at"]).isoformat() if r.get("returned_at") else None,
-                "start_label": sa.strftime("%d.%m.%Y %H:%M") if sa else "",
-                "end_label": ea.strftime("%d.%m.%Y %H:%M") if ea else "",
-                "total": r.get("total") or 0,
-            })
-        return out
-
-    return {
-        "pickups": pack(pickups),
-        "returns": pack(returns),
-        "tomorrow": pack(tomorrow),
-        "in_progress": pack(in_progress),
-    }
 
 
 async def admin_planner_api(request):
@@ -8511,6 +8568,15 @@ def admin_client_detail_sync(client_id):
             "user_id": client.get("user_id"),
             "notes": client.get("notes") or "",
             "blacklisted": bool(client.get("blacklisted")),
+            "passport_series": client.get("passport_series") or "",
+            "passport_number": client.get("passport_number") or "",
+            "passport_issued_by": client.get("passport_issued_by") or "",
+            "passport_issued_date": client.get("passport_issued_date") or "",
+            "license_number": client.get("license_number") or "",
+            "license_issued_date": client.get("license_issued_date") or "",
+            "license_categories": client.get("license_categories") or "",
+            "address": client.get("address") or "",
+            "birth_date": client.get("birth_date") or "",
         },
         "bookings": b_out,
     }
@@ -8548,6 +8614,11 @@ async def admin_client_action_api(request):
     if action == "notes":
         notes = str(data.get("notes", "")).strip()
         await asyncio.to_thread(set_client_notes_sync, cid, notes)
+        return mini_json({"ok": True})
+    if action == "update":
+        row = await asyncio.to_thread(admin_update_client_docs_sync, cid, data)
+        if not row:
+            return mini_json({"message": "Клиент не найден"}, 404)
         return mini_json({"ok": True})
     return mini_json({"message": "Неизвестное действие"}, 400)
 
@@ -8605,12 +8676,457 @@ async def admin_client_create_api(request):
         data.get('phone'),
         data.get('notes') or '',
         data.get('username') or '',
+        passport_series=data.get('passport_series'),
+        passport_number=data.get('passport_number'),
+        passport_issued_by=data.get('passport_issued_by'),
+        passport_issued_date=data.get('passport_issued_date'),
+        license_number=data.get('license_number'),
+        license_issued_date=data.get('license_issued_date'),
+        license_categories=data.get('license_categories'),
+        address=data.get('address'),
+        birth_date=data.get('birth_date'),
     )
     if not result.get('ok'):
         if result.get('reason') == 'exists':
             return mini_json({'message': 'Клиент с таким телефоном уже есть', 'id': result.get('id')}, 409)
         return mini_json({'message': 'Укажите ФИО и телефон'}, 400)
     return mini_json(result)
+
+
+# ============================================================
+# MANUAL BOOKING / TEMPLATES / EXPORT / CONTRACT
+# (merged into bot.py)
+# ============================================================
+
+MESSAGE_TEMPLATES = [
+    {
+        "id": "confirmed",
+        "title": "Бронь подтверждена",
+        "body": (
+            "Здравствуйте, {name}!\n\nВаша бронь №{bid} подтверждена.\n"
+            "🚗 {car}\n📅 {start} → {end}\n💰 {total}\n\nЖдём вас вовремя. BALTICAR"
+        ),
+    },
+    {
+        "id": "pickup_tomorrow",
+        "title": "Напоминание: выдача завтра",
+        "body": (
+            "Здравствуйте, {name}!\n\nНапоминаем: завтра выдача автомобиля.\n"
+            "🚗 {car}\n📅 {start}\n\nВозьмите паспорт и водительское удостоверение.\nBALTICAR"
+        ),
+    },
+    {
+        "id": "return_today",
+        "title": "Напоминание: возврат сегодня",
+        "body": (
+            "Здравствуйте, {name}!\n\nСегодня возврат автомобиля.\n"
+            "🚗 {car}\n📅 {end}\n\nПожалуйста, верните авто вовремя и с тем же уровнем топлива.\nBALTICAR"
+        ),
+    },
+    {
+        "id": "docs_request",
+        "title": "Запрос документов",
+        "body": (
+            "Здравствуйте, {name}!\n\nДля договора аренды пришлите, пожалуйста:\n"
+            "• паспорт (разворот)\n• водительское удостоверение\n\nBALTICAR"
+        ),
+    },
+]
+
+
+def admin_update_client_docs_sync(client_id, data):
+    con = db()
+    try:
+        with con.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE clients SET
+                    full_name = COALESCE(%s, full_name),
+                    phone = COALESCE(%s, phone),
+                    notes = COALESCE(%s, notes),
+                    passport_series = COALESCE(%s, passport_series),
+                    passport_number = COALESCE(%s, passport_number),
+                    passport_issued_by = COALESCE(%s, passport_issued_by),
+                    passport_issued_date = COALESCE(%s, passport_issued_date),
+                    license_number = COALESCE(%s, license_number),
+                    license_issued_date = COALESCE(%s, license_issued_date),
+                    license_categories = COALESCE(%s, license_categories),
+                    address = COALESCE(%s, address),
+                    birth_date = COALESCE(%s, birth_date),
+                    updated_at = NOW()
+                WHERE id=%s
+                RETURNING *
+                """,
+                (
+                    data.get("full_name") or None,
+                    data.get("phone") or None,
+                    data.get("notes") if data.get("notes") is not None else None,
+                    data.get("passport_series") or None,
+                    data.get("passport_number") or None,
+                    data.get("passport_issued_by") or None,
+                    data.get("passport_issued_date") or None,
+                    data.get("license_number") or None,
+                    data.get("license_issued_date") or None,
+                    data.get("license_categories") or None,
+                    data.get("address") or None,
+                    data.get("birth_date") or None,
+                    client_id,
+                ),
+            )
+            row = cur.fetchone()
+        con.commit()
+        return row
+    finally:
+        con.close()
+
+
+def admin_manual_booking_sync(data):
+    car_id = (data.get("car_id") or "").strip()
+    if car_id not in CARS:
+        return {"ok": False, "reason": "car"}
+    try:
+        start_at = ensure_tz(datetime.fromisoformat(str(data.get("start_at")).replace("Z", "+00:00")))
+        end_at = ensure_tz(datetime.fromisoformat(str(data.get("end_at")).replace("Z", "+00:00")))
+    except Exception:
+        return {"ok": False, "reason": "dates"}
+    if end_at <= start_at:
+        return {"ok": False, "reason": "dates"}
+    name = (data.get("name") or "").strip()
+    phone = (data.get("phone") or "").strip()
+    client_id = data.get("client_id")
+    try:
+        client_id = int(client_id) if client_id else None
+    except (TypeError, ValueError):
+        client_id = None
+    if not name or not phone:
+        if client_id:
+            cl = get_client_sync(client_id=client_id)
+            if not cl:
+                return {"ok": False, "reason": "client"}
+            name = cl["full_name"]
+            phone = cl["phone"]
+        else:
+            return {"ok": False, "reason": "client"}
+    comment = (data.get("comment") or "Ручная бронь админа").strip()
+    try:
+        user_id = int(data.get("user_id") or 0)
+    except (TypeError, ValueError):
+        user_id = 0
+    if not available(car_id, start_at, end_at):
+        return {"ok": False, "reason": "overlap"}
+    days = rental_days(start_at, end_at)
+    total = days * rate_for_days(car_id, days)
+    if data.get("total") is not None:
+        try:
+            total = int(data.get("total"))
+        except (TypeError, ValueError):
+            pass
+    client = upsert_client_sync(user_id or None, None, name, phone, None)
+    client_id = client["id"] if client else client_id
+    if client and client.get("blacklisted"):
+        return {"ok": False, "reason": "blacklisted"}
+    contract_no = f"BK-{datetime.now(TZ).strftime('%Y%m%d')}-{secrets.token_hex(2).upper()}"
+    con = db()
+    try:
+        with con.cursor() as cur:
+            lock_bookings(cur)
+            expire_pending(cur)
+            if find_maintenance(cur, car_id, start_at, end_at):
+                con.rollback()
+                return {"ok": False, "reason": "maintenance"}
+            if find_overlap(cur, car_id, start_at, end_at):
+                con.rollback()
+                return {"ok": False, "reason": "overlap"}
+            row = cur.execute(
+                """
+                INSERT INTO bookings (
+                    user_id, username, car_id, start_date, end_date, start_at, end_at,
+                    name, phone, comment, total, status, created_at, expires_at,
+                    client_id, contract_number
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, 'confirmed', %s, NULL,
+                    %s, %s
+                ) RETURNING *
+                """,
+                (
+                    user_id, "", car_id, start_at.date(), end_at.date(), start_at, end_at,
+                    name, phone, comment, total, datetime.now(TZ),
+                    client_id, contract_no,
+                ),
+            ).fetchone()
+        con.commit()
+        return {"ok": True, "booking": dict(row), "contract_number": contract_no}
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+
+
+def admin_booking_full_sync(bid):
+    con = db()
+    try:
+        with con.cursor() as cur:
+            b = cur.execute("SELECT * FROM bookings WHERE id=%s", (bid,)).fetchone()
+            if not b:
+                return None
+            client = None
+            if b.get("client_id"):
+                client = cur.execute("SELECT * FROM clients WHERE id=%s", (b["client_id"],)).fetchone()
+            if not client and b.get("phone"):
+                client = cur.execute(
+                    "SELECT * FROM clients WHERE phone=%s ORDER BY id DESC LIMIT 1",
+                    (b["phone"],),
+                ).fetchone()
+        return {"booking": b, "client": client}
+    finally:
+        con.close()
+
+
+def build_contract_html(bid):
+    data = admin_booking_full_sync(bid)
+    if not data:
+        return None
+    b = data["booking"]
+    c = data["client"] or {}
+    car = CARS.get(b["car_id"], {})
+    sa = ensure_tz(b["start_at"]) if b.get("start_at") else None
+    ea = ensure_tz(b["end_at"]) if b.get("end_at") else None
+    days = rental_days(sa, ea) if sa and ea else 1
+    rate = rate_for_days(b["car_id"], days) if b.get("car_id") in CARS else 0
+    contract_no = b.get("contract_number") or f"BK-{b['id']}"
+    if not b.get("contract_number"):
+        con = db()
+        try:
+            with con.cursor() as cur:
+                cur.execute(
+                    "UPDATE bookings SET contract_number=%s WHERE id=%s AND (contract_number IS NULL OR contract_number='')",
+                    (contract_no, bid),
+                )
+            con.commit()
+        finally:
+            con.close()
+
+    def v(x):
+        return escape_html(str(x if x is not None and x != "" else "________________"))
+
+    company = os.getenv("COMPANY_NAME", "BALTICAR")
+    company_details = os.getenv("COMPANY_DETAILS", "г. Калининград, аренда автомобилей")
+    start_s = sa.strftime("%d.%m.%Y %H:%M") if sa else ""
+    end_s = ea.strftime("%d.%m.%Y %H:%M") if ea else ""
+    today_s = datetime.now(TZ).strftime("%d.%m.%Y")
+    css = (
+        "body{font-family:Times New Roman,serif;font-size:14px;line-height:1.45;"
+        "max-width:800px;margin:24px auto;padding:0 16px;color:#111}"
+        "h1{text-align:center;font-size:18px;margin:0 0 8px}"
+        "h2{font-size:15px;margin:18px 0 8px}"
+        ".meta{text-align:center;margin-bottom:20px}"
+        "table{width:100%;border-collapse:collapse;margin:10px 0}"
+        "td{padding:4px 6px;vertical-align:top}"
+        ".sign{display:flex;justify-content:space-between;margin-top:40px;gap:24px}"
+        ".sign div{width:45%}@media print{body{margin:0}}"
+    )
+    html = (
+        "<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"utf-8\">"
+        f"<title>Договор {v(contract_no)}</title><style>{css}</style></head><body>"
+        f"<h1>ДОГОВОР АРЕНДЫ ТРАНСПОРТНОГО СРЕДСТВА № {v(contract_no)}</h1>"
+        f"<div class=\"meta\">г. Калининград &nbsp;&nbsp; {v(today_s)}</div>"
+        f"<p><b>Арендодатель:</b> {v(company)}, {v(company_details)}, с одной стороны, и</p>"
+        f"<p><b>Арендатор:</b> {v(c.get('full_name') or b.get('name'))}, "
+        f"дата рождения {v(c.get('birth_date'))}, "
+        f"паспорт {v(c.get('passport_series'))} № {v(c.get('passport_number'))}, "
+        f"выдан {v(c.get('passport_issued_by'))} {v(c.get('passport_issued_date'))}, "
+        f"адрес: {v(c.get('address'))}, "
+        f"водительское удостоверение № {v(c.get('license_number'))}, "
+        f"категории {v(c.get('license_categories'))}, "
+        f"дата выдачи ВУ {v(c.get('license_issued_date'))}, "
+        f"тел. {v(c.get('phone') or b.get('phone'))}, с другой стороны, "
+        "заключили настоящий договор о нижеследующем.</p>"
+        "<h2>1. Предмет договора</h2>"
+        "<p>1.1. Арендодатель передаёт, а Арендатор принимает во временное владение "
+        "и пользование транспортное средство:</p><table>"
+        f"<tr><td>Марка, модель</td><td><b>{v(car.get('name') or b.get('car_id'))}</b></td></tr>"
+        f"<tr><td>КПП / топливо / мест</td><td>{v(car.get('gear'))} / {v(car.get('fuel'))} / {v(car.get('seats'))}</td></tr>"
+        f"<tr><td>Период аренды</td><td>{v(start_s)} — {v(end_s)}</td></tr>"
+        f"<tr><td>Срок (оплачиваемые сутки)</td><td>{days}</td></tr></table>"
+        "<h2>2. Арендная плата и залог</h2>"
+        f"<p>2.1. Стоимость аренды: <b>{v(b.get('total'))} ₽</b> "
+        f"(тариф {v(rate)} ₽/сутки × {days} сут.).</p>"
+        f"<p>2.2. Залог: <b>{v(b.get('deposit_amount') or 0)} ₽</b>, "
+        f"статус: {v(b.get('deposit_status') or 'не внесён')}.</p>"
+        "<p>2.3. Оплата производится в порядке, согласованном сторонами до выдачи автомобиля.</p>"
+        "<h2>3. Права и обязанности</h2>"
+        "<p>3.1. Арендатор обязуется использовать ТС по назначению, соблюдать ПДД РФ, "
+        "не передавать управление третьим лицам без согласия Арендодателя, "
+        "вернуть ТС в состоянии не хуже полученного с учётом нормального износа, "
+        "с тем же уровнем топлива.</p>"
+        "<p>3.2. Арендодатель обязуется передать исправное ТС в согласованный срок.</p>"
+        f"<p>3.3. Пробег при выдаче: {v(b.get('mileage_out'))} км, топливо: {v(b.get('fuel_out'))}. "
+        f"При возврате: пробег {v(b.get('mileage_in'))} км, топливо: {v(b.get('fuel_in'))}.</p>"
+        "<h2>4. Ответственность</h2>"
+        "<p>4.1. Убытки, штрафы и ущерб ТС по вине Арендатора возмещаются Арендатором. "
+        "Залог может быть удержан в счёт задолженности или ущерба.</p>"
+        "<h2>5. Прочие условия</h2>"
+        "<p>5.1. Договор вступает в силу с момента передачи ТС и действует до возврата.</p>"
+        "<p>5.2. Стороны подтверждают достоверность указанных данных.</p>"
+        f"<p>Комментарий к брони: {v(b.get('comment'))}</p>"
+        "<div class=\"sign\">"
+        f"<div><b>Арендодатель</b><br><br>____________________ / {v(company)} /</div>"
+        f"<div><b>Арендатор</b><br><br>____________________ / {v(c.get('full_name') or b.get('name'))} /</div>"
+        "</div>"
+        "<script>window.onload=function(){try{window.print()}catch(e){}}</script>"
+        "</body></html>"
+    )
+    return html
+
+
+def admin_finance_export_csv_sync(start_day, end_day):
+    import csv
+    import io
+
+    start_dt = local_dt(start_day, time(0, 0))
+    end_dt = local_dt(end_day + timedelta(days=1), time(0, 0))
+    con = db()
+    try:
+        with con.cursor() as cur:
+            rows = cur.execute(
+                """
+                SELECT id, car_id, name, phone, status, start_at, end_at, total,
+                       deposit_amount, deposit_status, contract_number, issued_at, returned_at
+                FROM bookings
+                WHERE status IN ('confirmed', 'completed')
+                  AND start_at >= %s AND start_at < %s
+                ORDER BY start_at
+                """,
+                (start_dt, end_dt),
+            ).fetchall()
+    finally:
+        con.close()
+    buf = io.StringIO()
+    buf.write("\ufeff")
+    w = csv.writer(buf, delimiter=";")
+    w.writerow([
+        "ID", "Договор", "Авто", "Клиент", "Телефон", "Статус",
+        "Начало", "Конец", "Сумма", "Залог", "Статус залога", "Выдача", "Возврат",
+    ])
+    for r in rows:
+        w.writerow([
+            r["id"],
+            r.get("contract_number") or "",
+            CARS.get(r["car_id"], {}).get("name", r["car_id"]),
+            r.get("name") or "",
+            r.get("phone") or "",
+            r.get("status") or "",
+            format_date_time(r["start_at"]) if r.get("start_at") else "",
+            format_date_time(r["end_at"]) if r.get("end_at") else "",
+            r.get("total") or 0,
+            r.get("deposit_amount") or 0,
+            r.get("deposit_status") or "",
+            format_date_time(r["issued_at"]) if r.get("issued_at") else "",
+            format_date_time(r["returned_at"]) if r.get("returned_at") else "",
+        ])
+    return buf.getvalue()
+
+
+async def admin_manual_booking_api(request):
+    admin_web_auth_or_403(request)
+    try:
+        data = await request.json()
+    except Exception:
+        return mini_json({"message": "Некорректный JSON"}, 400)
+    result = await asyncio.to_thread(admin_manual_booking_sync, data)
+    if not result.get("ok"):
+        messages = {
+            "car": "Выберите автомобиль",
+            "dates": "Проверьте даты начала и окончания",
+            "client": "Укажите клиента или ФИО и телефон",
+            "overlap": "Период занят",
+            "maintenance": "На период назначено ТО",
+            "blacklisted": "Клиент в чёрном списке",
+        }
+        return mini_json({"message": messages.get(result.get("reason"), "Не удалось создать бронь")}, 409)
+    return mini_json(result)
+
+
+async def admin_templates_api(request):
+    admin_web_auth_or_403(request)
+    return mini_json({"templates": [{"id": t["id"], "title": t["title"]} for t in MESSAGE_TEMPLATES]})
+
+
+async def admin_send_template_api(request):
+    admin_web_auth_or_403(request)
+    try:
+        data = await request.json()
+        bid = int(data.get("booking_id") or 0)
+        tid = str(data.get("template_id") or "")
+    except Exception:
+        return mini_json({"message": "Некорректный запрос"}, 400)
+    tpl = next((t for t in MESSAGE_TEMPLATES if t["id"] == tid), None)
+    if not tpl or bid <= 0:
+        return mini_json({"message": "Шаблон или бронь не найдены"}, 404)
+    full = await asyncio.to_thread(admin_booking_full_sync, bid)
+    if not full:
+        return mini_json({"message": "Бронь не найдена"}, 404)
+    b = full["booking"]
+    car = CARS.get(b["car_id"], {}).get("name", b["car_id"])
+    sa = ensure_tz(b["start_at"]) if b.get("start_at") else None
+    ea = ensure_tz(b["end_at"]) if b.get("end_at") else None
+    body = tpl["body"].format(
+        name=b.get("name") or "клиент",
+        bid=b["id"],
+        car=car,
+        start=format_date_time(sa) if sa else "—",
+        end=format_date_time(ea) if ea else "—",
+        total=money(b.get("total") or 0),
+    )
+    uid = b.get("user_id")
+    if not uid:
+        return mini_json({"message": "У брони нет Telegram user_id — отправьте текст вручную", "text": body}, 409)
+    try:
+        async with ClientSession() as session:
+            await session.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                json={"chat_id": uid, "text": body},
+                timeout=ClientTimeout(total=15),
+            )
+    except Exception as exc:
+        return mini_json({"message": f"Не отправлено: {exc}", "text": body}, 500)
+    return mini_json({"ok": True, "text": body})
+
+
+async def admin_contract_api(request):
+    admin_web_auth_or_403(request)
+    try:
+        bid = int(request.query.get("id") or 0)
+    except ValueError:
+        raise web.HTTPBadRequest(text="bad id")
+    html = await asyncio.to_thread(build_contract_html, bid)
+    if not html:
+        raise web.HTTPNotFound(text="booking not found")
+    return web.Response(
+        text=html,
+        content_type="text/html",
+        charset="utf-8",
+        headers={"Content-Disposition": f'inline; filename="contract_{bid}.html"'},
+    )
+
+
+async def admin_export_csv_api(request):
+    admin_web_auth_or_403(request)
+    today = datetime.now(TZ).date()
+    try:
+        start_day = date.fromisoformat(request.query.get("from") or today.replace(day=1).isoformat())
+        end_day = date.fromisoformat(request.query.get("to") or today.isoformat())
+    except ValueError:
+        start_day, end_day = today.replace(day=1), today
+    csv_data = await asyncio.to_thread(admin_finance_export_csv_sync, start_day, end_day)
+    return web.Response(
+        text=csv_data,
+        content_type="text/csv",
+        charset="utf-8",
+        headers={"Content-Disposition": f'attachment; filename="balticar_{start_day}_{end_day}.csv"'},
+    )
 
 
 async def mini_app_routes(app):
@@ -8636,6 +9152,11 @@ async def mini_app_routes(app):
     app.router.add_get("/api/admin/cars", admin_cars_api)
     app.router.add_post("/api/admin/cars/save", admin_car_save_api)
     app.router.add_post("/api/admin/cars/delete", admin_car_delete_api)
+    app.router.add_post("/api/admin/booking/manual", admin_manual_booking_api)
+    app.router.add_get("/api/admin/templates", admin_templates_api)
+    app.router.add_post("/api/admin/templates/send", admin_send_template_api)
+    app.router.add_get("/api/admin/contract", admin_contract_api)
+    app.router.add_get("/api/admin/export.csv", admin_export_csv_api)
     app.router.add_get("/photos/{name:.*}", mini_photo)
     app.router.add_get("/api/cars", mini_cars)
     app.router.add_get("/api/availability", mini_availability)
