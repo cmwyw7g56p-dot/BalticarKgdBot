@@ -118,7 +118,7 @@ INIT_DATA_MAX_AGE = int(
 _RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
 MINIAPP_BASE_URL = (_RENDER_URL + "/app") if _RENDER_URL else "https://balticarkgdbot.onrender.com/app"
 MINIAPP_URL = MINIAPP_BASE_URL + "?v=55"
-ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=70"
+ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=71"
 
 
 # ============================================================
@@ -741,18 +741,33 @@ def get_today_pickups_sync():
     con = db()
     try:
         with con.cursor() as cur:
-            return cur.execute(
-                """
-                SELECT *
-                FROM bookings
-                WHERE status = 'confirmed'
-                  AND issued_at IS NULL
-                  AND start_at >= %s
-                  AND start_at < %s
-                ORDER BY start_at
-                """,
-                (day_start, day_end)
-            ).fetchall()
+            try:
+                return cur.execute(
+                    """
+                    SELECT *
+                    FROM bookings
+                    WHERE status = 'confirmed'
+                      AND issued_at IS NULL
+                      AND start_at >= %s
+                      AND start_at < %s
+                    ORDER BY start_at
+                    """,
+                    (day_start, day_end)
+                ).fetchall()
+            except Exception as exc:
+                con.rollback()
+                print(f"[PLANNER] pickups fallback: {exc}", flush=True)
+                return cur.execute(
+                    """
+                    SELECT *
+                    FROM bookings
+                    WHERE status = 'confirmed'
+                      AND start_at >= %s
+                      AND start_at < %s
+                    ORDER BY start_at
+                    """,
+                    (day_start, day_end)
+                ).fetchall()
     finally:
         con.close()
 
@@ -764,19 +779,24 @@ def get_today_returns_sync():
     con = db()
     try:
         with con.cursor() as cur:
-            return cur.execute(
-                """
-                SELECT *
-                FROM bookings
-                WHERE status = 'confirmed'
-                  AND issued_at IS NOT NULL
-                  AND returned_at IS NULL
-                  AND end_at >= %s
-                  AND end_at < %s
-                ORDER BY end_at
-                """,
-                (day_start, day_end)
-            ).fetchall()
+            try:
+                return cur.execute(
+                    """
+                    SELECT *
+                    FROM bookings
+                    WHERE status = 'confirmed'
+                      AND issued_at IS NOT NULL
+                      AND returned_at IS NULL
+                      AND end_at >= %s
+                      AND end_at < %s
+                    ORDER BY end_at
+                    """,
+                    (day_start, day_end)
+                ).fetchall()
+            except Exception as exc:
+                con.rollback()
+                print(f"[PLANNER] returns fallback: {exc}", flush=True)
+                return []
     finally:
         con.close()
 
@@ -8508,10 +8528,73 @@ def admin_create_client_sync(full_name, phone, notes='', username='', **extra):
 
 
 
+def admin_planner_sync():
+    """Данные вкладки «Сегодня» для Mini App."""
+    def pack(rows):
+        out = []
+        for r in rows:
+            try:
+                sa = ensure_tz(r.get("start_at")) if r.get("start_at") else None
+            except Exception:
+                sa = None
+            try:
+                ea = ensure_tz(r.get("end_at")) if r.get("end_at") else None
+            except Exception:
+                ea = None
+            out.append({
+                "id": r["id"],
+                "car_id": r.get("car_id"),
+                "car_name": CARS.get(r.get("car_id"), {}).get("name", r.get("car_id") or ""),
+                "name": r.get("name") or "",
+                "phone": r.get("phone") or "",
+                "status": r.get("status"),
+                "issued_at": ensure_tz(r["issued_at"]).isoformat() if r.get("issued_at") else None,
+                "returned_at": ensure_tz(r["returned_at"]).isoformat() if r.get("returned_at") else None,
+                "start_label": sa.strftime("%d.%m.%Y %H:%M") if sa else "",
+                "end_label": ea.strftime("%d.%m.%Y %H:%M") if ea else "",
+                "total": r.get("total") or 0,
+                "deposit_amount": r.get("deposit_amount") or 0,
+                "deposit_status": r.get("deposit_status") or "",
+            })
+        return out
+
+    try:
+        pickups = get_today_pickups_sync()
+    except Exception as exc:
+        print(f"[PLANNER] pickups error: {exc}", flush=True)
+        pickups = []
+    try:
+        returns = get_today_returns_sync()
+    except Exception as exc:
+        print(f"[PLANNER] returns error: {exc}", flush=True)
+        returns = []
+    try:
+        tomorrow = get_tomorrow_pickups_sync()
+    except Exception as exc:
+        print(f"[PLANNER] tomorrow error: {exc}", flush=True)
+        tomorrow = []
+    try:
+        in_progress = get_in_progress_rentals_sync()
+    except Exception as exc:
+        print(f"[PLANNER] in_progress error: {exc}", flush=True)
+        in_progress = []
+
+    return {
+        "pickups": pack(pickups),
+        "returns": pack(returns),
+        "tomorrow": pack(tomorrow),
+        "in_progress": pack(in_progress),
+    }
+
+
 async def admin_planner_api(request):
     admin_web_auth_or_403(request)
-    data = await asyncio.to_thread(admin_planner_sync)
-    return mini_json(data)
+    try:
+        data = await asyncio.to_thread(admin_planner_sync)
+        return mini_json(data)
+    except Exception as exc:
+        print(f"[PLANNER/API] {type(exc).__name__}: {exc}", flush=True)
+        return mini_json({"message": f"Ошибка планировщика: {exc}", "pickups": [], "returns": [], "tomorrow": [], "in_progress": []}, 500)
 
 
 def admin_clients_list_sync(query=None, limit=50):
