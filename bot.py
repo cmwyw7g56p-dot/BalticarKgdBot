@@ -118,7 +118,7 @@ INIT_DATA_MAX_AGE = int(
 _RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
 MINIAPP_BASE_URL = (_RENDER_URL + "/app") if _RENDER_URL else "https://balticarkgdbot.onrender.com/app"
 MINIAPP_URL = MINIAPP_BASE_URL + "?v=55"
-ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=71"
+ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=73"
 
 
 # ============================================================
@@ -519,6 +519,8 @@ def init_db():
                 "ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS seats INTEGER DEFAULT 5",
                 "ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''",
                 "ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS is_custom BOOLEAN NOT NULL DEFAULT FALSE",
+                "ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS plate TEXT DEFAULT ''",
+                "ALTER TABLE car_settings ADD COLUMN IF NOT EXISTS vin TEXT DEFAULT ''",
             ):
                 cur.execute(sql)
 
@@ -560,6 +562,10 @@ def load_car_settings():
                     CARS[cid]['seats'] = row['seats']
                 if row.get('description') is not None:
                     CARS[cid]['description'] = row['description'] or CARS[cid].get('description', '')
+                if row.get('plate') is not None:
+                    CARS[cid]['plate'] = row.get('plate') or ''
+                if row.get('vin') is not None:
+                    CARS[cid]['vin'] = row.get('vin') or ''
             else:
                 # custom car added from admin
                 CARS[cid] = {
@@ -572,6 +578,8 @@ def load_car_settings():
                     'photos': [],
                     'description': row.get('description') or '',
                     'is_custom': True,
+                    'plate': row.get('plate') or '',
+                    'vin': row.get('vin') or '',
                 }
         # soft-remove custom cars deleted from DB
         for cid in list(CARS.keys()):
@@ -7218,6 +7226,28 @@ def mini_car_payload():
     # Настройки уже загружены при старте и обновляются после действий администратора.
     # Не открываем новое соединение с Neon на каждый запрос каталога Mini App.
     base = Path(__file__).resolve().parent
+    # Какие авто сейчас в аренде (подтверждённая бронь пересекает "сейчас")
+    now = datetime.now(TZ)
+    busy_ids = set()
+    try:
+        con = db()
+        try:
+            with con.cursor() as cur:
+                rows = cur.execute(
+                    """
+                    SELECT DISTINCT car_id FROM bookings
+                    WHERE status = 'confirmed'
+                      AND start_at <= %s
+                      AND end_at > %s
+                    """,
+                    (now, now),
+                ).fetchall()
+                busy_ids = {r["car_id"] for r in rows}
+        finally:
+            con.close()
+    except Exception as exc:
+        print(f"[MINI/CARS] busy check failed: {exc}", flush=True)
+
     result=[]
     for cid, c in active_cars().items():
         photos=[]
@@ -7227,8 +7257,8 @@ def mini_car_payload():
             if full.is_file():
                 photos.append(rel)
             elif (PHOTOS_DIR / Path(rel).name).is_file():
-                # fallback: file lies directly under photos/
                 photos.append(f"photos/{Path(rel).name}")
+        busy = cid in busy_ids
         result.append({
             "id": cid,
             "name": c.get("name", cid),
@@ -7239,6 +7269,9 @@ def mini_car_payload():
             "rates": list(c.get("rates", (0,0,0))),
             "photos": photos,
             "color": "Белый",
+            "busy_now": busy,
+            "available_now": not busy,
+            "status_label": "ЗАНЯТА СЕЙЧАС" if busy else "ДОСТУПНО ДЛЯ БРОНИРОВАНИЯ",
         })
     return result
 
@@ -8362,6 +8395,8 @@ def admin_list_cars_sync():
             'rates': list(car.get('rates', (0, 0, 0))),
             'active': bool(car.get('active', True)),
             'description': car.get('description') or '',
+            'plate': car.get('plate') or '',
+            'vin': car.get('vin') or '',
             'is_custom': bool(car.get('is_custom')) or cid not in ('solaris21', 'solaris20', 'solaris17', 'i30'),
         })
     out.sort(key=lambda x: x['name'])
@@ -8397,6 +8432,8 @@ def admin_save_car_sync(data):
     except (TypeError, ValueError):
         seats = 5
     description = (data.get('description') or '').strip()
+    plate = (data.get('plate') or '').strip()
+    vin = (data.get('vin') or '').strip()
     active = bool(data.get('active', True))
     is_custom = car_id not in ('solaris21', 'solaris20', 'solaris17', 'i30')
 
@@ -8407,8 +8444,8 @@ def admin_save_car_sync(data):
                 """
                 INSERT INTO car_settings (
                     car_id, name, active, rate_1_3, rate_4_6, rate_7_plus,
-                    gear, fuel, seats, description, is_custom, updated_at
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                    gear, fuel, seats, description, is_custom, plate, vin, updated_at
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
                 ON CONFLICT (car_id) DO UPDATE SET
                     name=EXCLUDED.name,
                     active=EXCLUDED.active,
@@ -8419,9 +8456,11 @@ def admin_save_car_sync(data):
                     fuel=EXCLUDED.fuel,
                     seats=EXCLUDED.seats,
                     description=EXCLUDED.description,
+                    plate=EXCLUDED.plate,
+                    vin=EXCLUDED.vin,
                     updated_at=NOW()
                 """,
-                (car_id, name, active, r1, r2, r3, gear, fuel, seats, description, is_custom)
+                (car_id, name, active, r1, r2, r3, gear, fuel, seats, description, is_custom, plate, vin)
             )
         con.commit()
     finally:
@@ -8868,8 +8907,17 @@ def admin_manual_booking_sync(data):
     if car_id not in CARS:
         return {"ok": False, "reason": "car"}
     try:
-        start_at = ensure_tz(datetime.fromisoformat(str(data.get("start_at")).replace("Z", "+00:00")))
-        end_at = ensure_tz(datetime.fromisoformat(str(data.get("end_at")).replace("Z", "+00:00")))
+        def _parse_dt(val):
+            s = str(val).strip().replace("Z", "+00:00")
+            # datetime-local often comes as "2026-11-24T10:30" without tz
+            if "T" in s and len(s) == 16:
+                s = s + ":00"
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=TZ)
+            return ensure_tz(dt)
+        start_at = _parse_dt(data.get("start_at"))
+        end_at = _parse_dt(data.get("end_at"))
     except Exception:
         return {"ok": False, "reason": "dates"}
     if end_at <= start_at:
@@ -8939,10 +8987,19 @@ def admin_manual_booking_sync(data):
                 ),
             ).fetchone()
         con.commit()
-        return {"ok": True, "booking": dict(row), "contract_number": contract_no}
-    except Exception:
+        return {
+            "ok": True,
+            "id": row["id"],
+            "contract_number": contract_no,
+            "total": int(row.get("total") or total),
+            "car_id": car_id,
+            "name": name,
+            "phone": phone,
+        }
+    except Exception as exc:
         con.rollback()
-        raise
+        print(f"[MANUAL/BOOKING] {type(exc).__name__}: {exc}", flush=True)
+        return {"ok": False, "reason": "db", "error": str(exc)}
     finally:
         con.close()
 
@@ -8968,16 +9025,19 @@ def admin_booking_full_sync(bid):
 
 
 def build_contract_html(bid):
+    """Договор по шаблону BALTICAR (как в Word-форме Сорокоумова)."""
     data = admin_booking_full_sync(bid)
     if not data:
         return None
     b = data["booking"]
     c = data["client"] or {}
-    car = CARS.get(b["car_id"], {})
+    car = CARS.get(b["car_id"], {}) or {}
     sa = ensure_tz(b["start_at"]) if b.get("start_at") else None
     ea = ensure_tz(b["end_at"]) if b.get("end_at") else None
     days = rental_days(sa, ea) if sa and ea else 1
     rate = rate_for_days(b["car_id"], days) if b.get("car_id") in CARS else 0
+    total = int(b.get("total") or (rate * days))
+    deposit = int(b.get("deposit_amount") or 0)
     contract_no = b.get("contract_number") or f"BK-{b['id']}"
     if not b.get("contract_number"):
         con = db()
@@ -8991,77 +9051,278 @@ def build_contract_html(bid):
         finally:
             con.close()
 
-    def v(x):
-        return escape_html(str(x if x is not None and x != "" else "________________"))
+    def v(x, blank="________________"):
+        s = str(x).strip() if x is not None else ""
+        return escape_html(s if s else blank)
 
-    company = os.getenv("COMPANY_NAME", "BALTICAR")
-    company_details = os.getenv("COMPANY_DETAILS", "г. Калининград, аренда автомобилей")
-    start_s = sa.strftime("%d.%m.%Y %H:%M") if sa else ""
-    end_s = ea.strftime("%d.%m.%Y %H:%M") if ea else ""
-    today_s = datetime.now(TZ).strftime("%d.%m.%Y")
+    def dmy(dt):
+        return dt.strftime("%d.%m.%Y") if dt else "____________"
+
+    def hm(dt):
+        return dt.strftime("%H:%M") if dt else "____"
+
+    lessor_name = os.getenv("LESSOR_NAME", "Сорокоумов Тимофей Викторович")
+    lessor_address = os.getenv("LESSOR_ADDRESS", "г. Калининград ул. Шахматная д. 4В")
+    lessor_inn = os.getenv("LESSOR_INN", "650302181070")
+    lessor_rs = os.getenv("LESSOR_RS", "40817810220861910843")
+    lessor_ks = os.getenv("LESSOR_KS", "30101810100000000634")
+    lessor_bank = os.getenv("LESSOR_BANK", "Калининградское отделение №8626 ПАО Сбербанк")
+    lessor_bik = os.getenv("LESSOR_BIK", "042748634")
+    lessor_phone = os.getenv("LESSOR_PHONE", "89097770133")
+    lessor_email = os.getenv("LESSOR_EMAIL", "tvsorokoumov@gmail.com")
+    lessor_schedule = os.getenv(
+        "LESSOR_SCHEDULE",
+        "c 08:00-20:00 Пн-Пт; 09:00-19:00 выходные и праздничные дни",
+    )
+    pickup_place = (
+        b.get("pickup_location")
+        or os.getenv("DEFAULT_PICKUP_PLACE", "г. Калининград")
+    )
+    return_place = pickup_place
+    car_name = car.get("name") or b.get("car_id") or "_______________"
+    plate = car.get("plate") or ""
+    vin = car.get("vin") or ""
+    passport = " ".join(
+        x for x in [
+            (c.get("passport_series") or ""),
+            (("№" + c["passport_number"]) if c.get("passport_number") else ""),
+            (("выдан " + c["passport_issued_date"]) if c.get("passport_issued_date") else ""),
+            (c.get("passport_issued_by") or ""),
+        ] if x
+    ).strip()
+    license_line = " ".join(
+        x for x in [
+            (c.get("license_number") or ""),
+            (("кат. " + c["license_categories"]) if c.get("license_categories") else ""),
+            (c.get("license_issued_date") or ""),
+        ] if x
+    ).strip()
+    renter = c.get("full_name") or b.get("name") or ""
+    phone = c.get("phone") or b.get("phone") or ""
+    address = c.get("address") or ""
+    contract_date = dmy(sa) if sa else dmy(datetime.now(TZ))
+
     css = (
-        "body{font-family:Times New Roman,serif;font-size:14px;line-height:1.45;"
-        "max-width:800px;margin:24px auto;padding:0 16px;color:#111}"
-        "h1{text-align:center;font-size:18px;margin:0 0 8px}"
-        "h2{font-size:15px;margin:18px 0 8px}"
-        ".meta{text-align:center;margin-bottom:20px}"
-        "table{width:100%;border-collapse:collapse;margin:10px 0}"
-        "td{padding:4px 6px;vertical-align:top}"
-        ".sign{display:flex;justify-content:space-between;margin-top:40px;gap:24px}"
-        ".sign div{width:45%}@media print{body{margin:0}}"
+        "body{font-family:'Times New Roman',Times,serif;font-size:13px;line-height:1.35;"
+        "color:#111;max-width:900px;margin:16px auto;padding:12px 18px}"
+        "h1{text-align:center;font-size:18px;margin:0 0 6px}"
+        "h2{font-size:14px;margin:14px 0 6px}"
+        ".head{display:flex;justify-content:space-between;margin-bottom:10px}"
+        "table{width:100%;border-collapse:collapse;margin:8px 0}"
+        "td,th{border:1px solid #333;padding:5px 7px;vertical-align:top}"
+        ".noborder td{border:none;padding:2px 0}"
+        ".muted{color:#444;font-size:12px}"
+        ".sign{display:flex;justify-content:space-between;margin-top:28px;gap:24px}"
+        ".sign div{width:46%}"
+        "@media print{body{margin:0;padding:8mm}}"
     )
-    html = (
-        "<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"utf-8\">"
-        f"<title>Договор {v(contract_no)}</title><style>{css}</style></head><body>"
-        f"<h1>ДОГОВОР АРЕНДЫ ТРАНСПОРТНОГО СРЕДСТВА № {v(contract_no)}</h1>"
-        f"<div class=\"meta\">г. Калининград &nbsp;&nbsp; {v(today_s)}</div>"
-        f"<p><b>Арендодатель:</b> {v(company)}, {v(company_details)}, с одной стороны, и</p>"
-        f"<p><b>Арендатор:</b> {v(c.get('full_name') or b.get('name'))}, "
-        f"дата рождения {v(c.get('birth_date'))}, "
-        f"паспорт {v(c.get('passport_series'))} № {v(c.get('passport_number'))}, "
-        f"выдан {v(c.get('passport_issued_by'))} {v(c.get('passport_issued_date'))}, "
-        f"адрес: {v(c.get('address'))}, "
-        f"водительское удостоверение № {v(c.get('license_number'))}, "
-        f"категории {v(c.get('license_categories'))}, "
-        f"дата выдачи ВУ {v(c.get('license_issued_date'))}, "
-        f"тел. {v(c.get('phone') or b.get('phone'))}, с другой стороны, "
-        "заключили настоящий договор о нижеследующем.</p>"
-        "<h2>1. Предмет договора</h2>"
-        "<p>1.1. Арендодатель передаёт, а Арендатор принимает во временное владение "
-        "и пользование транспортное средство:</p><table>"
-        f"<tr><td>Марка, модель</td><td><b>{v(car.get('name') or b.get('car_id'))}</b></td></tr>"
-        f"<tr><td>КПП / топливо / мест</td><td>{v(car.get('gear'))} / {v(car.get('fuel'))} / {v(car.get('seats'))}</td></tr>"
-        f"<tr><td>Период аренды</td><td>{v(start_s)} — {v(end_s)}</td></tr>"
-        f"<tr><td>Срок (оплачиваемые сутки)</td><td>{days}</td></tr></table>"
-        "<h2>2. Арендная плата и залог</h2>"
-        f"<p>2.1. Стоимость аренды: <b>{v(b.get('total'))} ₽</b> "
-        f"(тариф {v(rate)} ₽/сутки × {days} сут.).</p>"
-        f"<p>2.2. Залог: <b>{v(b.get('deposit_amount') or 0)} ₽</b>, "
-        f"статус: {v(b.get('deposit_status') or 'не внесён')}.</p>"
-        "<p>2.3. Оплата производится в порядке, согласованном сторонами до выдачи автомобиля.</p>"
-        "<h2>3. Права и обязанности</h2>"
-        "<p>3.1. Арендатор обязуется использовать ТС по назначению, соблюдать ПДД РФ, "
-        "не передавать управление третьим лицам без согласия Арендодателя, "
-        "вернуть ТС в состоянии не хуже полученного с учётом нормального износа, "
-        "с тем же уровнем топлива.</p>"
-        "<p>3.2. Арендодатель обязуется передать исправное ТС в согласованный срок.</p>"
-        f"<p>3.3. Пробег при выдаче: {v(b.get('mileage_out'))} км, топливо: {v(b.get('fuel_out'))}. "
-        f"При возврате: пробег {v(b.get('mileage_in'))} км, топливо: {v(b.get('fuel_in'))}.</p>"
-        "<h2>4. Ответственность</h2>"
-        "<p>4.1. Убытки, штрафы и ущерб ТС по вине Арендатора возмещаются Арендатором. "
-        "Залог может быть удержан в счёт задолженности или ущерба.</p>"
-        "<h2>5. Прочие условия</h2>"
-        "<p>5.1. Договор вступает в силу с момента передачи ТС и действует до возврата.</p>"
-        "<p>5.2. Стороны подтверждают достоверность указанных данных.</p>"
-        f"<p>Комментарий к брони: {v(b.get('comment'))}</p>"
+
+    rows = []
+    rows.append("<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"utf-8\">")
+    rows.append(f"<title>Договор № {v(contract_no)}</title><style>{css}</style></head><body>")
+    rows.append("<h1>Договор аренды транспортного средства</h1>")
+    rows.append(
+        f"<div class=\"head\"><div>г. Калининград</div><div>{v(contract_date)}</div></div>"
+    )
+    rows.append("<table><tr>")
+    rows.append(f"<td style=\"width:18%\"><b>№:{v(contract_no,'')}</b></td>")
+    rows.append(
+        "<td><b>АРЕНДОДАТЕЛЬ:</b> "
+        f"{v(lessor_name)}. Юридический адрес: {v(lessor_address)}. "
+        f"ИНН:{v(lessor_inn)}, р/с: № {v(lessor_rs)} к/с: № {v(lessor_ks)} "
+        f"в Банк: {v(lessor_bank)}, БИК: {v(lessor_bik)}."
+        "</td></tr></table>"
+    )
+    rows.append(
+        f"<p class=\"muted\"><b>График работы:</b> {v(lessor_schedule)}. "
+        f"Телефон: <b>{v(lessor_phone)}</b>, email: <b>{v(lessor_email)}</b></p>"
+    )
+
+    rows.append("<table>")
+    rows.append("<tr><td colspan=\"2\"><b>1. Арендатор:</b></td></tr>")
+    rows.append(f"<tr><td style=\"width:8%\">1.1</td><td><b>Арендатор:</b> {v(renter)}</td></tr>")
+    rows.append(
+        f"<tr><td>1.2</td><td><b>Документ, удостоверяющий личность:</b> Паспорт: {v(passport)}</td></tr>"
+    )
+    rows.append(f"<tr><td>1.3</td><td><b>Адрес проживания:</b> {v(address)}</td></tr>")
+    rows.append(f"<tr><td>1.4</td><td><b>Телефон дом./моб.:</b> {v(phone)}</td></tr>")
+    rows.append(f"<tr><td>1.5</td><td><b>Водительское удостоверение:</b> {v(license_line)}</td></tr>")
+    rows.append("</table>")
+
+    rows.append(
+        f"<p>{v(lessor_name)}, именуемый в дальнейшем «Арендодатель», с одной стороны, "
+        f"и гражданин(ка) {v(renter)}, с другой стороны, заключили настоящий Договор "
+        "о нижеследующем.</p>"
+    )
+
+    rows.append("<h2>2. Предмет договора</h2>")
+    rows.append("<table><tr>")
+    rows.append(f"<td><b>2.1.1</b> {v(car_name)}</td>")
+    rows.append(f"<td><b>2.1.2 Гос. номер</b> {v(plate)}</td>")
+    rows.append(f"<td><b>2.1.3 VIN:</b> {v(vin)}</td>")
+    rows.append("<td><b>2.1.4 Категория</b> B</td>")
+    rows.append("</tr></table>")
+    rows.append(
+        "<p>2.2. Комплектация Автомобиля, передаваемого в аренду, указана в Акте приёма-передачи "
+        "(Приложение № 1). При утрате, повреждении или отсутствии указанных принадлежностей "
+        "при возврате Автомобиля Арендодателю Арендатор обязан оплатить стоимость услуг "
+        "Арендодателя по доукомплектованию Автомобиля по тарифам, указанным в Акте приёма-передачи.</p>"
+    )
+    rows.append(
+        "<p>2.3. Арендодатель предоставляет Арендатору за плату во временное владение и пользование "
+        "транспортное средство, указанное в п. 2 настоящего Договора, без оказания услуг по управлению "
+        "им и его технической эксплуатации для использования Арендатором в потребительских целях.</p>"
+    )
+    rows.append(
+        "<p>2.4. Передача транспортного средства в аренду осуществляется по акту приёмки-передачи "
+        "(Приложение № 1), который является неотъемлемой частью настоящего Договора.</p>"
+    )
+    rows.append(
+        "<p>2.5. Автотранспортное средство является пригодным к использованию и имеет все необходимые "
+        "разрешительные документы и государственные номера для нормальной эксплуатации. Точные "
+        "характеристики отражены в Приложении № 1.</p>"
+    )
+
+    rows.append("<h2>3. Цена договора и тарифы</h2>")
+    rows.append("<table>")
+    rows.append(
+        "<tr><th>3.1 Цены/Категории</th><th>Марка</th><th>Ед. измер.</th>"
+        "<th>Кол-во</th><th>Цена</th><th>Общая сумма</th></tr>"
+    )
+    rows.append(
+        f"<tr><td>Суточная аренда</td><td>{v(car_name)}</td><td>сутки</td>"
+        f"<td><b>{days}</b></td><td><b>{rate}</b></td><td><b>{total}</b></td></tr>"
+    )
+    rows.append("</table>")
+    if deposit:
+        rows.append(f"<p>Залог: <b>{deposit} ₽</b> (статус: {v(b.get('deposit_status') or 'не внесён')}).</p>")
+    rows.append(
+        "<p>3.2. Арендная плата устанавливается в соответствии с тарифами Арендодателя.</p>"
+        "<p>3.3. Тариф применяется исходя из срока непрерывной аренды Автомобиля.</p>"
+        "<p>3.4. Оплата аренды и внесение залога производится в день и время передачи автомобиля "
+        "либо безналичным путём на счёт Арендодателя.</p>"
+    )
+
+    rows.append("<h2>4. Срок аренды. Место выдачи и получения автомобиля</h2>")
+    rows.append("<table>")
+    rows.append(
+        f"<tr><td><b>4.1 Автомобиль выдан:</b></td>"
+        f"<td><b>Дата:</b> {dmy(sa)}</td>"
+        f"<td><b>Время:</b> {hm(sa)}</td>"
+        f"<td><b>Место:</b> {v(pickup_place)}</td></tr>"
+    )
+    rows.append(
+        f"<tr><td><b>4.2 Срок и место возврата:</b></td>"
+        f"<td><b>Дата:</b> {dmy(ea)}</td>"
+        f"<td><b>Время:</b> {hm(ea)}</td>"
+        f"<td><b>Место:</b> {v(return_place)}</td></tr>"
+    )
+    rows.append("</table>")
+    rows.append(
+        "<p>4.3. При продлении срока аренды стороны заключают письменное соглашение либо при взаимном "
+        "согласии вправе устно продлить договор (в т.ч. через сообщения).</p>"
+    )
+
+    if b.get("mileage_out") or b.get("fuel_out") or b.get("mileage_in") or b.get("fuel_in"):
+        rows.append(
+            f"<p><b>Показания при выдаче:</b> пробег {v(b.get('mileage_out'),'—')} км, "
+            f"топливо {v(b.get('fuel_out'),'—')}. "
+            f"<b>При возврате:</b> пробег {v(b.get('mileage_in'),'—')} км, "
+            f"топливо {v(b.get('fuel_in'),'—')}.</p>"
+        )
+
+    rows.append("<h2>5. Права, обязанности и ответственность сторон</h2>")
+    rows.append("<p><b>5.1. Права и обязанности Арендодателя</b></p>")
+    rows.append(
+        "<p>5.1.1. Арендодатель имеет право требовать возврата сданного в аренду транспортного средства "
+        "в срок и в состоянии, соответствующем условиям Договора и Приложению № 1.</p>"
+        "<p>5.1.2. Арендодатель имеет право требовать своевременной уплаты всех причитающихся платежей. "
+        "При нарушении сроков оплаты Арендатор уплачивает неустойку 0,5% от суммы просроченного платежа "
+        "за каждый день просрочки.</p>"
+        "<p>5.1.3. Арендодатель обязан предоставить транспортное средство в состоянии, пригодном для "
+        "эксплуатации, согласно Приложению № 1.</p>"
+        "<p>5.1.4. Арендодатель обязан передать вместе с транспортным средством документы "
+        "(свидетельство о регистрации, полис/документы, необходимые для эксплуатации).</p>"
+    )
+    rows.append("<p><b>5.2. Права и обязанности Арендатора</b></p>")
+    rows.append(
+        "<p>5.2.1. Предоставлять право управления только лицам, указанным в п. 1.5, если иное не "
+        "согласовано сторонами.</p>"
+        "<p>5.2.2–5.2.4. Использовать ТС по условиям Договора; вносить арендную плату в срок; "
+        "осмотреть ТС до подписания акта приёма-передачи.</p>"
+        "<p>5.2.5. Поддерживать ТС в рабочем состоянии. При просрочке возврата свыше 60 минут "
+        "Арендатор уплачивает арендную плату за следующие сутки.</p>"
+        "<p>5.2.6–5.2.8. Обеспечить сохранность автомобиля и комплектующих; при ущербе Арендодатель "
+        "вправе удержать залог пропорционально ущербу; вернуть документы и принадлежности по акту.</p>"
+        "<p>5.2.9. Не сдавать автомобиль в субаренду и не использовать для перевозок третьих лиц "
+        "без согласия Арендодателя (штраф — трёхкратная суточная аренда).</p>"
+        "<p>5.2.10. Не эксплуатировать автомобиль за пределами Калининградской области без письменного "
+        "согласия Арендодателя (штраф — трёхкратная суточная аренда).</p>"
+        "<p>5.2.11. Не использовать ТС для буксировки, езды с прицепом, по бездорожью и обучения вождению "
+        "(штраф — суточная аренда).</p>"
+        "<p>5.2.12. Вернуть автомобиль в чистом виде и исправном состоянии.</p>"
+        "<p>5.2.14. Не курить в салоне (штраф 5 000 ₽).</p>"
+    )
+    rows.append(
+        "<p><b>5.5. При ДТП / повреждении</b> Арендатор обязан немедленно вызвать ГИБДД, сообщить "
+        "Арендодателю, зафиксировать данные участников и свидетелей, получить документы ГИБДД и "
+        "передать их Арендодателю, предоставить автомобиль для осмотра.</p>"
+        "<p>5.5.3. При выполнении п. 5.5 и признании Арендатора виновником — возмещение ущерба "
+        "до 100 000 ₽ пропорционально размеру ущерба.</p>"
+        "<p>5.5.4. Полное возмещение ущерба, если водитель был в состоянии опьянения, нарушены "
+        "правила пожарной безопасности либо не выполнены п. 5.5–5.5.2.</p>"
+    )
+
+    rows.append("<h2>6. Ответственность сторон</h2>")
+    rows.append(
+        f"<p>6.1. При нарушении условий договора Арендатор несёт ответственность в размере залога "
+        f"{deposit if deposit else 10000} ₽, а также за повреждения или кражу автомобиля / его частей.</p>"
+        "<p>6.2. Повреждения салона, подвески или ходовой части, не связанные со страховым случаем, "
+        "оплачиваются Арендатором по тарифам дилерской станции на выбор Арендодателя.</p>"
+        "<p>6.3. Невозврат автомобиля в срок может квалифицироваться как незаконное завладение; "
+        "Арендодатель вправе принудительно изъять ТС с отнесением расходов на Арендатора.</p>"
+        "<p>6.4. При возврате с неполным баком Арендатор компенсирует стоимость топлива.</p>"
+        "<p>6.5. Арендодатель не отвечает за вещи, оставленные в автомобиле.</p>"
+        "<p>6.6. В остальных случаях стороны несут ответственность по законодательству РФ.</p>"
+    )
+
+    rows.append(
+        "<h2>7. Форс-мажор</h2>"
+        "<p>Стороны освобождаются от ответственности при обстоятельствах непреодолимой силы. "
+        "Сторона, которая не может исполнить обязательство, извещает другую в течение 2 дней.</p>"
+    )
+    rows.append(
+        "<h2>8. Изменение и расторжение договора</h2>"
+        "<p>8.1. Изменения действительны при оформлении письменного соглашения.</p>"
+        "<p>8.2. Каждая сторона вправе отказаться от договора, уведомив другую за сутки.</p>"
+        "<p>8.3. При досрочном расторжении по инициативе Арендатора производится перерасчёт "
+        "арендных платежей за фактический срок.</p>"
+    )
+    rows.append(
+        "<h2>9. Разрешение споров</h2>"
+        "<p>9.1. Споры разрешаются путём переговоров.</p>"
+        "<p>9.2. Неурегулированные споры подлежат рассмотрению в суде по законодательству РФ.</p>"
+    )
+    rows.append(
+        "<h2>10. Заключительные положения</h2>"
+        "<p>10.1. Договор составлен в двух экземплярах, по одному для каждой стороны.</p>"
+        "<p>10.2. Подписи сторон:</p>"
+    )
+    rows.append(
         "<div class=\"sign\">"
-        f"<div><b>Арендодатель</b><br><br>____________________ / {v(company)} /</div>"
-        f"<div><b>Арендатор</b><br><br>____________________ / {v(c.get('full_name') or b.get('name'))} /</div>"
+        f"<div><b>Арендодатель</b><br><br>____________________ / {v(lessor_name)} /</div>"
+        f"<div><b>Арендатор</b><br><br>____________________ / {v(renter)} /</div>"
         "</div>"
-        "<script>window.onload=function(){try{window.print()}catch(e){}}</script>"
-        "</body></html>"
     )
-    return html
+    rows.append(
+        "<p class=\"muted\" style=\"margin-top:18px\">Приложение № 1 — Акт приёма-передачи "
+        "(заполняется при выдаче/возврате). Комментарий к брони: "
+        f"{v(b.get('comment'),'—')}</p>"
+    )
+    rows.append("<script>window.onload=function(){try{window.print()}catch(e){}}</script>")
+    rows.append("</body></html>")
+    return "".join(rows)
+
 
 
 def admin_finance_export_csv_sync(start_day, end_day):
@@ -9118,7 +9379,11 @@ async def admin_manual_booking_api(request):
         data = await request.json()
     except Exception:
         return mini_json({"message": "Некорректный JSON"}, 400)
-    result = await asyncio.to_thread(admin_manual_booking_sync, data)
+    try:
+        result = await asyncio.to_thread(admin_manual_booking_sync, data)
+    except Exception as exc:
+        print(f"[MANUAL/BOOKING/API] {type(exc).__name__}: {exc}", flush=True)
+        return mini_json({"message": f"Ошибка сервера: {exc}"}, 500)
     if not result.get("ok"):
         messages = {
             "car": "Выберите автомобиль",
@@ -9127,8 +9392,12 @@ async def admin_manual_booking_api(request):
             "overlap": "Период занят",
             "maintenance": "На период назначено ТО",
             "blacklisted": "Клиент в чёрном списке",
+            "db": "Ошибка базы (проверьте миграции / поля брони)",
         }
-        return mini_json({"message": messages.get(result.get("reason"), "Не удалось создать бронь")}, 409)
+        msg = messages.get(result.get("reason"), "Не удалось создать бронь")
+        if result.get("error"):
+            msg = f"{msg}: {result['error']}"
+        return mini_json({"message": msg}, 409)
     return mini_json(result)
 
 
