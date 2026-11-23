@@ -365,7 +365,7 @@ function drawCalendar(){
     }
   }catch(e){}
 }
-function moveMonthfunction moveMonth(n){cursor.setMonth(cursor.getMonth()+n);renderCalendar(viewToken)}
+function moveMonth(n){cursor.setMonth(cursor.getMonth()+n);renderCalendar(viewToken)}
 
 function hourOptions(selected){
   let h='';
@@ -817,7 +817,7 @@ async function boot(){
   $('content').innerHTML='<div class="panel"><div class="loader">Подключаюсь к админке…</div></div>';
   const s=await waitInitData();
   if(!s){$('content').innerHTML='<div class="panel"><div class="empty"><b>Не удалось получить авторизацию Telegram.</b><br>Закройте это окно и откройте админку заново через кнопку «🖥 Открыть веб-админку».</div></div>';return;}
-  renderCalendar(viewToken);
+  setTab('today');
 }
 boot();
 </script></body></html>
