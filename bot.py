@@ -118,7 +118,7 @@ INIT_DATA_MAX_AGE = int(
 _RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
 MINIAPP_BASE_URL = (_RENDER_URL + "/app") if _RENDER_URL else "https://balticarkgdbot.onrender.com/app"
 MINIAPP_URL = MINIAPP_BASE_URL + "?v=55"
-ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=74"
+ADMIN_WEBAPP_URL = ((_RENDER_URL + "/admin") if _RENDER_URL else "https://balticarkgdbot.onrender.com/admin") + "?v=75"
 
 
 # ============================================================
@@ -8213,7 +8213,7 @@ async def admin_booking_action_api(request):
         data = await request.json()
         bid = int(data.get("id", 0))
         action = str(data.get("action", "")).strip().lower()
-        if action not in ("confirm", "reject", "cancel", "issue", "return") or bid <= 0:
+        if action not in ("confirm", "reject", "cancel", "issue", "return", "delete") or bid <= 0:
             return mini_json({"message": "Некорректный запрос."}, 400)
         if action == "issue":
             dep = data.get("deposit_amount")
@@ -9481,6 +9481,29 @@ async def admin_export_csv_api(request):
     )
 
 
+
+async def admin_booking_purge_api(request):
+    """Удалить все cancelled/expired/rejected брони."""
+    admin_web_auth_or_403(request)
+    def _purge():
+        con = db()
+        try:
+            with con.cursor() as cur:
+                cur.execute(
+                    """
+                    DELETE FROM bookings
+                    WHERE status IN ('cancelled', 'expired', 'rejected')
+                    """
+                )
+                n = cur.rowcount
+            con.commit()
+            return n
+        finally:
+            con.close()
+    n = await asyncio.to_thread(_purge)
+    return mini_json({"ok": True, "deleted": n})
+
+
 async def mini_app_routes(app):
     mini_add_location_columns()
     app.router.add_get("/app", mini_app)
@@ -9488,6 +9511,7 @@ async def mini_app_routes(app):
     app.router.add_get("/api/admin/calendar", admin_calendar_api)
     app.router.add_get("/api/admin/bookings", admin_bookings_api)
     app.router.add_post("/api/admin/booking/action", admin_booking_action_api)
+    app.router.add_post("/api/admin/booking/purge", admin_booking_purge_api)
     app.router.add_post("/api/admin/booking/fee", admin_booking_fee_api)
     app.router.add_post("/api/admin/block", admin_block_create_api)
     app.router.add_post("/api/admin/block/delete", admin_block_delete_api)
