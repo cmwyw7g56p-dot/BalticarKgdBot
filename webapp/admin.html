@@ -42,6 +42,33 @@ html.dark .close{background:var(--surface2);color:var(--text)}
 html.dark .financePeriod button{background:var(--surface2);border-color:var(--line)}
 html.dark .financePeriod button.active{background:#1676d2!important;color:#fff!important;-webkit-text-fill-color:#fff!important}
 .financeDates input,input[type=date]{color:var(--text)!important;-webkit-text-fill-color:var(--text)!important;background:var(--surface)!important}
+
+.calPanel{overflow:hidden}
+.calStats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.calStat{background:var(--surface2);border-radius:12px;padding:10px;text-align:center}
+.calStat b{display:block;font-size:18px}
+.calStat span{font-size:11px;color:var(--muted)}
+.calLegend{display:flex;flex-wrap:wrap;gap:10px;padding:8px 14px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line)}
+.calLegend i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:4px}
+.calCar{padding:12px 14px;border-bottom:1px solid var(--line)}
+.calCarHead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px}
+.calBadge{font-size:11px;font-weight:800;padding:4px 8px;border-radius:8px;white-space:nowrap}
+.calBadge.free{background:rgba(36,168,90,.12);color:var(--green)}
+.calBadge.busy{background:rgba(220,77,77,.12);color:var(--red)}
+.calDays{display:flex;flex-wrap:wrap;gap:4px}
+.calDays .cd{width:32px;height:32px;border-radius:8px;border:1px solid var(--line);background:var(--surface);font-size:11px;font-weight:700;color:var(--text);padding:0}
+.calDays .cd.weekend{opacity:.85}
+.calDays .cd.today{outline:2px solid var(--blue)}
+.calDays .cd.free{background:rgba(36,168,90,.08);border-color:rgba(36,168,90,.25)}
+.calDays .cd.booked{background:rgba(75,157,240,.35);border-color:rgba(75,157,240,.55);color:#0b2a4a}
+.calDays .cd.pending{background:rgba(243,181,62,.35);border-color:rgba(243,181,62,.55)}
+.calDays .cd.maint{background:rgba(217,87,87,.3);border-color:rgba(217,87,87,.5)}
+.calList{margin-top:8px;display:grid;gap:4px}
+.calItem{padding:8px 10px;border-radius:10px;background:var(--surface2);display:flex;justify-content:space-between;gap:8px;font-size:12px;cursor:pointer}
+.calEmpty{font-size:12px;padding:4px 0}
+.calBlock{margin:12px 14px 16px;border:1px solid var(--line);border-radius:12px;padding:8px 12px}
+.calBlock summary{font-weight:800;cursor:pointer}
+@media(max-width:700px){.calDays .cd{width:28px;height:28px;font-size:10px}.calStats{grid-template-columns:repeat(3,1fr);gap:6px}}
 </style>
 </head><body><div class="wrap"><div class="top"><div><div class="brand">BALTICAR</div><small>Администратор · автопарк</small></div><button class="close" onclick="closeApp()">Закрыть</button></div><div class="nav"><button id="tabToday" class="active" onclick="setTab('today')">📅 Сегодня</button><button id="tabCal" onclick="setTab('calendar')">🗓 Календарь</button><button id="tabBookings" onclick="setTab('bookings')">📋 Брони</button><button id="tabCars" onclick="setTab('cars')">🚗 Авто</button><button id="tabClients" onclick="setTab('clients')">👥 Клиенты</button><button id="tabTools" onclick="setTab('tools')">🛠 Операции</button><button id="tabFinance" onclick="setTab('finance')">💰 Финансы</button><button id="tabReviews" onclick="setTab('reviews')">⭐ Отзывы</button></div><section id="content"></section></div>
 <script>
@@ -230,38 +257,115 @@ async function editClientNotes(id){
 }
 
 async function renderCalendar(token=viewToken){const y=cursor.getFullYear(),m=cursor.getMonth();$('content').innerHTML='<div class="panel"><div class="loader">Загружаю календарь…</div></div>';try{currentData=await api(`/api/admin/calendar?year=${y}&month=${m+1}`);if(token!==viewToken||tab!=='calendar')return;drawCalendar()}catch(e){if(token!==viewToken||tab!=='calendar')return;$('content').innerHTML=`<div class="panel"><div class="empty">${esc(e.message)}</div></div>`}}
-function drawCalendar(){const d=currentData, y=cursor.getFullYear(),m=cursor.getMonth(),days=d.days;let html=`<div class="panel"><div class="panelHead"><div><h1>Занятость автопарка</h1><div class="muted">Все автомобили · пересечения видно сразу</div></div><div class="monthNav"><button onclick="moveMonth(-1)">‹</button><div class="monthTitle">${months[m]} ${y}</div><button onclick="moveMonth(1)">›</button></div></div><div class="legend"><span class="dot"><i class="d-confirmed"></i> подтверждено</span><span class="dot"><i class="d-pending"></i> ожидает</span><span class="dot"><i class="d-completed"></i> завершено</span><span class="dot"><i class="d-maint"></i> занято вручную / ТО</span><span class="dot"><i class="d-free"></i> свободно</span></div>`;
-html+=`<div class="blockForm panel" style="margin:0;border-radius:0;border-left:0;border-right:0;box-shadow:none">
-  <div class="panelHead" style="border-bottom:1px solid var(--line)"><div><h1 style="font-size:16px;color:var(--text)">Занять даты вручную</h1><div class="muted">Бронь с сайта, телефон, Авито — период станет недоступен клиентам бота</div></div></div>
-  <div style="padding:12px 16px" class="blkGrid">
-    <label>Автомобиль
-      <select id="blkCar"></select>
-    </label>
-    <label>Комментарий
-      <input id="blkReason" type="text" value="Бронь с сайта" placeholder="Бронь с сайта / ТО / телефон">
-    </label>
-    <div class="blkRow2">
-      <label>Начало — дата
-        <input id="blkStartDate" type="date">
-      </label>
-      <label>Начало — время
-        <select id="blkStartTime"></select>
-      </label>
+function drawCalendar(){
+  const d=currentData, y=cursor.getFullYear(), m=cursor.getMonth(), days=d.days||new Date(y,m+1,0).getDate();
+  const cars=d.cars||[];
+  const today=new Date();
+  const isThisMonth=today.getFullYear()===y && today.getMonth()===m;
+  const todayN=today.getDate();
+
+  // stats
+  let busyToday=0, freeToday=0, monthBookings=0;
+  for(const car of cars){
+    const blocks=car.blocks||[];
+    monthBookings += blocks.filter(b=>b.status!=='maintenance').length;
+    const onToday=blocks.some(b=>{
+      const a=Math.max(1,b.start_day), e=Math.min(days,b.end_day);
+      return isThisMonth && a<=todayN && e>=todayN && b.status!=='pending';
+    });
+    if(onToday) busyToday++; else freeToday++;
+  }
+
+  let html=`<div class="panel calPanel">
+    <div class="panelHead">
+      <div><h1>Календарь</h1><div class="muted">${months[m]} ${y}</div></div>
+      <div class="monthNav">
+        <button onclick="moveMonth(-1)">‹</button>
+        <button onclick="cursor=new Date();renderCalendar(viewToken)">Сегодня</button>
+        <button onclick="moveMonth(1)">›</button>
+      </div>
     </div>
-    <div class="blkRow2">
-      <label>Конец — дата
-        <input id="blkEndDate" type="date">
-      </label>
-      <label>Конец — время
-        <select id="blkEndTime"></select>
-      </label>
+    <div class="calStats">
+      <div class="calStat"><b>${freeToday}</b><span>свободны сегодня</span></div>
+      <div class="calStat"><b>${busyToday}</b><span>заняты сегодня</span></div>
+      <div class="calStat"><b>${monthBookings}</b><span>броней в месяце</span></div>
     </div>
-    <button class="miniBtn primary" style="width:100%;padding:13px 16px;font-size:15px" onclick="createManualBlock()">🔒 Занять период</button>
-  </div>
-</div>`;
-html+='<div class="calendarScroll"><div class="calendar" style="--days:'+days+'"><div class="dayHead"><div class="carLabel">Автомобиль</div>';for(let n=1;n<=days;n++){const dt=new Date(y,m,n),week=dt.getDay(),today=new Date();const isToday=dt.toDateString()===today.toDateString();html+=`<div class="day ${week===0||week===6?'weekend':''} ${isToday?'today':''}"><b>${n}</b><span>${wd[week]}</span></div>`}html+='</div>';
-for(const car of d.cars){html+=`<div class="carRow"><div class="carLabel">🚗 ${esc(car.name)}<span class="carSub">${esc(car.gear||'')}</span></div><div class="track">`;for(const b of car.blocks){const start=Math.max(1,b.start_day),end=Math.min(days,b.end_day);if(end<1||start>days)continue;const left=(start-1)*100/days,width=(end-start+1)*100/days;html+=`<div class="booking ${esc(b.status)}" style="left:${left}%;width:${width}%" onclick="showBooking(${Number(b.id)}, '${esc(b.status)}')"><b style="color:#000 !important;-webkit-text-fill-color:#000 !important;text-shadow:none !important">${b.status==='maintenance'?'🔒 '+(b.name||'Занято'):esc(b.name||'Без имени')}</b><span style="color:#000 !important;-webkit-text-fill-color:#000 !important;text-shadow:none !important">№${b.id} · ${b.status==='pending'?'ожидает':(b.status==='completed'?'завершена':(b.status==='maintenance'?'ТО':'бронь'))}</span></div>`}html+='</div></div>'}html+='</div></div></div>';html+=`<div id="detail"></div></div>`;$('content').innerHTML=html; fillBlockForm();}
-function moveMonth(n){cursor.setMonth(cursor.getMonth()+n);renderCalendar(viewToken)}
+    <div class="calLegend">
+      <span><i class="d-confirmed"></i> бронь</span>
+      <span><i class="d-pending"></i> заявка</span>
+      <span><i class="d-maint"></i> ТО</span>
+      <span><i class="d-free"></i> свободно</span>
+    </div>`;
+
+  for(const car of cars){
+    const blocks=(car.blocks||[]).slice().sort((a,b)=>a.start_day-b.start_day);
+    const onToday=isThisMonth && blocks.some(b=>b.start_day<=todayN && b.end_day>=todayN && b.status!=='pending');
+    html+=`<div class="calCar">
+      <div class="calCarHead">
+        <div>
+          <b>🚗 ${esc(car.name)}</b>
+          <div class="muted">${esc(car.gear||'')}</div>
+        </div>
+        <span class="calBadge ${onToday?'busy':'free'}">${onToday?'Занята сегодня':'Свободна сегодня'}</span>
+      </div>
+      <div class="calDays">`;
+    for(let n=1;n<=days;n++){
+      const dt=new Date(y,m,n);
+      const week=dt.getDay();
+      const isTod=isThisMonth && n===todayN;
+      const hit=blocks.find(b=>b.start_day<=n && b.end_day>=n);
+      let cls='cd';
+      if(week===0||week===6) cls+=' weekend';
+      if(isTod) cls+=' today';
+      if(hit){
+        if(hit.status==='pending') cls+=' pending';
+        else if(hit.status==='maintenance') cls+=' maint';
+        else cls+=' booked';
+      } else cls+=' free';
+      const title=hit?(hit.name||hit.status)+' №'+(hit.id||''):'Свободно';
+      html+=`<button class="${cls}" title="${esc(title)}" ${hit?`onclick="showBooking(${Number(hit.id||0)}, '${esc(hit.status||'')}')"`:''}>${n}</button>`;
+    }
+    html+=`</div>`;
+    // compact list of bookings
+    if(blocks.length){
+      html+=`<div class="calList">`;
+      for(const b of blocks){
+        const st=b.status==='pending'?'заявка':(b.status==='maintenance'?'ТО':(b.status==='completed'?'завершена':'бронь'));
+        html+=`<div class="calItem" onclick="showBooking(${Number(b.id||0)}, '${esc(b.status||'')}')">
+          <b>${b.status==='maintenance'?'🔒 ':'👤 '}${esc(b.name||'Без имени')}</b>
+          <span class="muted">${b.start_day}–${b.end_day} · ${st}${b.id?' · №'+b.id:''}</span>
+        </div>`;
+      }
+      html+=`</div>`;
+    } else {
+      html+=`<div class="calEmpty muted">Нет броней в этом месяце</div>`;
+    }
+    html+=`</div>`;
+  }
+
+  html+=`<div id="detail"></div>
+    <details class="calBlock">
+      <summary>Занять даты вручную (ТО / блок)</summary>
+      <div id="blockFormWrap"></div>
+    </details>
+  </div>`;
+  $('content').innerHTML=html;
+  // re-inject block form if template exists in old code path
+  try{
+    const wrap=$('blockFormWrap');
+    if(wrap){
+      wrap.innerHTML=`<div class="blockForm">
+        <select id="blkCar"></select>
+        <div class="row2"><input type="date" id="blkStartDate"><select id="blkStartTime"></select></div>
+        <div class="row2"><input type="date" id="blkEndDate"><select id="blkEndTime"></select></div>
+        <input id="blkReason" placeholder="Причина (ТО, мойка…)">
+        <button class="miniBtn primary" onclick="createManualBlock()">Занять</button>
+      </div>`;
+      fillBlockForm();
+    }
+  }catch(e){}
+}
+function moveMonthfunction moveMonth(n){cursor.setMonth(cursor.getMonth()+n);renderCalendar(viewToken)}
 
 function hourOptions(selected){
   let h='';
@@ -498,7 +602,7 @@ async function renderCars(token=viewToken){
         <div class="row" style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
           <div>
             <b>${c.active?'🟢':'⚪'} ${esc(c.name)}</b>
-            <div class="muted">${esc(c.gear)} · ${esc(c.fuel)} · ${c.seats} мест · <code>${esc(c.car_id)}</code></div>
+            <div class="muted">${esc(c.gear)} · ${esc(c.fuel)} · ${c.seats} мест · ${c.plate?esc(c.plate)+' · ':''}<code>${esc(c.car_id)}</code></div>
             <div class="rates">1–3 сут: <b>${c.rates[0]}</b> · 4–6: <b>${c.rates[1]}</b> · 7+: <b>${c.rates[2]}</b> ₽</div>
           </div>
           <div class="planActions">
@@ -518,7 +622,7 @@ async function renderCars(token=viewToken){
 function editCarIdx(i){editCar((window._carsCache||[])[i])}
 function editCar(c){
   const box=$('carFormBox'); if(!box)return;
-  const v=c||{car_id:'',name:'',gear:'АКПП',fuel:'Бензин',seats:5,rates:[2500,2400,2300],description:'',active:true};
+  const v=c||{car_id:'',name:'',gear:'АКПП',fuel:'Бензин',seats:5,rates:[2500,2400,2300],description:'',plate:'',vin:'',active:true};
   box.innerHTML=`
     <div class="carForm">
       <b>${c?'Изменить':'Новый автомобиль'}</b>
@@ -532,6 +636,10 @@ function editCar(c){
         <input id="cf_gear" placeholder="КПП" value="${esc(v.gear)}">
         <input id="cf_fuel" placeholder="Топливо" value="${esc(v.fuel)}">
         <input id="cf_seats" type="number" placeholder="Мест" value="${v.seats}">
+      </div>
+      <div class="row2">
+        <input id="cf_plate" placeholder="Госномер (А123ВС39)" value="${esc(v.plate||'')}">
+        <input id="cf_vin" placeholder="VIN" value="${esc(v.vin||'')}">
       </div>
       <textarea id="cf_desc" placeholder="Описание">${esc(v.description||'')}</textarea>
       <label style="display:flex;gap:8px;align-items:center"><input id="cf_active" type="checkbox" ${v.active?'checked':''}> Активен (виден клиентам)</label>
@@ -552,6 +660,8 @@ async function saveCar(carId){
     fuel:$('cf_fuel').value.trim(),
     seats:+$('cf_seats').value||5,
     description:$('cf_desc').value.trim(),
+    plate:($('cf_plate')&&$('cf_plate').value||'').trim(),
+    vin:($('cf_vin')&&$('cf_vin').value||'').trim(),
     active:$('cf_active').checked
   };
   try{
@@ -658,18 +768,20 @@ async function renderTools(token=viewToken){
 async function createManualBooking(){
   const start=$('mb_start').value; const end=$('mb_end').value;
   if(!start||!end){alert('Укажите даты');return}
+  if(!$('mb_name').value.trim()||!$('mb_phone').value.trim()){alert('Укажите ФИО и телефон');return}
+  // datetime-local already local; send as-is (backend treats naive as Europe/Kaliningrad)
   const payload={
     car_id:$('mb_car').value,
     name:$('mb_name').value.trim(),
     phone:$('mb_phone').value.trim(),
-    start_at:new Date(start).toISOString(),
-    end_at:new Date(end).toISOString(),
-    comment:$('mb_comment').value.trim()
+    start_at:start.length===16?start+':00':start,
+    end_at:end.length===16?end+':00':end,
+    comment:($('mb_comment').value||'Ручная бронь').trim()
   };
   const t=$('mb_total').value; if(t)payload.total=+t;
   try{
     const r=await api('/api/admin/booking/manual',{method:'POST',body:JSON.stringify(payload)});
-    alert('Бронь создана'+(r.contract_number?(', договор '+r.contract_number):''));
+    alert('Бронь №'+(r.id||'')+' создана'+(r.contract_number?(', договор '+r.contract_number):''));
     setTab('bookings');
   }catch(e){alert(e.message||e)}
 }
